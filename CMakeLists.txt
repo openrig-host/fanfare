@@ -83,3 +83,7 @@ target_link_libraries(Fanfare PRIVATE
 if(WIN32)
     set_property(TARGET Fanfare PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
+
+# TEMP: link map so crash-report offsets (Fanfare.exe + 0xXXXX) resolve to
+# functions. Remove after the silent-plugin hunt.
+target_link_options(Fanfare PRIVATE "/MAP")

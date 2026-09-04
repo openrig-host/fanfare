@@ -1307,11 +1307,24 @@ void MainComponent::loadAudioSettings() {
   auto file = FanfareConstants::getAppDirectory().getChildFile("audio_settings.xml");
   if (file.existsAsFile()) {
     auto xml = juce::XmlDocument::parse(file);
-    if (xml != nullptr)
-      deviceManager.initialise(0, 8, xml.get(), true);
-  } else {
-    deviceManager.initialiseWithDefaultDevices(0, 2);
+    if (xml != nullptr) {
+      auto initError = deviceManager.initialise(0, 8, xml.get(), true);
+      if (initError.isEmpty()) {
+        juce::String devInfo = "AUDIO: device opened OK";
+        if (auto *dev = deviceManager.getCurrentAudioDevice())
+          devInfo += " — " + dev->getName() + ", " +
+                     juce::String(dev->getCurrentSampleRate(), 0) + "Hz, buffer " +
+                     juce::String(dev->getCurrentBufferSizeSamples());
+        else
+          devInfo += " — but NO current device is active!";
+        logToFile(devInfo);
+      } else {
+        logToFile("AUDIO INIT FAILED: " + initError);
+      }
+      return;
+    }
   }
+  deviceManager.initialiseWithDefaultDevices(0, 2);
 }
 
 void MainComponent::resetAudioDevice() {

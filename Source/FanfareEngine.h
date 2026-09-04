@@ -1226,6 +1226,24 @@ public:
     fohPeakR.store(fR);
     iemPeakL.store(iL);
     iemPeakR.store(iR);
+
+    // DIAGNOSTIC (silent-output hunt): ~1Hz downstream state. Appears at the
+    // END of processAudio, after the output write, so the peaks reflect what
+    // was actually handed to the driver this block.
+    if (++diagTick >= 172) {
+      diagTick = 0;
+      float maxSlotPeak = 0.0f;
+      for (auto &s : slots)
+        maxSlotPeak = juce::jmax(maxSlotPeak, s->getLeftPeak());
+      logToFile("DIAG engine: switching=" + juce::String(isApplyingRig.load() ? 1 : 0)
+                + " fohOff=" + juce::String(fohOutputOffset.load())
+                + " iemOff=" + juce::String(iemOutputOffset.load())
+                + " numOut=" + juce::String(numOutputs) + " numIn=" + juce::String(numInputs)
+                + " fohPeakL=" + juce::String(fL, 4)
+                + " iemPeakL=" + juce::String(iL, 4)
+                + " maxSlotPeak=" + juce::String(maxSlotPeak, 4)
+                + " fohMaster=" + juce::String(fohMasterLevel.load(), 2));
+    }
   }
 
   // --- Master FX Management ---
@@ -2955,6 +2973,7 @@ private:
 
 public:
   std::atomic<bool> stressTestActive{false};
+  int diagTick = 0; // DIAGNOSTIC throttle
 
   // Staging cache for async rig transitions: plugin instances built off-thread
   // by RigBuilder, keyed by rack location (see stagingKeyFor()).

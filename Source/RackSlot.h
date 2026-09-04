@@ -169,6 +169,24 @@ public:
     auto startTime = juce::Time::getHighResolutionTicks();
     double totalBlockSecs = (double)slotBuffer.getNumSamples() / lastSampleRate;
 
+    // DIAGNOSTIC (silent-plugin hunt): ~1Hz render-path trace
+    if (++diagTick >= 172) {
+      diagTick = 0;
+      int chainSize = (int)pluginChain.size(); // bounds-guard: chain may be empty
+      juce::String d = "DIAG slot '" + slotName + "': bypassed=" + juce::String(bypassed.load() ? 1 : 0);
+      for (int i = 0; i < 3; ++i) {
+        auto *p = (i < chainSize) ? pluginChain[i].get() : nullptr;
+        d += " | c" + juce::String(i + 1) + ": ";
+        if (p) {
+          d += p->getName() + " isInst=" + juce::String(chainIsInstrument[i].load() ? 1 : 0)
+             + " enabled=" + juce::String(chainSettings[i].enabled.load() ? 1 : 0);
+        } else {
+          d += "(empty)";
+        }
+      }
+      logToFile(d);
+    }
+
     // 1. Merge injected MIDI from harmony routers (thread-safe)
     {
       juce::SpinLock::ScopedLockType sl(injectedMidiLock);
@@ -303,6 +321,11 @@ public:
                   if (ch < scratchBuffer.getNumChannels())
                     slotBuffer.addFrom(ch, 0, scratchBuffer, ch, 0, slotBuffer.getNumSamples());
                 }
+              } else {
+                // Effect plugins process in-place on the slot buffer
+                FanfareLog::safeExecutePluginCall([&]() {
+                  plugin->processBlock(slotBuffer, midiMessages);
+                }, "processBlock (" + plugin->getName() + ")");
               }
               consecutivePluginErrors.store(0);
             } catch (...) {
@@ -1048,6 +1071,7 @@ private:
   SamplerProcessor sampler;
   std::unique_ptr<Mp3PlayerProcessor> mp3Player; // lazy — see getMp3Player()
   int lastMaxBlockSize = 8192;
+  int diagTick = 0; // DIAGNOSTIC throttle
 
   FanfareDSP::ChannelStripProcessor strip;
 
