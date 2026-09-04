@@ -752,6 +752,20 @@ public:
     juce::ScopedNoDenormals noDenormals;
     FanfareLog::g_audioThreadId.store((uint32_t)::GetCurrentThreadId());
 
+    // July-era safety restored: try-lock the global engine lock for the whole
+    // render pass. The lock-free redesign left rendering racing concurrent
+    // state mutation (web remote, timers, apply paths) — the prime suspect for
+    // corrupted ASIO audio. If a UI operation holds the lock, render this
+    // block as silence instead of racing it (try-lock: no deadlock possible).
+    juce::GenericScopedTryLock<juce::CriticalSection> renderLock(lock);
+    if (!renderLock.isLocked()) {
+      for (int i = 0; i < numOutputs; ++i)
+        if (outputData[i])
+          juce::FloatVectorOperations::clear(outputData[i], numSamples);
+      return;
+    }
+
+
     // Inject stress test MIDI if active
     if (stressTestActive.load()) {
         double sr = currentSampleRate;
