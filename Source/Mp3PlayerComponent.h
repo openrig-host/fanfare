@@ -21,20 +21,308 @@ public:
     }
 };
 
+// Interactive Dual-Deck High-Speed Waveform Display (100% Background Isolated)
+class WaveformDisplay : public juce::Component {
+public:
+    WaveformDisplay(juce::Colour waveColour)
+        : waveformColour(waveColour)
+    {
+    }
+
+    void setFile(const juce::File& file) {
+        if (currentFile == file) return;
+        currentFile = file;
+        peaks.clear();
+        isPeaksLoaded = false;
+
+        if (!file.existsAsFile()) {
+            repaint();
+            return;
+        }
+
+        juce::String filePath = file.getFullPathName();
+        // Load peaks on background worker thread completely isolated from the real-time audio playback streamer
+        juce::Thread::launch([filePath, this]() {
+            juce::File f(filePath);
+            if (!f.existsAsFile()) return;
+
+            juce::AudioFormatManager fmt;
+            fmt.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> reader(fmt.createReaderFor(f));
+            if (reader == nullptr) return;
+
+            int numPoints = 512;
+            std::vector<std::pair<float, float>> newPeaks(numPoints, {0.0f, 0.0f});
+            juce::int64 totalSamples = reader->lengthInSamples;
+            juce::int64 samplesPerPoint = totalSamples / numPoints;
+            if (samplesPerPoint < 1) samplesPerPoint = 1;
+
+            int blockSize = (int)juce::jmin((juce::int64)2048, samplesPerPoint);
+            juce::AudioBuffer<float> tempBuf(2, blockSize);
+
+            for (int i = 0; i < numPoints; ++i) {
+                juce::int64 startSample = i * samplesPerPoint;
+                int readLen = (int)juce::jmin((juce::int64)tempBuf.getNumSamples(), totalSamples - startSample);
+                if (readLen <= 0) break;
+
+                reader->read(&tempBuf, 0, readLen, startSample, true, true);
+                float minVal = 0.0f, maxVal = 0.0f;
+                auto r0 = tempBuf.findMinMax(0, 0, readLen);
+                minVal = r0.getStart();
+                maxVal = r0.getEnd();
+                if (tempBuf.getNumChannels() > 1) {
+                    auto r1 = tempBuf.findMinMax(1, 0, readLen);
+                    minVal = juce::jmin(minVal, r1.getStart());
+                    maxVal = juce::jmax(maxVal, r1.getEnd());
+                }
+                newPeaks[i] = { minVal, maxVal };
+            }
+
+            juce::MessageManager::callAsync([this, filePath, newPeaks]() {
+                if (currentFile.getFullPathName() == filePath) {
+                    peaks = newPeaks;
+                    isPeaksLoaded = true;
+                    repaint();
+                }
+            });
+        });
+    }
+
+    void setPlayhead(double currentSeconds, double totalSeconds) {
+        if (std::abs(curTime - currentSeconds) < 0.02 && std::abs(totalLength - totalSeconds) < 0.02)
+            return;
+        curTime = currentSeconds;
+        totalLength = totalSeconds;
+        repaint();
+    }
+
+    void setCues(double inSeconds, double outSeconds) {
+        cueIn = inSeconds;
+        cueOut = outSeconds;
+        repaint();
+    }
+
+    void setDeckActive(bool active, bool livePlaying) {
+        isActive = active;
+        isLive = livePlaying;
+    }
+
+    std::function<void(double)> onSeek;
+    std::function<void(bool)> onScrubStateChanged;
+
+    void mouseMove(const juce::MouseEvent& e) override {
+        hoverX = e.x;
+        isHovered = true;
+        updateHoverTime(e.x);
+        repaint();
+    }
+
+    void mouseExit(const juce::MouseEvent&) override {
+        isHovered = false;
+        repaint();
+    }
+
+    void mouseDown(const juce::MouseEvent& e) override {
+        if (totalLength <= 0.0) return;
+        isDragging = true;
+        hoverX = e.x;
+        updateHoverTime(e.x);
+        if (onScrubStateChanged) onScrubStateChanged(true);
+        if (onSeek) onSeek(hoverTime);
+        repaint();
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override {
+        if (isDragging && totalLength > 0.0) {
+            hoverX = e.x;
+            updateHoverTime(e.x);
+            if (onSeek) onSeek(hoverTime);
+            repaint();
+        }
+    }
+
+    void mouseUp(const juce::MouseEvent&) override {
+        if (isDragging) {
+            isDragging = false;
+            if (onScrubStateChanged) onScrubStateChanged(false);
+            repaint();
+        }
+    }
+
+    void paint(juce::Graphics& g) override {
+        auto bounds = getLocalBounds().toFloat();
+
+        // Dark track background
+        g.setColour(juce::Colour(0xff0b0e14));
+        g.fillRoundedRectangle(bounds, 4.0f);
+
+        // Border with deck accent glow
+        g.setColour(waveformColour.withAlpha(isActive ? 0.40f : 0.15f));
+        g.drawRoundedRectangle(bounds, 4.0f, 1.0f);
+
+        if (!isPeaksLoaded || peaks.empty() || totalLength <= 0.0) {
+            g.setColour(juce::Colours::grey.withAlpha(0.4f));
+            g.setFont(juce::FontOptions(11.0f));
+            g.drawText(isPeaksLoaded ? "No audio waveform loaded" : "Loading waveform...", bounds, juce::Justification::centred);
+            return;
+        }
+
+        auto waveArea = bounds.reduced(3.0f, 2.0f);
+        float progressNorm = (totalLength > 0.0) ? (float)juce::jlimit(0.0, 1.0, curTime / totalLength) : 0.0f;
+        float playheadX = waveArea.getX() + waveArea.getWidth() * progressNorm;
+        float midY = waveArea.getCentreY();
+        float halfH = waveArea.getHeight() * 0.48f;
+        int numPeaks = (int)peaks.size();
+
+        // 1. Draw base unplayed & played waveform
+        for (int i = 0; i < numPeaks; ++i) {
+            float x = waveArea.getX() + (float)i / (float)numPeaks * waveArea.getWidth();
+            float topY = midY - peaks[i].second * halfH;
+            float botY = midY - peaks[i].first * halfH;
+            if (std::abs(topY - botY) < 1.0f) {
+                topY = midY - 1.0f;
+                botY = midY + 1.0f;
+            }
+
+            bool isPlayed = (x <= playheadX);
+            if (isPlayed) {
+                g.setColour(waveformColour.brighter(0.35f));
+            } else {
+                g.setColour(waveformColour.withAlpha(isActive ? (isLive ? 0.45f : 0.30f) : 0.20f));
+            }
+            g.drawVerticalLine((int)x, topY, botY);
+        }
+
+        // 2. Cue-In Line (Green)
+        if (cueIn > 0.0 && cueIn < totalLength) {
+            float inX = waveArea.getX() + waveArea.getWidth() * (float)(cueIn / totalLength);
+            g.setColour(juce::Colours::lightgreen);
+            g.drawVerticalLine((int)inX, waveArea.getY(), waveArea.getBottom());
+            g.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+            g.drawText("IN", (int)inX + 2, (int)waveArea.getY() + 1, 20, 10, juce::Justification::left);
+        }
+
+        // 3. Cue-Out Line (Red/Tomato)
+        if (cueOut > 0.0 && cueOut < totalLength) {
+            float outX = waveArea.getX() + waveArea.getWidth() * (float)(cueOut / totalLength);
+            g.setColour(juce::Colours::tomato);
+            g.drawVerticalLine((int)outX, waveArea.getY(), waveArea.getBottom());
+            g.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+            g.drawText("OUT", (int)outX - 22, (int)waveArea.getY() + 1, 20, 10, juce::Justification::right);
+        }
+
+        // 4. Playhead cursor (white glow line + top needle)
+        g.setColour(juce::Colours::white);
+        g.drawVerticalLine((int)playheadX, waveArea.getY(), waveArea.getBottom());
+        juce::Path p;
+        p.addTriangle(playheadX - 4.0f, waveArea.getY(), playheadX + 4.0f, waveArea.getY(), playheadX, waveArea.getY() + 5.0f);
+        g.fillPath(p);
+
+        // 5. Magnifier Loupe (Zoom Lens around pointer on Hover / Drag)
+        if ((isHovered || isDragging) && totalLength > 0.0 && isPeaksLoaded) {
+            int loupeW = 150;
+            int loupeH = (int)bounds.getHeight();
+            int loupeX = juce::jlimit(2, (int)bounds.getWidth() - loupeW - 2, hoverX - loupeW / 2);
+            juce::Rectangle<int> loupeRect(loupeX, 0, loupeW, loupeH);
+
+            // Loupe container background & border
+            g.setColour(juce::Colour(0xf0080b10));
+            g.fillRoundedRectangle(loupeRect.toFloat(), 4.0f);
+            g.setColour(waveformColour.brighter(0.5f));
+            g.drawRoundedRectangle(loupeRect.toFloat(), 4.0f, 1.5f);
+
+            // Zoom range: +/- 2.5s
+            double zoomWindow = 2.5;
+            double zoomStart = juce::jmax(0.0, hoverTime - zoomWindow);
+            double zoomEnd = juce::jmin(totalLength, hoverTime + zoomWindow);
+
+            int startIdx = (int)((zoomStart / totalLength) * numPeaks);
+            int endIdx = (int)((zoomEnd / totalLength) * numPeaks);
+            int sliceCount = juce::jmax(1, endIdx - startIdx);
+
+            auto loupeWaveArea = loupeRect.reduced(3, 3);
+            float loupeMidY = (float)loupeWaveArea.getCentreY();
+            float loupeHalfH = (float)loupeWaveArea.getHeight() * 0.48f;
+
+            g.setColour(waveformColour.brighter(0.45f));
+            for (int k = 0; k < sliceCount; ++k) {
+                int pIdx = juce::jlimit(0, numPeaks - 1, startIdx + k);
+                float lx = (float)loupeWaveArea.getX() + (float)k / (float)sliceCount * (float)loupeWaveArea.getWidth();
+                float lTop = loupeMidY - peaks[pIdx].second * loupeHalfH;
+                float lBot = loupeMidY - peaks[pIdx].first * loupeHalfH;
+                if (std::abs(lTop - lBot) < 1.0f) {
+                    lTop = loupeMidY - 1.0f;
+                    lBot = loupeMidY + 1.0f;
+                }
+                g.drawVerticalLine((int)lx, lTop, lBot);
+            }
+
+            // Reticle center hairline in the loupe (exact seek cursor)
+            float reticleX = (float)loupeRect.getCentreX();
+            g.setColour(juce::Colours::yellow);
+            g.drawVerticalLine((int)reticleX, (float)loupeRect.getY() + 2, (float)loupeRect.getBottom() - 2);
+
+            // Precision Millisecond Timestamp Badge
+            juce::String timecode = formatTimeMs(hoverTime);
+            g.setColour(juce::Colour(0xcc000000));
+            g.fillRoundedRectangle((float)loupeRect.getX() + 3, (float)loupeRect.getY() + 2, 68.0f, 13.0f, 2.0f);
+            g.setColour(juce::Colours::white);
+            g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
+            g.drawText(timecode, loupeRect.getX() + 4, loupeRect.getY() + 2, 66, 12, juce::Justification::centred);
+
+            // Zoom level tag
+            g.setColour(juce::Colours::cyan.withAlpha(0.85f));
+            g.setFont(juce::FontOptions(8.5f));
+            g.drawText("5s ZOOM", loupeRect.getRight() - 46, loupeRect.getY() + 2, 42, 12, juce::Justification::right);
+        }
+    }
+
+private:
+    void updateHoverTime(int mouseX) {
+        auto waveArea = getLocalBounds().reduced(3, 2);
+        float norm = juce::jlimit(0.0f, 1.0f, (float)(mouseX - waveArea.getX()) / (float)juce::jmax(1, waveArea.getWidth()));
+        hoverTime = norm * totalLength;
+    }
+
+    static juce::String formatTimeMs(double seconds) {
+        if (seconds < 0.0) seconds = 0.0;
+        int m = (int)(seconds / 60);
+        int s = (int)std::fmod(seconds, 60.0);
+        int ms = (int)std::fmod(seconds * 1000.0, 1000.0);
+        return juce::String::formatted("%02d:%02d.%03d", m, s, ms);
+    }
+
+    std::vector<std::pair<float, float>> peaks;
+    bool isPeaksLoaded = false;
+    juce::Colour waveformColour;
+    juce::File currentFile;
+    double curTime = 0.0;
+    double totalLength = 0.0;
+    double cueIn = 0.0;
+    double cueOut = 0.0;
+    double hoverTime = 0.0;
+    int hoverX = 0;
+    bool isHovered = false;
+    bool isDragging = false;
+    bool isActive = false;
+    bool isLive = false;
+};
+
 class Mp3PlayerComponent : public juce::Component,
                            public juce::Timer,
                            public juce::ListBoxModel,
                            public juce::FileDragAndDropTarget {
 public:
-    Mp3PlayerComponent(Mp3PlayerProcessor& proc, std::function<void()> onClose)
+    Mp3PlayerComponent(Mp3PlayerProcessor& proc, std::function<void()> onClose, const juce::String& slotName = "")
         : processor(proc), closeCallback(onClose),
-          levelerMeter(processor.getLevelerReference())
+          levelerMeter(processor.getLevelerReference()),
+          ownerSlotName(slotName)
     {
         setOpaque(true);
         setWantsKeyboardFocus(true);
 
         // Header Title & Close
-        titleLabel.setText("DJ PLAYLIST & DUAL-DECK PLAYER - Slot 11", juce::dontSendNotification);
+        titleLabel.setText("DUAL-DECK DJ & BREAK MUSIC" + (ownerSlotName.isNotEmpty() ? (" - " + ownerSlotName) : juce::String()), juce::dontSendNotification);
         titleLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
         titleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
         addAndMakeVisible(titleLabel);
@@ -51,7 +339,7 @@ public:
             auto btn = std::make_unique<BankButton>();
             int bankIdx = i;
             btn->setButtonText(getBankButtonLabel(bankIdx));
-            btn->setTooltip("Left-Click: Load & Play Bank " + juce::String(bankIdx + 1) + "\nRight-Click: Assign Music Folder / Rename");
+            btn->setTooltip("Left-Click: Load & Play Preset Playlist " + juce::String(bankIdx + 1) + "\nRight-Click: Assign Playlist (.m3u/.json) / Folder / Rename");
             btn->onClick = [this, bankIdx] {
                 processor.loadBank(bankIdx, true);
                 updateBankButtonsState();
@@ -92,17 +380,13 @@ public:
         deckATimeLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
         addAndMakeVisible(deckATimeLabel);
 
-        deckAPosSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-        deckAPosSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-        deckAPosSlider.setRange(0.0, 1.0, 0.001);
-        deckAPosSlider.onValueChange = [this] {
-            if (isScrubbingA && processor.getDeckLength(0) > 0.0) {
-                processor.setDeckPosition(0, deckAPosSlider.getValue() * processor.getDeckLength(0));
-            }
+        deckAWaveform.onSeek = [this](double seekSec) {
+            processor.setDeckPosition(0, seekSec);
         };
-        deckAPosSlider.onDragStart = [this] { isScrubbingA = true; };
-        deckAPosSlider.onDragEnd = [this] { isScrubbingA = false; };
-        addAndMakeVisible(deckAPosSlider);
+        deckAWaveform.onScrubStateChanged = [this](bool isScrubbing) {
+            isScrubbingA = isScrubbing;
+        };
+        addAndMakeVisible(deckAWaveform);
 
         deckASetInBtn.setButtonText("SET IN");
         deckASetInBtn.setTooltip("Set Cue-In point to current playhead (skips intro chatter/silence)");
@@ -170,17 +454,13 @@ public:
         deckBTimeLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
         addAndMakeVisible(deckBTimeLabel);
 
-        deckBPosSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-        deckBPosSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-        deckBPosSlider.setRange(0.0, 1.0, 0.001);
-        deckBPosSlider.onValueChange = [this] {
-            if (isScrubbingB && processor.getDeckLength(1) > 0.0) {
-                processor.setDeckPosition(1, deckBPosSlider.getValue() * processor.getDeckLength(1));
-            }
+        deckBWaveform.onSeek = [this](double seekSec) {
+            processor.setDeckPosition(1, seekSec);
         };
-        deckBPosSlider.onDragStart = [this] { isScrubbingB = true; };
-        deckBPosSlider.onDragEnd = [this] { isScrubbingB = false; };
-        addAndMakeVisible(deckBPosSlider);
+        deckBWaveform.onScrubStateChanged = [this](bool isScrubbing) {
+            isScrubbingB = isScrubbing;
+        };
+        addAndMakeVisible(deckBWaveform);
 
         deckBSetInBtn.setButtonText("SET IN");
         deckBSetInBtn.setTooltip("Set Cue-In point to current playhead (skips intro chatter/silence)");
@@ -339,18 +619,27 @@ public:
         addFolderBtn.onClick = [this] { chooseFolder(); };
         addAndMakeVisible(addFolderBtn);
 
-        moveUpBtn.setButtonText("^ Up");
-        moveUpBtn.setTooltip("Move selected song UP (Shortcut: Alt+Up)");
-        moveUpBtn.onClick = [this] { moveSelectedUp(); };
-        addAndMakeVisible(moveUpBtn);
+        // Reorder menu — consolidates Up/Down/Top/Bottom into one button
+        reorderBtn.setButtonText("Reorder");
+        reorderBtn.setTooltip("Move selected track (Alt+Up/Down for quick reorder)");
+        reorderBtn.onClick = [this] {
+            juce::PopupMenu m;
+            m.addItem(1, "Move Up (Alt+Up)");
+            m.addItem(2, "Move Down (Alt+Down)");
+            m.addSeparator();
+            m.addItem(3, "Move to Top");
+            m.addItem(4, "Move to Bottom");
+            m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&reorderBtn), [this](int r) {
+                if (r == 1) moveSelectedUp();
+                else if (r == 2) moveSelectedDown();
+                else if (r == 3) moveSelectedToTop();
+                else if (r == 4) moveSelectedToBottom();
+            });
+        };
+        addAndMakeVisible(reorderBtn);
 
-        moveDownBtn.setButtonText("v Dn");
-        moveDownBtn.setTooltip("Move selected song DOWN (Shortcut: Alt+Down)");
-        moveDownBtn.onClick = [this] { moveSelectedDown(); };
-        addAndMakeVisible(moveDownBtn);
-
-        smartArrangeBtn.setButtonText("SMART ARRANGE ⚡");
-        smartArrangeBtn.setTooltip("Intelligently arrange playlist sequence by BPM (Smooth Ramp, Minimal Jump, Energy Wave, Fit Duration)");
+        smartArrangeBtn.setButtonText("SMART ARRANGE");
+        smartArrangeBtn.setTooltip("Intelligently arrange playlist by BPM or fit to set duration");
         smartArrangeBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::deepskyblue.darker(0.5f));
         smartArrangeBtn.onClick = [this] { showSmartArrangeMenu(); };
         addAndMakeVisible(smartArrangeBtn);
@@ -361,27 +650,21 @@ public:
         grabYoutubeBtn.onClick = [this] { promptYoutubeDownload(); };
         addAndMakeVisible(grabYoutubeBtn);
 
-        loadToDeckABtn.setButtonText("Load -> Deck A");
-        loadToDeckABtn.setColour(juce::TextButton::buttonColourId, juce::Colours::cyan.darker(0.6f));
-        loadToDeckABtn.onClick = [this] {
+        // Load to Deck — single button with popup for A or B
+        loadToDeckBtn.setButtonText("Load to Deck");
+        loadToDeckBtn.setTooltip("Load selected track into Deck A or B");
+        loadToDeckBtn.onClick = [this] {
             int sel = listBox.getSelectedRow();
-            if (sel >= 0 && sel < (int)processor.getPlaylist().size()) {
-                processor.loadFileToDeck(0, processor.getPlaylist()[sel].file, false);
-                updateTrackUI();
-            }
+            if (sel < 0 || sel >= (int)processor.getPlaylist().size()) return;
+            juce::PopupMenu m;
+            m.addItem(1, "Load to Deck A");
+            m.addItem(2, "Load to Deck B");
+            m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&loadToDeckBtn), [this, sel](int r) {
+                if (r == 1) { processor.loadFileToDeck(0, processor.getPlaylist()[sel].file, false); updateTrackUI(); }
+                else if (r == 2) { processor.loadFileToDeck(1, processor.getPlaylist()[sel].file, false); updateTrackUI(); }
+            });
         };
-        addAndMakeVisible(loadToDeckABtn);
-
-        loadToDeckBBtn.setButtonText("Load -> Deck B");
-        loadToDeckBBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::orange.darker(0.6f));
-        loadToDeckBBtn.onClick = [this] {
-            int sel = listBox.getSelectedRow();
-            if (sel >= 0 && sel < (int)processor.getPlaylist().size()) {
-                processor.loadFileToDeck(1, processor.getPlaylist()[sel].file, false);
-                updateTrackUI();
-            }
-        };
-        addAndMakeVisible(loadToDeckBBtn);
+        addAndMakeVisible(loadToDeckBtn);
 
         removeBtn.setButtonText("Remove");
         removeBtn.onClick = [this] {
@@ -402,19 +685,22 @@ public:
         };
         addAndMakeVisible(clearBtn);
 
-        savePlaylistBtn.setButtonText("Save...");
-        savePlaylistBtn.onClick = [this] { savePlaylist(); };
-        addAndMakeVisible(savePlaylistBtn);
-
-        loadPlaylistBtn.setButtonText("Load...");
-        loadPlaylistBtn.onClick = [this] { loadPlaylist(); };
-        addAndMakeVisible(loadPlaylistBtn);
-
-        exportBtn.setButtonText("EXPORT 💾");
-        exportBtn.setTooltip("Export library metadata (CSV, JSON, Extended M3U, SQLite DB Backup)");
-        exportBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::teal.darker(0.5f));
-        exportBtn.onClick = [this] { showExportMenu(); };
-        addAndMakeVisible(exportBtn);
+        // Playlist File menu — consolidates Save/Load/Export into one button
+        playlistFileBtn.setButtonText("Playlist...");
+        playlistFileBtn.setTooltip("Save, Load, or Export playlist data");
+        playlistFileBtn.onClick = [this] {
+            juce::PopupMenu m;
+            m.addItem(1, "Save Playlist...");
+            m.addItem(2, "Load Playlist...");
+            m.addSeparator();
+            m.addItem(3, "Export Library (CSV, JSON, M3U, DB)...");
+            m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&playlistFileBtn), [this](int r) {
+                if (r == 1) savePlaylist();
+                else if (r == 2) loadPlaylist();
+                else if (r == 3) showExportMenu();
+            });
+        };
+        addAndMakeVisible(playlistFileBtn);
 
         updateBankButtonsState();
         updateTrackUI();
@@ -538,7 +824,7 @@ public:
         menu.addSectionHeader("IMPORT DATA");
         menu.addItem(5, "📥 Import Library Metadata from CSV...");
 
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&exportBtn), [this](int result) {
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&playlistFileBtn), [this](int result) {
             if (result == 1) {
                 // Export CSV
                 fileChooser = std::make_unique<juce::FileChooser>(
@@ -732,6 +1018,12 @@ public:
     void listBoxItemClicked(int row, const juce::MouseEvent& e) override {
         if (e.mods.isPopupMenu() || e.mods.isRightButtonDown()) {
             showTrackContextMenu(row);
+        } else {
+            if (row >= 0 && row < (int)processor.getPlaylist().size()) {
+                processor.playTrack(row, true);
+                updateTrackUI();
+                listBox.repaint();
+            }
         }
     }
 
@@ -853,13 +1145,39 @@ public:
         if (bankIdx < 0 || bankIdx >= (int)processor.getBanks().size()) return;
 
         juce::PopupMenu m;
-        m.addItem(1, "Assign Music Folder to Preset " + juce::String(bankIdx + 1) + "...");
-        m.addItem(2, "Rename Preset Button (" + processor.getBanks()[bankIdx].name + ")...");
-        m.addItem(3, "Open Preset Folder in Windows Explorer");
+        m.addItem(1, "Assign Current Loaded Playlist to Preset " + juce::String(bankIdx + 1));
+        m.addItem(2, "Select Playlist File (.m3u / .json) for Preset " + juce::String(bankIdx + 1) + "...");
+        m.addItem(3, "Import Music Folder for Preset " + juce::String(bankIdx + 1) + "...");
+        m.addSeparator();
+        m.addItem(4, "Rename Preset Button (" + processor.getBanks()[bankIdx].name + ")...");
+        m.addItem(5, "Show Preset in Windows Explorer");
+
         m.showMenuAsync(juce::PopupMenu::Options(), [this, bankIdx](int result) {
             if (result == 1) {
+                processor.assignCurrentPlaylistToBank(bankIdx);
+                updateBankButtonsState();
+            } else if (result == 2) {
+                auto playlistsDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("Fanfare").getChildFile("Playlists");
                 fileChooser = std::make_unique<juce::FileChooser>(
-                    "Select Music Folder for " + processor.getBanks()[bankIdx].name + "...",
+                    "Select Playlist File for Preset " + juce::String(bankIdx + 1) + "...",
+                    playlistsDir.exists() ? playlistsDir : processor.getLastFolder(),
+                    "*.m3u;*.m3u8;*.json"
+                );
+                fileChooser->launchAsync(
+                    juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                    [this, bankIdx](const juce::FileChooser& fc) {
+                        auto f = fc.getResult();
+                        if (f.existsAsFile()) {
+                            processor.assignBankPlaylistFile(bankIdx, f);
+                            updateBankButtonsState();
+                            listBox.updateContent();
+                            updateTrackUI();
+                        }
+                    }
+                );
+            } else if (result == 3) {
+                fileChooser = std::make_unique<juce::FileChooser>(
+                    "Select Music Folder for Preset " + juce::String(bankIdx + 1) + "...",
                     processor.getLastFolder()
                 );
                 fileChooser->launchAsync(
@@ -869,15 +1187,17 @@ public:
                         if (dir.isDirectory()) {
                             processor.assignBankFolder(bankIdx, dir);
                             updateBankButtonsState();
+                            listBox.updateContent();
+                            updateTrackUI();
                         }
                     }
                 );
-            } else if (result == 2) {
+            } else if (result == 4) {
                 promptRenameBank(bankIdx);
-            } else if (result == 3) {
-                juce::File folder(processor.getBanks()[bankIdx].folderPath);
-                if (folder.isDirectory()) {
-                    YoutubeDownloadManager::openFolderInExplorer(folder);
+            } else if (result == 5) {
+                juce::File pFile(processor.getBanks()[bankIdx].playlistPath);
+                if (pFile.exists()) {
+                    YoutubeDownloadManager::openFolderInExplorer(pFile.isDirectory() ? pFile : pFile.getParentDirectory());
                 } else {
                     YoutubeDownloadManager::openFolderInExplorer(processor.getLastFolder());
                 }
@@ -886,7 +1206,7 @@ public:
     }
 
     void promptRenameBank(int bankIdx) {
-        auto* alert = new juce::AlertWindow("Rename Preset Bank", "Enter new name for Preset " + juce::String(bankIdx + 1) + ":", juce::AlertWindow::QuestionIcon);
+        auto* alert = new juce::AlertWindow("Rename Preset Playlist", "Enter new name for Preset " + juce::String(bankIdx + 1) + ":", juce::AlertWindow::QuestionIcon);
         alert->addTextEditor("name", processor.getBanks()[bankIdx].name);
         alert->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
         alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
@@ -895,8 +1215,7 @@ public:
             if (result == 1) {
                 juce::String newName = alert->getTextEditorContents("name").trim();
                 if (newName.isNotEmpty()) {
-                    juce::File folder(processor.getBanks()[bankIdx].folderPath);
-                    processor.assignBankFolder(bankIdx, folder, newName);
+                    processor.renameBank(bankIdx, newName);
                     updateBankButtonsState();
                 }
             }
@@ -998,27 +1317,22 @@ public:
 
         area.removeFromRight(8);
 
-        // Bottom Playlist Action Buttons Row (13 buttons)
-        auto btnRow = area.removeFromBottom(26);
-        int bw = btnRow.getWidth() / 13;
+        // Bottom Playlist Action Buttons Row (consolidated: 8 buttons)
+        auto btnRow = area.removeFromBottom(28);
+        int bw = btnRow.getWidth() / 8;
         addFilesBtn.setBounds(btnRow.removeFromLeft(bw).reduced(2));
         addFolderBtn.setBounds(btnRow.removeFromLeft(bw).reduced(2));
-        moveUpBtn.setBounds(btnRow.removeFromLeft(bw - 4).reduced(2));
-        moveDownBtn.setBounds(btnRow.removeFromLeft(bw - 4).reduced(2));
-        smartArrangeBtn.setBounds(btnRow.removeFromLeft(bw + 12).reduced(2));
-        grabYoutubeBtn.setBounds(btnRow.removeFromLeft(bw + 8).reduced(2));
-        loadToDeckABtn.setBounds(btnRow.removeFromLeft(bw).reduced(2));
-        loadToDeckBBtn.setBounds(btnRow.removeFromLeft(bw).reduced(2));
-        removeBtn.setBounds(btnRow.removeFromLeft(bw - 8).reduced(2));
-        clearBtn.setBounds(btnRow.removeFromLeft(bw - 8).reduced(2));
-        savePlaylistBtn.setBounds(btnRow.removeFromLeft(bw - 4).reduced(2));
-        loadPlaylistBtn.setBounds(btnRow.removeFromLeft(bw - 4).reduced(2));
-        exportBtn.setBounds(btnRow.reduced(2));
+        reorderBtn.setBounds(btnRow.removeFromLeft(bw).reduced(2));
+        smartArrangeBtn.setBounds(btnRow.removeFromLeft(bw).reduced(2));
+        grabYoutubeBtn.setBounds(btnRow.removeFromLeft(bw).reduced(2));
+        loadToDeckBtn.setBounds(btnRow.removeFromLeft(bw).reduced(2));
+        removeBtn.setBounds(btnRow.removeFromLeft(bw).reduced(2));
+        playlistFileBtn.setBounds(btnRow.reduced(2));
 
         area.removeFromBottom(8);
 
         // Dual Deck Area (Top half: Deck A on Left, Deck B on Right)
-        auto decksArea = area.removeFromTop(188);
+        auto decksArea = area.removeFromTop(212);
         int deckWidth = (decksArea.getWidth() - 10) / 2;
 
         deckABounds = decksArea.removeFromLeft(deckWidth);
@@ -1034,8 +1348,8 @@ public:
 
         deckATrackLabel.setBounds(aInner.removeFromTop(18));
         deckATimeLabel.setBounds(aInner.removeFromTop(16));
-        deckAPosSlider.setBounds(aInner.removeFromTop(16));
-        aInner.removeFromTop(2);
+        deckAWaveform.setBounds(aInner.removeFromTop(38));
+        aInner.removeFromTop(4);
 
         auto aCueRow = aInner.removeFromTop(20);
         int aCueW = aCueRow.getWidth() / 3;
@@ -1060,8 +1374,8 @@ public:
 
         deckBTrackLabel.setBounds(bInner.removeFromTop(18));
         deckBTimeLabel.setBounds(bInner.removeFromTop(16));
-        deckBPosSlider.setBounds(bInner.removeFromTop(16));
-        bInner.removeFromTop(2);
+        deckBWaveform.setBounds(bInner.removeFromTop(38));
+        bInner.removeFromTop(4);
 
         auto bCueRow = bInner.removeFromTop(20);
         int bCueW = bCueRow.getWidth() / 3;
@@ -1097,7 +1411,7 @@ public:
 
     void timerCallback() override {
         // Update Title with total effective time
-        titleLabel.setText("FANFARE DUAL-DECK DJ & BREAK MUSIC   |   " + juce::String((int)processor.getPlaylist().size()) + " Tracks (" + formatTime(processor.getTotalPlaylistEffectiveDuration()) + ")", juce::dontSendNotification);
+        titleLabel.setText("DUAL-DECK DJ & BREAK MUSIC" + (ownerSlotName.isNotEmpty() ? (" - " + ownerSlotName) : juce::String()) + "   |   " + juce::String((int)processor.getPlaylist().size()) + " Tracks (" + formatTime(processor.getTotalPlaylistEffectiveDuration()) + ")", juce::dontSendNotification);
 
         // 1. Deck A Updates
         bool isDeckAPlaying = processor.isDeckPlaying(0);
@@ -1132,22 +1446,31 @@ public:
         }
 
         if (isDeckALoaded) {
-            deckATrackLabel.setText(processor.getDeckATrack().title, juce::dontSendNotification);
+            const auto& trkA = processor.getDeckATrack();
+            if (lastDeckAFile != trkA.file) {
+                lastDeckAFile = trkA.file;
+                deckAWaveform.setFile(trkA.file);
+            }
+            deckATrackLabel.setText(trkA.title, juce::dontSendNotification);
             double posA = processor.getDeckPosition(0);
             double lenA = processor.getDeckLength(0);
-            const auto& trkA = processor.getDeckATrack();
             juce::String timeStr = formatTime(posA) + " / " + formatTime(lenA) + " (-" + formatTime(juce::jmax(0.0, lenA - posA)) + ")";
             if (trkA.hasCues()) {
                 timeStr += " [IN: " + formatTime(trkA.cueInSeconds) + " | OUT: " + formatTime(trkA.getEffectiveEnd()) + "]";
             }
             deckATimeLabel.setText(timeStr, juce::dontSendNotification);
-            if (!isScrubbingA && lenA > 0.0) {
-                deckAPosSlider.setValue(posA / lenA, juce::dontSendNotification);
-            }
+            deckAWaveform.setPlayhead(posA, lenA);
+            deckAWaveform.setCues(trkA.cueInSeconds, trkA.getEffectiveEnd());
+            deckAWaveform.setDeckActive(true, isDeckAPlaying);
         } else {
+            if (lastDeckAFile != juce::File()) {
+                lastDeckAFile = juce::File();
+                deckAWaveform.setFile(juce::File());
+            }
             deckATrackLabel.setText("No file loaded in Deck A", juce::dontSendNotification);
             deckATimeLabel.setText("00:00 / 00:00", juce::dontSendNotification);
-            deckAPosSlider.setValue(0.0, juce::dontSendNotification);
+            deckAWaveform.setPlayhead(0.0, 0.0);
+            deckAWaveform.setDeckActive(false, false);
         }
 
         // 2. Deck B Updates
@@ -1183,33 +1506,62 @@ public:
         }
 
         if (isDeckBLoaded) {
-            deckBTrackLabel.setText(processor.getDeckBTrack().title, juce::dontSendNotification);
+            const auto& trkB = processor.getDeckBTrack();
+            if (lastDeckBFile != trkB.file) {
+                lastDeckBFile = trkB.file;
+                deckBWaveform.setFile(trkB.file);
+            }
+            deckBTrackLabel.setText(trkB.title, juce::dontSendNotification);
             double posB = processor.getDeckPosition(1);
             double lenB = processor.getDeckLength(1);
-            const auto& trkB = processor.getDeckBTrack();
             juce::String timeStr = formatTime(posB) + " / " + formatTime(lenB) + " (-" + formatTime(juce::jmax(0.0, lenB - posB)) + ")";
             if (trkB.hasCues()) {
                 timeStr += " [IN: " + formatTime(trkB.cueInSeconds) + " | OUT: " + formatTime(trkB.getEffectiveEnd()) + "]";
             }
             deckBTimeLabel.setText(timeStr, juce::dontSendNotification);
-            if (!isScrubbingB && lenB > 0.0) {
-                deckBPosSlider.setValue(posB / lenB, juce::dontSendNotification);
-            }
+            deckBWaveform.setPlayhead(posB, lenB);
+            deckBWaveform.setCues(trkB.cueInSeconds, trkB.getEffectiveEnd());
+            deckBWaveform.setDeckActive(true, isDeckBPlaying);
         } else {
+            if (lastDeckBFile != juce::File()) {
+                lastDeckBFile = juce::File();
+                deckBWaveform.setFile(juce::File());
+            }
             deckBTrackLabel.setText("No file loaded in Deck B", juce::dontSendNotification);
             deckBTimeLabel.setText("00:00 / 00:00", juce::dontSendNotification);
-            deckBPosSlider.setValue(0.0, juce::dontSendNotification);
+            deckBWaveform.setPlayhead(0.0, 0.0);
+            deckBWaveform.setDeckActive(false, false);
         }
 
-        // 3. Crossfader Position Update
+        // 3. Crossfader Position & Button Status Update
         if (!isManualCrossfading) {
             float manualPos = processor.getManualCrossfadePos();
             if (manualPos >= 0.0f) {
                 crossfaderSlider.setValue(manualPos, juce::dontSendNotification);
             } else {
-                int active = processor.getActiveDeckIndex();
-                crossfaderSlider.setValue((active == 0) ? 0.0 : 1.0, juce::dontSendNotification);
+                float prog = processor.getCrossfadeProgress();
+                crossfaderSlider.setValue(prog, juce::dontSendNotification);
             }
+        }
+
+        if (processor.isCrossfadingActive()) {
+            int targetDeck = processor.getActiveDeckIndex();
+            if (targetDeck == 1) {
+                fadeToBBtn.setButtonText("FADING TO B >>");
+                fadeToBBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::orange.darker(0.3f));
+                fadeToABtn.setButtonText("<< FADE A");
+                fadeToABtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel));
+            } else {
+                fadeToABtn.setButtonText("<< FADING TO A");
+                fadeToABtn.setColour(juce::TextButton::buttonColourId, juce::Colours::cyan.darker(0.5f));
+                fadeToBBtn.setButtonText("FADE B >>");
+                fadeToBBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel));
+            }
+        } else {
+            fadeToABtn.setButtonText("<< FADE A");
+            fadeToABtn.setColour(juce::TextButton::buttonColourId, (processor.getActiveDeckIndex() == 0 && isDeckAPlaying) ? juce::Colours::cyan.darker(0.7f) : ThemeManager::get(Theme::Role::panel));
+            fadeToBBtn.setButtonText("FADE B >>");
+            fadeToBBtn.setColour(juce::TextButton::buttonColourId, (processor.getActiveDeckIndex() == 1 && isDeckBPlaying) ? juce::Colours::orange.darker(0.7f) : ThemeManager::get(Theme::Role::panel));
         }
     }
 
@@ -1409,6 +1761,7 @@ public:
     }
 
     Mp3PlayerProcessor& processor;
+    juce::String ownerSlotName;
     std::function<void()> closeCallback;
 
     juce::Label titleLabel;
@@ -1422,7 +1775,7 @@ public:
     juce::TextButton deckALoadBtn;
     juce::Label deckATrackLabel;
     juce::Label deckATimeLabel;
-    juce::Slider deckAPosSlider;
+    WaveformDisplay deckAWaveform{juce::Colours::cyan};
     juce::TextButton deckASetInBtn;
     juce::TextButton deckASetOutBtn;
     juce::TextButton deckAClrCueBtn;
@@ -1438,7 +1791,7 @@ public:
     juce::TextButton deckBLoadBtn;
     juce::Label deckBTrackLabel;
     juce::Label deckBTimeLabel;
-    juce::Slider deckBPosSlider;
+    WaveformDisplay deckBWaveform{juce::Colours::orange};
     juce::TextButton deckBSetInBtn;
     juce::TextButton deckBSetOutBtn;
     juce::TextButton deckBClrCueBtn;
@@ -1466,21 +1819,19 @@ public:
     juce::ListBox listBox;
     juce::TextButton addFilesBtn;
     juce::TextButton addFolderBtn;
-    juce::TextButton moveUpBtn;
-    juce::TextButton moveDownBtn;
+    juce::TextButton reorderBtn;
     juce::TextButton smartArrangeBtn;
     juce::TextButton grabYoutubeBtn;
-    juce::TextButton loadToDeckABtn;
-    juce::TextButton loadToDeckBBtn;
+    juce::TextButton loadToDeckBtn;
     juce::TextButton removeBtn;
     juce::TextButton clearBtn;
-    juce::TextButton savePlaylistBtn;
-    juce::TextButton loadPlaylistBtn;
-    juce::TextButton exportBtn;
+    juce::TextButton playlistFileBtn;
 
     bool isScrubbingA = false;
     bool isScrubbingB = false;
     bool isManualCrossfading = false;
+    juce::File lastDeckAFile;
+    juce::File lastDeckBFile;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(Mp3PlayerComponent)

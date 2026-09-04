@@ -55,6 +55,15 @@ target_compile_definitions(Fanfare PUBLIC
     JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
 )
 
+# ASIO: match the Projucer build. JUCE 8 only needs the three Steinberg headers
+# (asio.h, asiosys.h, iasiodrv.h) dropped next to the modules; enable the backend
+# when they're present so local builds keep low-latency ASIO. CI (no SDK headers)
+# still configures and falls back to WASAPI/DirectSound.
+if(EXISTS "${JUCE_ROOT}/modules/juce_audio_devices/native/asio/asio.h")
+    target_compile_definitions(Fanfare PUBLIC JUCE_ASIO=1)
+endif()
+
+
 target_link_libraries(Fanfare PRIVATE
     juce::juce_audio_basics
     juce::juce_audio_devices
@@ -68,6 +77,7 @@ target_link_libraries(Fanfare PRIVATE
     juce::juce_graphics
     juce::juce_gui_basics
     juce::juce_gui_extra
+    juce::juce_dsp
 )
 
 if(WIN32)

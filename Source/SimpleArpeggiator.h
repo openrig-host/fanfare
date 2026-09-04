@@ -85,7 +85,8 @@ public:
 
         // --- 2. No notes held: send note-off and bail ---
         if (heldNotesCount == 0) {
-            juce::MidiBuffer output;
+            scratchOutput.clear();
+            auto& output = scratchOutput;
             if (soundingNote >= 0) {
                 output.addEvent(juce::MidiMessage::noteOff(1, soundingNote), 0);
                 soundingNote = -1;
@@ -139,7 +140,8 @@ public:
         if (arpNotesCount == 0) return;
 
         // --- 4. Build output buffer ---
-        juce::MidiBuffer output;
+        scratchOutput.clear();
+        auto& output = scratchOutput;
 
         for (const auto meta : midi) {
             auto msg = meta.getMessage();
@@ -201,6 +203,9 @@ public:
     std::atomic<int> patternIdx{(int)Pattern::Random};
 
 private:
+    // Reused output scratch so the audio path never heap-allocates per block
+    juce::MidiBuffer scratchOutput;
+
     void buildNoteList(int up, int down) {
         arpNotesCount = 0;
         for (int note = 0; note < 128; ++note) {

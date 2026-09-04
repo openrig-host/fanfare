@@ -439,9 +439,9 @@ inline LONG WINAPI fanfareUnhandledExceptionFilter(PEXCEPTION_POINTERS ep) {
       uint32_t mainTid = g_mainThreadId.load();
 
       // Check if this exception occurred in a non-critical background worker thread
-      // (such as Kontakt 8 WINHTTP telemetry/license worker thread).
+      // (such as Kontakt 8 WINHTTP telemetry/license worker thread or Steinberg license engine thread).
       // If so, terminate ONLY the faulting thread so the live audio and UI keep running!
-      if (currentTid != audioTid && currentTid != mainTid && audioTid != 0) {
+      if (currentTid != mainTid && (audioTid == 0 || currentTid != audioTid)) {
         wchar_t appData[MAX_PATH] = {0};
         GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
         wchar_t crashDir[MAX_PATH] = {0};

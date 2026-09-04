@@ -1708,6 +1708,24 @@ html, body {
   border-radius: 4px;
 }
 
+/* Cue-mode toggle: badge look, clickable */
+button.dj-autodj-badge#djCueModeBtn {
+  border: 1px solid rgba(210, 168, 255, 0.4);
+  cursor: pointer;
+  font-family: inherit;
+}
+
+button.dj-autodj-badge#djCueModeBtn:active {
+  background: rgba(210, 168, 255, 0.35);
+}
+
+.btn-dj-cue {
+  border: 1px solid var(--accent-green-bright);
+  color: var(--accent-green-bright);
+  background: transparent;
+  font-weight: 800;
+}
+
 .dj-track-title {
   font-size: 16px;
   font-weight: 800;

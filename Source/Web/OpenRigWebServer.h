@@ -55,6 +55,11 @@ public:
     static juce::StringArray getLocalIpAddresses();
     static juce::String getPrimaryUrl(int port);
 
+    // Pairing token that tablet clients must present (?k=... or X-OpenRig-Token).
+    // Generated on first run and persisted, so it never changes between gigs —
+    // the QR/bookmark URL stays valid forever. Embed it in the QR pairing URL.
+    static juce::String getPairingToken() { ensureTokenLoaded(); return pairingToken; }
+
     // Callbacks to push state updates immediately
     void notifySceneChanged(int sceneIndex, const juce::String& sceneName);
     void notifySetlistChanged();
@@ -65,6 +70,9 @@ public:
     // Broadcast raw WebSocket text message to all connected clients
     void broadcastWebSocket(const juce::String& jsonMessage);
 
+    // Number of browsers holding a live WebSocket session (0 = nobody attached)
+    int getConnectedClientCount();
+
 private:
     void run() override; // Worker thread listening for incoming TCP connections
     void timerCallback() override; // ~30Hz Telemetry & VU broadcast timer
@@ -74,6 +82,13 @@ private:
     bool handleHttpRequest(void* socketHandle, const juce::String& requestMethod, const juce::String& requestPath, const juce::String& requestHeaders, const juce::String& requestBody);
     bool handleWebSocketHandshake(void* socketHandle, const juce::String& secWebSocketKey);
     void handleWebSocketSession(void* socketHandle);
+
+    // Security: load/create the pairing token + remote-access settings
+    static void ensureTokenLoaded();   // loads from disk or generates+persists once
+    void loadPairingSettings();        // token + remote_security.json (per-instance settings)
+    // True when the request presents the pairing token (query "k=" or the
+    // X-OpenRig-Token header). requestText is the raw request incl. headers.
+    bool isAuthorized(const juce::String& rawPathWithQuery, const juce::String& requestText) const;
 
     // REST API Handlers
     juce::var buildStatusJson();
@@ -106,6 +121,12 @@ private:
     std::atomic<bool> serverRunning{false};
     int serverPort = 8080;
     void* listenSocket = nullptr; // Raw socket descriptor (SOCKET / int)
+
+    // Pairing / security state
+    static juce::String pairingToken;      // shared with the QR overlay UI
+    bool allowRemoteDownloads = false;     // guard for POST /api/mp3/download
+    std::atomic<int> activeConnectionCount{0};
+    static constexpr int kMaxConnections = 8;
 
     // Active WebSocket clients set
     std::mutex clientSocketsMutex;

@@ -1,5 +1,13 @@
 #pragma once
 
+#ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+  #define NOMINMAX
+#endif
+#include <objbase.h>
+
 #include "Logger.h"
 #include "RackSlot.h"
 #include "Scene.h"
@@ -26,9 +34,25 @@
 inline void pinDllInMemory(const juce::String &path) {
 #if JUCE_WINDOWS
   if (path.isNotEmpty()) {
-    ::LoadLibraryW(path.toWideCharPointer());
+    juce::File f(path);
+    if (f.existsAsFile()) {
+      ::LoadLibraryW(path.toWideCharPointer());
+    }
   }
 #endif
+}
+
+inline juce::String normalizeVst3Path(const juce::String &path) {
+  if (path.isEmpty())
+    return path;
+  juce::File cur(path);
+  while (cur.exists() && cur != cur.getParentDirectory()) {
+    if (cur.getFileName().endsWithIgnoreCase(".vst3") && cur.isDirectory()) {
+      return cur.getFullPathName();
+    }
+    cur = cur.getParentDirectory();
+  }
+  return path;
 }
 #endif
 
@@ -566,15 +590,25 @@ public:
       ScanResults results;
       std::vector<PluginInfo> foundPlugins;
 
-      // Recursive scan for .vst3 files using modern RangedDirectoryIterator
+      // Recursive scan for .vst3 files and bundles using modern RangedDirectoryIterator
       for (const auto &entry : juce::RangedDirectoryIterator(
-               vstFolder, true, "*.vst3", juce::File::findFiles)) {
+               vstFolder, true, "*.vst3", juce::File::findFilesAndDirectories)) {
         if (!alive->load()) return;
         juce::File f = entry.getFile();
+        juce::String normPath = normalizeVst3Path(f.getFullPathName());
+        juce::File normFile(normPath);
         PluginInfo info;
-        info.name = f.getFileNameWithoutExtension();
-        info.path = f.getFullPathName();
-        foundPlugins.push_back(info);
+        info.name = normFile.getFileNameWithoutExtension();
+        info.path = normFile.getFullPathName();
+        bool alreadyAdded = false;
+        for (const auto &existing : foundPlugins) {
+          if (existing.path.equalsIgnoreCase(info.path)) {
+            alreadyAdded = true;
+            break;
+          }
+        }
+        if (!alreadyAdded)
+          foundPlugins.push_back(info);
       }
 
       if (!alive->load()) return;
@@ -695,8 +729,9 @@ public:
         availablePlugins.clear();
         for (int i = 0; i < arr->size(); ++i) {
           auto v = arr->getReference(i);
-          availablePlugins.push_back({v.getProperty("name", "").toString(),
-                                      v.getProperty("path", "").toString()});
+          juce::String name = v.getProperty("name", "").toString();
+          juce::String path = normalizeVst3Path(v.getProperty("path", "").toString());
+          availablePlugins.push_back({name, path});
         }
         return; // Success
       }
@@ -716,6 +751,7 @@ public:
                     juce::MidiBuffer &midi) {
     juce::ScopedNoDenormals noDenormals;
     FanfareLog::g_audioThreadId.store((uint32_t)::GetCurrentThreadId());
+
     // Inject stress test MIDI if active
     if (stressTestActive.load()) {
         double sr = currentSampleRate;
@@ -871,22 +907,16 @@ public:
       scratchBuffers[i].clear();
     }
 
-    // PARALLEL PROCESSING DECISION: If we have <= 1 active slot with VSTs loaded,
-    // process sequentially inline directly on the audio thread to eliminate thread-pool
-    // scheduling overhead and context-switch jitter (crucial for tight buffers like 128 samples).
+    // PARALLEL PROCESSING DECISION: with few active slots carrying VSTs,
+    // process sequentially inline directly on the audio thread to eliminate
+    // thread-pool scheduling overhead and context-switch jitter (crucial for
+    // tight buffers like 128 samples). Subgrouping is handled in both paths
+    // (see seed-only targets below).
     int numActiveSlots = (int)slots.size();
     int slotsWithPlugins = 0;
     for (int i = 0; i < numActiveSlots; ++i) {
       if (slots[i]->hasActivePlugins() && !slots[i]->isBypassed()) {
         slotsWithPlugins++;
-      }
-    }
-
-    bool hasSubgroups = false;
-    for (int i = 0; i < numActiveSlots; ++i) {
-      if (slots[i]->getOutputTarget() >= 0) {
-        hasSubgroups = true;
-        break;
       }
     }
 
@@ -1490,6 +1520,30 @@ public:
       std::atomic<bool> &flag;
       ~AutoReset() { flag.store(false, std::memory_order_release); }
     } resetFlag{isApplyingRig};
+
+    // Establish a quiesce point: the audio block that was in flight when the
+    // flag went up may still have worker jobs inside plugin code. Pushing
+    // state into a plugin while its process() runs on a worker deadlocked
+    // Kontakt 8 for 60s+ (Aug 31 incident). isApplyingRig stops future blocks,
+    // so all fork-join tokens settle within one block — wait, bounded.
+    {
+      const int quiesceDeadlineMs = 500;
+      int waitedMs = 0;
+      while (waitedMs < quiesceDeadlineMs) {
+        bool allSettled = true;
+        for (auto *job : preallocatedJobs) {
+          if (job->completedToken.load(std::memory_order_acquire) !=
+              job->setupToken.load(std::memory_order_acquire)) {
+            allSettled = false;
+            break;
+          }
+        }
+        if (allSettled)
+          break;
+        juce::Thread::sleep(2);
+        waitedMs += 2;
+      }
+    }
 
     // Note: isApplyingRig pauses audio processing cleanly without spinning or priority inversions.
     // We avoid holding the global audio lock across all plugin setStateInformation calls to prevent
@@ -2161,17 +2215,20 @@ public:
       songSlot.sampler.slots[idx].volumeCC = cfg.volumeCC;
     }
 
-    auto& mp3Live = s->getMp3Player();
-    songSlot.mp3Player.loopMode = (int)mp3Live.getLoopMode();
-    songSlot.mp3Player.shuffle = mp3Live.isShuffleEnabled();
-    songSlot.mp3Player.gain = mp3Live.getGain();
-    songSlot.mp3Player.tracks.clear();
-    for (const auto& t : mp3Live.getPlaylist()) {
-      Fanfare::Mp3TrackSettings ts;
-      ts.path = t.file.getFullPathName();
-      ts.title = t.title;
-      ts.duration = t.durationSeconds;
-      songSlot.mp3Player.tracks.push_back(ts);
+    // Read-only: a slot whose DJ player was never used serializes defaults
+    // and must NOT materialize one just because we saved the rig.
+    if (auto *mp3Live = s->findMp3Player()) {
+      songSlot.mp3Player.loopMode = (int)mp3Live->getLoopMode();
+      songSlot.mp3Player.shuffle = mp3Live->isShuffleEnabled();
+      songSlot.mp3Player.gain = mp3Live->getGain();
+      songSlot.mp3Player.tracks.clear();
+      for (const auto& t : mp3Live->getPlaylist()) {
+        Fanfare::Mp3TrackSettings ts;
+        ts.path = t.file.getFullPathName();
+        ts.title = t.title;
+        ts.duration = t.durationSeconds;
+        songSlot.mp3Player.tracks.push_back(ts);
+      }
     }
 
     for (const auto& pair : s->getCCMappings()) {
@@ -2300,13 +2357,23 @@ public:
       samplerLive.setSlotConfig(idx, cfg);
     }
 
-    auto& mp3Live = s->getMp3Player();
-    mp3Live.clearPlaylist();
-    mp3Live.setLoopMode((Mp3PlayerProcessor::LoopMode)songSlot.mp3Player.loopMode);
-    mp3Live.setShuffleEnabled(songSlot.mp3Player.shuffle);
-    mp3Live.setGain(songSlot.mp3Player.gain);
-    for (const auto& ts : songSlot.mp3Player.tracks) {
-      mp3Live.addTrack(juce::File(ts.path), ts.title, ts.duration);
+    // Only materialize the slot's DJ engine when the song actually carries DJ
+    // content; otherwise just clear any player that already exists.
+    bool hasMp3Content = !songSlot.mp3Player.tracks.empty()
+        || songSlot.mp3Player.gain != 1.0f
+        || songSlot.mp3Player.loopMode != 0
+        || songSlot.mp3Player.shuffle;
+    if (hasMp3Content) {
+      auto& mp3Live = s->getMp3Player();
+      mp3Live.clearPlaylist();
+      mp3Live.setLoopMode((Mp3PlayerProcessor::LoopMode)songSlot.mp3Player.loopMode);
+      mp3Live.setShuffleEnabled(songSlot.mp3Player.shuffle);
+      mp3Live.setGain(songSlot.mp3Player.gain);
+      for (const auto& ts : songSlot.mp3Player.tracks) {
+        mp3Live.addTrack(juce::File(ts.path), ts.title, ts.duration);
+      }
+    } else if (auto* mp3Live = s->findMp3Player()) {
+      mp3Live->clearPlaylist();
     }
 
     s->clearAllCCMappings();
@@ -2411,7 +2478,8 @@ public:
   juce::String normalizePath(const juce::String &path) {
     if (path.trim().isEmpty())
       return "";
-    juce::String p = juce::File(path).getFullPathName().trim().toLowerCase();
+    juce::String norm = normalizeVst3Path(path);
+    juce::String p = juce::File(norm).getFullPathName().trim().toLowerCase();
     p = p.replaceCharacter('/', '\\');
     while (p.endsWithChar('\\'))
       p = p.dropLastCharacters(1);
@@ -2486,18 +2554,19 @@ public:
         return;
       }
 
-      juce::MemoryBlock blob;
-      blob.fromBase64Encoding(newStateBase64);
-      logToFile("TRACE: setStateInformation started for reused plugin " + currentPlugin->getName() + " (" + juce::String(blob.getSize()) + " bytes)");
-      bool stateOk = FanfareLog::safeExecutePluginCall([&]() {
-        currentPlugin->setStateInformation(blob.getData(), (int)blob.getSize());
-      }, "setStateInformation (Reused " + currentPlugin->getName() + ")");
-      logToFile("TRACE: setStateInformation finished for reused plugin: " + currentPlugin->getName());
-      if (stateOk) {
-        lastAppliedPluginStates[key] = newStateBase64;
-      } else {
-        logToFile("WARNING: setStateInformation faulted for reused plugin: " + currentPlugin->getName() + ", continuing");
-      }
+      // State differs: do NOT push into the live instance. Third-party
+      // setStateInformation only completes reliably while the host's message
+      // loop is free to service the plugin's internal tasks — it succeeds on
+      // the preload build threads (message loop pumping) and deadlocked both
+      // Kontakt 8 and Blue3 during applyRig (message thread busy), no matter
+      // which thread made the call. The correct path is a staged instance
+      // built off-thread during preload; RigBuilder now stages same-path
+      // plugins whose state differs. If staging is missing here (cold switch
+      // without preload, or its build timed out), keep the previous state —
+      // bounded and playable — and say so loudly.
+      logToFile("WARNING: Same-path plugin state differs but no staged instance for " +
+                currentPlugin->getName() +
+                " — keeping previous state for this switch. Queue the song again to preload its real state.");
       return;
     }
 
@@ -2541,6 +2610,23 @@ public:
     }
     return nullptr;
   }
+  // Steinberg plugins (HALion, Dorico, etc.) spawn a background thread in
+  // license-engine-access.dll during createPluginInstance(). If processBlock
+  // runs before that thread completes, the DLL access-violates. This helper
+  // blocks the loading thread (never the audio thread) to let it finish.
+  void waitForSteinbergLicenseInit(juce::AudioPluginInstance *instance) {
+    if (instance == nullptr)
+      return;
+    auto desc = instance->getPluginDescription();
+    bool isSteinberg = desc.manufacturerName.containsIgnoreCase("Steinberg") ||
+                       desc.name.containsIgnoreCase("HALion") ||
+                       desc.name.containsIgnoreCase("Dorico") ||
+                       desc.name.containsIgnoreCase("Groove Agent");
+    if (isSteinberg) {
+      logToFile("Waiting 750ms for Steinberg license validation: " + desc.name);
+      juce::Thread::sleep(750);
+    }
+  }
 
   void configureStereoLayout(juce::AudioProcessor *processor) {
     if (processor == nullptr)
@@ -2548,7 +2634,12 @@ public:
 
     if (processor->getName().containsIgnoreCase("Omnisphere") ||
         processor->getName().containsIgnoreCase("Spectrasonics")) {
-      logToFile("Skipping strict layout enforcement for Omnisphere");
+      logToFile("Skipping strict layout enforcement for " + processor->getName() +
+                " - Ins: " + juce::String(processor->getTotalNumInputChannels()) +
+                ", Outs: " + juce::String(processor->getTotalNumOutputChannels()));
+      processor->setPlayConfigDetails(processor->getTotalNumInputChannels(),
+                                      processor->getTotalNumOutputChannels(),
+                                      currentSampleRate, currentBlockSize);
       return;
     }
 
@@ -2947,7 +3038,7 @@ public:
       return;
     }
 
-    juce::String pluginPath = availablePlugins[pluginIndex].path;
+    juce::String pluginPath = normalizeVst3Path(availablePlugins[pluginIndex].path);
     juce::File pluginFile(pluginPath);
 
     logToFile("=== LOADING PLUGIN (SYNC) ===");
@@ -2996,6 +3087,7 @@ public:
       logToFile("Plugin loaded successfully!");
       configureStereoLayout(instance.get());
       instance->prepareToPlay(currentSampleRate, currentBlockSize);
+      waitForSteinbergLicenseInit(instance.get());
       size_t ramAfter = FanfareLog::getMemoryStats().workingSetBytes;
       if (ramAfter > ramBefore) {
         slotVec[realIdx]->setEstimatedRamBytes(ramAfter - ramBefore);
@@ -3047,7 +3139,7 @@ public:
       return;
     }
 
-    juce::String pluginPath = availablePlugins[pluginIndex].path;
+    juce::String pluginPath = normalizeVst3Path(availablePlugins[pluginIndex].path);
     juce::AudioPluginFormat *vst3Format = nullptr;
     for (int i = 0; i < formatManager.getNumFormats(); ++i) {
       if (formatManager.getFormat(i)->getName() == "VST3") {
@@ -3077,6 +3169,7 @@ public:
     if (instance) {
       configureStereoLayout(instance.get());
       instance->prepareToPlay(currentSampleRate, currentBlockSize);
+      waitForSteinbergLicenseInit(instance.get());
       std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
       {
         juce::ScopedLock sl(lock);
@@ -3141,7 +3234,7 @@ public:
   bool buildPluginFromVar(const juce::var &vt,
                           std::unique_ptr<juce::AudioPluginInstance> &out,
                           juce::String &error) {
-    juce::String path = vt.getProperty("path", "").toString();
+    juce::String path = normalizeVst3Path(vt.getProperty("path", "").toString());
     juce::String stateBase64 = vt.getProperty("state", "").toString();
     if (path.isEmpty()) {
       error = "empty plugin path";
@@ -3189,6 +3282,7 @@ public:
         logToFile("TRACE: buildPluginFromVar prepareToPlay faulted for: " + instance->getName());
         return false;
       }
+      waitForSteinbergLicenseInit(instance.get());
 
       juce::MemoryBlock blob;
       blob.fromBase64Encoding(stateBase64);
@@ -3227,6 +3321,17 @@ public:
     return isFoh ? ("F:" + juce::String(chainIdx))
                  : ("I:" + juce::String(chainIdx));
   }
+
+  // True when the live plugin for `key` already has exactly this state
+  // applied, so a same-path instance can be reused with no state push at
+  // switch time. RigBuilder uses this to decide reuse vs. staging.
+  bool pluginStateMatches(const juce::String &key, const juce::var &pv) const {
+    auto it = lastAppliedPluginStates.find(key);
+    if (it == lastAppliedPluginStates.end())
+      return false;
+    return it->second == pv.getProperty("state", "").toString();
+  }
+
   void pushStagedPlugin(const juce::String &key,
                         std::unique_ptr<juce::AudioPluginInstance> inst) {
     juce::ScopedLock sl(stagingLock);

@@ -75,6 +75,25 @@
   const xrunVal = document.getElementById('xrunVal');
   const wakeLockPill = document.getElementById('wakeLockPill');
 
+  // --- Pairing token ---
+  // The desktop app embeds its pairing token in the QR URL (?k=...). The
+  // server rejects API/WebSocket traffic that doesn't present it.
+  const pairingToken = new URLSearchParams(window.location.search).get('k') || '';
+
+  function withToken(path) {
+    if (!pairingToken) return path;
+    return path + (path.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(pairingToken);
+  }
+
+  async function apiFetch(path, opts) {
+    const res = await fetch(withToken(path), opts);
+    if (res.status === 401) {
+      if (banner) banner.className = 'connection-banner disconnected';
+      if (connectionText) connectionText.innerText = 'PAIRING REQUIRED — RESCAN THE QR CODE';
+    }
+    return res;
+  }
+
   const songHeroCenter = document.getElementById('songHeroCenter');
   const currentSongTitle = document.getElementById('currentSongTitle');
   const songPosBadge = document.getElementById('songPosBadge');
@@ -136,9 +155,16 @@
 
   // --- WebSocket Connection ---
   function connectWebSocket() {
+    // Without a token every request will 401, so say so instead of silently
+    // looping through connect/disconnect cycles.
+    if (!pairingToken) {
+      if (banner) banner.className = 'connection-banner disconnected';
+      if (connectionText) connectionText.innerText = 'PAIRING REQUIRED — OPEN THE URL SHOWN IN THE QR CODE';
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host || 'localhost:8080';
-    const wsUrl = `${protocol}//${host}/ws`;
+    const wsUrl = `${protocol}//${host}/ws${pairingToken ? '?k=' + encodeURIComponent(pairingToken) : ''}`;
 
     try {
       ws = new WebSocket(wsUrl);
@@ -1157,6 +1183,8 @@
   const djNextBtn = document.getElementById('djNextBtn');
   const djTrackCount = document.getElementById('djTrackCount');
   const djPlaylistList = document.getElementById('djPlaylistList');
+  const djCueBtn = document.getElementById('djCueBtn');
+  const djCueModeBtn = document.getElementById('djCueModeBtn');
 
   const djYtUrlInput = document.getElementById('djYtUrlInput');
   const djYtGrabBtn = document.getElementById('djYtGrabBtn');
@@ -1173,7 +1201,7 @@
       djYtStatusMsg.style.display = 'block';
       djYtStatusMsg.innerText = 'Sending download request (MP3 192k) to OpenRig...';
     }
-    fetch('/api/mp3/download', {
+    apiFetch('/api/mp3/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: url, playNow: playNow })
@@ -1193,7 +1221,7 @@
 
   async function fetchMp3Status() {
     try {
-      const res = await fetch('/api/mp3');
+      const res = await apiFetch('/api/mp3');
       if (res.ok) {
         const data = await res.json();
         updateMp3Player(data);
@@ -1213,7 +1241,7 @@
         btn.className = `btn-dj-bank ${b.index === data.activeBank ? 'active' : ''}`;
         btn.innerText = `${b.index + 1}: ${b.name}`;
         btn.onclick = () => {
-          fetch('/api/mp3/bank', {
+          apiFetch('/api/mp3/bank', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ index: b.index })
@@ -1232,6 +1260,17 @@
     }
     if (djAutoDjBadge) {
       djAutoDjBadge.innerText = data.autoDj ? 'AUTO-DJ: ON' : 'AUTO-DJ: OFF';
+    }
+    if (djCueModeBtn) {
+      const fade = data.cueMode === 1;
+      djCueModeBtn.innerText = fade ? 'CUE: FADE' : 'CUE: CUT';
+      djCueModeBtn.onclick = () => {
+        apiFetch('/api/mp3/cuemode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: fade ? 0 : 1 })
+        });
+      };
     }
     if (djTrackTitle) {
       djTrackTitle.innerText = data.currentTitle || 'No track loaded';
@@ -1254,19 +1293,25 @@
     if (djPlayPauseBtn) {
       djPlayPauseBtn.innerHTML = data.isPlaying ? '&#10074;&#10074; PAUSE' : '&#9658; PLAY';
       djPlayPauseBtn.onclick = () => {
-        fetch(data.isPlaying ? '/api/mp3/pause' : '/api/mp3/play', { method: 'POST' });
+        apiFetch(data.isPlaying ? '/api/mp3/pause' : '/api/mp3/play', { method: 'POST' });
       };
     }
 
     if (djPrevBtn) {
       djPrevBtn.onclick = () => {
-        fetch('/api/mp3/prev', { method: 'POST' });
+        apiFetch('/api/mp3/prev', { method: 'POST' });
       };
     }
 
     if (djNextBtn) {
       djNextBtn.onclick = () => {
-        fetch('/api/mp3/next', { method: 'POST' });
+        apiFetch('/api/mp3/next', { method: 'POST' });
+      };
+    }
+
+    if (djCueBtn) {
+      djCueBtn.onclick = () => {
+        apiFetch('/api/mp3/cue', { method: 'POST' });
       };
     }
 
@@ -1290,7 +1335,7 @@
           <span class="dj-track-duration">${durStr}</span>
         `;
         row.onclick = () => {
-          fetch('/api/mp3/track', {
+          apiFetch('/api/mp3/track', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ index: t.index })

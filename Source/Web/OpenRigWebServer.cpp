@@ -89,10 +89,86 @@ bool WebServer::startServer(int port) {
     listenSocket = (void*)(uintptr_t)sock;
     serverRunning.store(true);
 
+    loadPairingSettings();
+
     startThread(juce::Thread::Priority::normal);
     startTimerHz(30); // 30fps real-time VU and telemetry stream
 
     return true;
+}
+
+// --- Pairing / security ---
+
+juce::String WebServer::pairingToken;
+
+void WebServer::ensureTokenLoaded() {
+    if (! pairingToken.isEmpty())
+        return;
+
+    // The token lives in a file the user can copy between machines; it is
+    // generated exactly once and reused forever, so QR-paired tablets and
+    // bookmarked URLs keep working across app restarts and gigs.
+    auto pairingFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                           .getChildFile("Fanfare").getChildFile("remote_pairing.json");
+    auto parsed = juce::JSON::parse(pairingFile);
+    if (auto* obj = parsed.getDynamicObject())
+        pairingToken = obj->getProperty("token").toString();
+
+    if (pairingToken.isEmpty()) {
+        // 8 chars from an unambiguous alphabet (no 0/O, 1/I/L) so it can be
+        // typed manually as a fallback to scanning the QR code.
+        static const char* kAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+        auto& rng = juce::Random::getSystemRandom();
+        juce::String token;
+        for (int i = 0; i < 8; ++i)
+            token << kAlphabet[rng.nextInt(31)];
+        pairingToken = token;
+
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty("token", pairingToken);
+        pairingFile.getParentDirectory().createDirectory();
+        if (! pairingFile.replaceWithText(juce::JSON::toString(juce::var(obj))))
+            logToFile("WebServer: FAILED to persist pairing token to " + pairingFile.getFullPathName()
+                      + " — a new token would be regenerated on next launch");
+    }
+}
+
+void WebServer::loadPairingSettings() {
+    ensureTokenLoaded();
+
+    // Remote downloads are opt-in: the default is that only the desktop app
+    // can queue YouTube downloads, even for paired clients.
+    auto securityFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                            .getChildFile("Fanfare").getChildFile("settings").getChildFile("remote_security.json");
+    auto parsedSec = juce::JSON::parse(securityFile);
+    if (auto* secObj = parsedSec.getDynamicObject())
+        allowRemoteDownloads = (bool) secObj->getProperty("allowRemoteDownloads");
+}
+
+bool WebServer::isAuthorized(const juce::String& rawPathWithQuery, const juce::String& requestText) const {
+    if (pairingToken.isEmpty())
+        return true;
+
+    int qIdx = rawPathWithQuery.indexOf("?");
+    if (qIdx >= 0) {
+        auto query = rawPathWithQuery.substring(qIdx + 1);
+        for (const auto& pair : juce::StringArray::fromTokens(query, "&", "")) {
+            if (pair.startsWithIgnoreCase("k=") && pair.substring(2) == pairingToken)
+                return true;
+        }
+    }
+
+    int hPos = requestText.indexOfIgnoreCase("X-OpenRig-Token:");
+    if (hPos >= 0) {
+        const int nameLen = (int) juce::String("X-OpenRig-Token:").length();
+        int lineEnd = requestText.indexOf(hPos, "\r\n");
+        if (lineEnd < 0) lineEnd = requestText.indexOf(hPos, "\n");
+        auto value = requestText.substring(hPos + nameLen,
+                                           lineEnd < 0 ? requestText.length() : lineEnd).trim();
+        return value == pairingToken;
+    }
+
+    return false;
 }
 
 void WebServer::stopServer() {
@@ -157,9 +233,17 @@ void WebServer::run() {
 #endif
             SocketType clientSock = ::accept(lSock, (struct sockaddr*)&clientAddr, &clientLen);
             if (clientSock != INVALID_SOCKET_VAL) {
+                // Bound the one-thread-per-connection model: reject when the
+                // stage rig already has a handful of remotes attached.
+                if (activeConnectionCount.load() >= kMaxConnections) {
+                    SOCKET_CLOSE(clientSock);
+                    continue;
+                }
+                activeConnectionCount.fetch_add(1);
                 // Spawn a detached worker thread for each incoming connection
                 std::thread([this, clientSock]() {
                     handleClientConnection((void*)(uintptr_t)clientSock);
+                    activeConnectionCount.fetch_sub(1);
                 }).detach();
             }
         }
@@ -168,6 +252,20 @@ void WebServer::run() {
 
 void WebServer::handleClientConnection(void* socketHandle) {
     SocketType sock = (SocketType)(uintptr_t)socketHandle;
+
+    // Bound how long one slow client can hold its thread and socket. Without
+    // this a stalled tablet blocks the 30Hz telemetry broadcast for everyone
+    // (broadcastWebSocket sends to all clients under the client-set mutex).
+#if JUCE_WINDOWS
+    DWORD timeoutMs = 2000;
+    ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeoutMs, sizeof(timeoutMs));
+    ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeoutMs, sizeof(timeoutMs));
+#else
+    timeval tvTimeout{ 2, 0 };
+    ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tvTimeout, sizeof(tvTimeout));
+    ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tvTimeout, sizeof(tvTimeout));
+#endif
+
     std::vector<char> buffer(8192, 0);
 
     int bytesRead = ::recv(sock, buffer.data(), (int)buffer.size() - 1, 0);
@@ -199,6 +297,18 @@ void WebServer::handleClientConnection(void* socketHandle) {
     int qIdx = rawPath.indexOf("?");
     juce::String path = (qIdx >= 0) ? rawPath.substring(0, qIdx) : rawPath;
 
+    // Pairing gate: the API and WebSocket endpoints require the token that is
+    // embedded in the QR pairing URL (?k=...). Static assets stay open so a
+    // browser can at least load the PWA shell and see the 401 hint.
+    if (path.startsWith("/api/") || requestText.containsIgnoreCase("Upgrade: websocket")) {
+        if (!isAuthorized(rawPath, requestText)) {
+            sendHttpResponse(socketHandle, 401, "application/json",
+                             "{\"ok\":false,\"error\":\"pairing required\",\"tokenRequired\":true}");
+            SOCKET_CLOSE(sock);
+            return;
+        }
+    }
+
     // Check for WebSocket Upgrade
     if (requestText.containsIgnoreCase("Upgrade: websocket")) {
         // Extract Sec-WebSocket-Key
@@ -214,6 +324,19 @@ void WebServer::handleClientConnection(void* socketHandle) {
         }
 
         if (secKey.isNotEmpty() && handleWebSocketHandshake(socketHandle, secKey)) {
+            // Long-lived session: relax the receive timeout. The 2s HTTP-phase
+            // guard must not apply here — idle gaps between client heartbeats
+            // are normal, and killing the session on them causes a
+            // connect/disconnect loop on the clients. 60s still reaps clients
+            // that vanished without sending a close frame, freeing their
+            // thread against kMaxConnections.
+#if JUCE_WINDOWS
+            DWORD wsRecvTimeoutMs = 60000;
+            ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&wsRecvTimeoutMs, sizeof(wsRecvTimeoutMs));
+#else
+            timeval tvWs{ 60, 0 };
+            ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tvWs, sizeof(tvWs));
+#endif
             handleWebSocketSession(socketHandle);
             return;
         }
@@ -322,12 +445,11 @@ bool WebServer::handleWebSocketHandshake(void* socketHandle, const juce::String&
     auto rawSha1 = Sha1Detail::compute(combined.toStdString());
     juce::String acceptKey = juce::Base64::toBase64(rawSha1.data(), rawSha1.size());
 
-    juce::String response = 
+    juce::String response =
         "HTTP/1.1 101 Switching Protocols\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Accept: " + acceptKey + "\r\n"
-        "Access-Control-Allow-Origin: *\r\n"
         "\r\n";
 
     int sent = ::send(sock, response.toRawUTF8(), (int)response.getNumBytesAsUTF8(), 0);
@@ -611,6 +733,13 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
 }
 
 void WebServer::timerCallback() {
+    // Don't build JSON frames 30x/second for an empty room.
+    {
+        std::lock_guard<std::mutex> lock(clientSocketsMutex);
+        if (activeWsClients.empty())
+            return;
+    }
+
     // 30Hz high-frequency VU and telemetry broadcast (calibrated logarithmic dB scale)
     juce::DynamicObject::Ptr root = new juce::DynamicObject();
     root->setProperty("type", "meter");
@@ -660,6 +789,11 @@ void WebServer::notifyMp3Changed() {
 }
 
 // REST API and Static Request Router
+int WebServer::getConnectedClientCount() {
+    std::lock_guard<std::mutex> lock(clientSocketsMutex);
+    return (int) activeWsClients.size();
+}
+
 bool WebServer::handleHttpRequest(void* socketHandle, const juce::String& method, const juce::String& path, const juce::String& headers, const juce::String& body) {
     if (method == "OPTIONS") {
         sendHttpResponse(socketHandle, 200, "text/plain", "");
@@ -763,7 +897,25 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
             notifyMp3Changed();
         }
         return "{\"ok\":true}";
+    } else if (path == "/api/mp3/cue") {
+        // Jump the active deck back to its cue-in point (respects the cue mode)
+        if (auto* mp3 = engine.getMp3Player()) {
+            mp3->cueToStart();
+            notifyMp3Changed();
+        }
+        return "{\"ok\":true}";
+    } else if (path == "/api/mp3/cuemode") {
+        int m = (int) jsonPayload.getProperty("mode", 0);
+        if (auto* mp3 = engine.getMp3Player()) {
+            mp3->setCueMode((Mp3PlayerProcessor::CueMode) (m != 0 ? 1 : 0));
+            notifyMp3Changed();
+        }
+        return "{\"ok\":true,\"cueMode\":" + juce::String(m != 0 ? 1 : 0) + "}";
     } else if (path == "/api/mp3/download") {
+        // Remote downloads are opt-in (settings/remote_security.json): even a
+        // paired client may not queue YouTube grabs on the rig machine.
+        if (!allowRemoteDownloads)
+            return "{\"ok\":false,\"error\":\"Remote downloads are disabled. Enable them in the OpenRig desktop app.\"}";
         juce::String url = jsonPayload["url"].toString().trim();
         bool playNow = (bool)jsonPayload.getProperty("playNow", false);
         if (url.isNotEmpty()) {
@@ -1047,6 +1199,7 @@ juce::var WebServer::buildMp3Json() {
     obj->setProperty("isCrossfading", mp3->getIsCrossfading());
     obj->setProperty("autoDj", mp3->isAutoDjEnabled());
     obj->setProperty("crossfadeSec", (double)mp3->getCrossfadeDuration());
+    obj->setProperty("cueMode", (int)mp3->getCueMode()); // 0 = hard cut, 1 = fade
     obj->setProperty("activeBank", mp3->getActiveBankIndex());
     obj->setProperty("currentTrackIndex", mp3->getCurrentTrackIndex());
 
@@ -1144,13 +1297,15 @@ void WebServer::sendHttpResponse(void* socketHandle, int statusCode, const juce:
 
 void WebServer::sendHttpDataResponse(void* socketHandle, int statusCode, const juce::String& contentType, const void* data, size_t dataSize) {
     SocketType sock = (SocketType)(uintptr_t)socketHandle;
-    juce::String statusText = (statusCode == 200) ? "OK" : (statusCode == 404) ? "Not Found" : "Error";
+    juce::String statusText = (statusCode == 200) ? "OK" : (statusCode == 401) ? "Unauthorized"
+                              : (statusCode == 404) ? "Not Found" : "Error";
 
     std::ostringstream ss;
     ss << "HTTP/1.1 " << statusCode << " " << statusText.toStdString() << "\r\n";
     ss << "Content-Type: " << contentType.toStdString() << "\r\n";
     ss << "Content-Length: " << dataSize << "\r\n";
-    ss << "Access-Control-Allow-Origin: *\r\n";
+    // No CORS header on purpose: the PWA is served same-origin, and a wildcard
+    // here would let any webpage on a connected device drive the rig.
     ss << "Connection: close\r\n\r\n";
 
     std::string headerStr = ss.str();

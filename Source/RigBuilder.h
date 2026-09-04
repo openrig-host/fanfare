@@ -178,10 +178,19 @@ private:
         // Reuse-by-path: keep the live instance for same-path plugins.
         // This avoids creating a second concurrent instance of single-instance plugins (Kontakt, Roland Zenology/XV-5080, Super 8)
         // which block or crash in their internal singleton lock when instantiated concurrently.
-        if (curPath == newPath) {
-            logToFile("TRACE: buildOne " + label + " reusing existing plugin instance (curPath == newPath): " + newPath);
+        //
+        // ONLY when the incoming state is already applied, though. Same-path
+        // with DIFFERENT state must go through the staging build below, so the
+        // state is applied off-thread during preload — where it completes
+        // reliably because the message loop is free. Pushing state into a live
+        // instance at switch time deadlocked Kontakt 8 and Blue3 (Aug 31).
+        if (curPath == newPath && engine.pluginStateMatches(key, pv)) {
+            logToFile("TRACE: buildOne " + label + " reusing existing plugin instance (state matches): " + newPath);
             ++r.reusedCount;
             return true;
+        }
+        if (curPath == newPath) {
+            logToFile("TRACE: buildOne " + label + " same path but state differs — staging a fresh instance with the new state: " + newPath);
         }
 
         bool requiresMessageThread = newPath.containsIgnoreCase("Super 8");

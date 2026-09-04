@@ -20,8 +20,12 @@ public:
     void processBlock(juce::MidiBuffer& midi, int /*numSamples*/,
                       juce::MidiBuffer* harmonyOutput = nullptr,
                       int transposeSemis = 0) {
-        juce::MidiBuffer output;
-        juce::MidiBuffer targetOutput; // holds generated voices routed to another strip
+        // Per-block scratch buffers, cleared in place (capacity is retained by
+        // the internal storage) so the audio path never heap-allocates.
+        scratchLocal.clear();
+        scratchTarget.clear();
+        auto& output = scratchLocal;
+        auto& targetOutput = scratchTarget; // holds generated voices routed to another strip
 
         // Generated harmony voices go to destinationBuffer. When a route target
         // is active they are diverted to targetOutput (forwarded to another
@@ -197,4 +201,7 @@ public:
 
 private:
     int refCount[128];               // note -> active reference count
+    // Per-block scratch, reused across blocks to avoid heap churn on the audio thread
+    juce::MidiBuffer scratchLocal;
+    juce::MidiBuffer scratchTarget;
 };

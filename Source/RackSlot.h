@@ -29,21 +29,22 @@ class RackSlot {
 public:
   RackSlot(const juce::String &name) : slotName(name) {
     setDefaultCCs();
-    mp3Player.onPlayStarted = [this] { setBypass(false); };
   }
   ~RackSlot() = default;
 
   void prepare(double sampleRate, int maxBlockSize = 8192) {
     lastSampleRate = sampleRate;
+    lastMaxBlockSize = maxBlockSize;
     strip.prepare(sampleRate);
     arpeggiator.prepare(sampleRate);
     harmonizer.prepare(sampleRate);
     sampler.prepare(sampleRate);
-    mp3Player.prepare(sampleRate, maxBlockSize);
+    if (mp3Player)
+      mp3Player->prepare(sampleRate, maxBlockSize);
 
     // Pre-allocate scratch buffer for summed instrument rendering (audio-thread safe)
     int allocSize = juce::jmax(maxBlockSize, 8192);
-    scratchBuffer.setSize(2, allocSize);
+    scratchBuffer.setSize(32, allocSize);
     scratchBuffer.clear();
   }
 
@@ -51,7 +52,22 @@ public:
   SimpleArpeggiator& getArpeggiator() { return arpeggiator; }
   OctaveHarmonizer& getHarmonizer() { return harmonizer; }
   SamplerProcessor& getSampler() { return sampler; }
-  Mp3PlayerProcessor& getMp3Player() { return mp3Player; }
+  // DJ player is created lazily: 12 slots + 2 aux returns × (2 high-priority
+  // buffering threads + double-deck buffers + constructor file I/O) is real
+  // memory and startup cost, and nearly every gig uses at most one of them.
+  // Creation happens on the message thread (UI open, tablet control, song
+  // load with DJ content); the audio path only sees a null check.
+  Mp3PlayerProcessor& getMp3Player() {
+    if (! mp3Player) {
+      mp3Player = std::make_unique<Mp3PlayerProcessor>();
+      mp3Player->onPlayStarted = [this] { setBypass(false); };
+      mp3Player->prepare(lastSampleRate, lastMaxBlockSize);
+    }
+    return *mp3Player;
+  }
+  // Null unless this slot's DJ player has actually been used — safe to call
+  // from any thread, never creates.
+  Mp3PlayerProcessor* findMp3Player() const { return mp3Player.get(); }
 
   // Per-plugin-chain-slot settings for instrument stacking (note range, level, enable)
   struct ChainSlotSettings {
@@ -175,11 +191,13 @@ public:
     // Sampler (before plugin chain)
     sampler.processBlock(slotBuffer, midiMessages);
 
-    // MP3 Player audio streaming
-    mp3Player.processBlock(slotBuffer);
+    // MP3 Player audio streaming (absent unless this slot is used as the DJ deck)
+    if (auto *mp3 = mp3Player.get())
+      mp3->processBlock(slotBuffer);
 
-    // Harmonizer with redirection support: generated harmony notes go to harmonyBuffer
-    juce::MidiBuffer harmonyBuffer;
+    // Harmonizer with redirection support: generated harmony notes go to harmonyScratch
+    harmonyScratch.clear();
+    auto& harmonyBuffer = harmonyScratch;
     harmonizer.processBlock(midiMessages, slotBuffer.getNumSamples(),
                             &harmonyBuffer, getTransposeSemis());
 
@@ -285,10 +303,6 @@ public:
                   if (ch < scratchBuffer.getNumChannels())
                     slotBuffer.addFrom(ch, 0, scratchBuffer, ch, 0, slotBuffer.getNumSamples());
                 }
-              } else {
-                FanfareLog::safeExecutePluginCall([&]() {
-                  plugin->processBlock(slotBuffer, midiMessages);
-                }, "processBlock (" + plugin->getName() + ")");
               }
               consecutivePluginErrors.store(0);
             } catch (...) {
@@ -471,8 +485,11 @@ public:
 
     for (int ch = 0; ch < channelsToSum; ++ch) {
       const float *ptr = slotBuffer.getReadPointer(ch);
+      // Subgroup send is pre-fader (unity): the target slot's sumToFohBusOnly
+      // applies its fader to the whole accumulated bus, so scaling this send by
+      // fohLevel too would attenuate subgrouped channels twice.
       if (fohEnabled.load() && ch < destBuffer.getNumChannels()) {
-        destBuffer.addFromWithRamp(ch, 0, ptr, numSamples, lastFohLevel, fohBase);
+        destBuffer.addFrom(ch, 0, ptr, numSamples);
       }
       if (ch < aux1.getNumChannels())
         aux1.addFrom(ch, 0, ptr, numSamples, fohBase * a1Level);
@@ -480,6 +497,8 @@ public:
         aux2.addFrom(ch, 0, ptr, numSamples, fohBase * a2Level);
     }
 
+    // Keep the ramp state current even while routed to a subgroup, so the
+    // transition back to sumToBuses doesn't ramp from a stale fader value.
     lastFohLevel = fohBase;
   }
 
@@ -1016,6 +1035,7 @@ private:
   std::map<int, int> ccPassthroughMap;
   juce::SpinLock ccPassthroughLock;
   juce::MidiBuffer passthroughScratch; // pre-allocated to avoid per-block alloc
+  juce::MidiBuffer harmonyScratch;     // harmonizer output, same reuse pattern
 
   std::atomic<float> leftPeak{0.0f};
   std::atomic<float> rightPeak{0.0f};
@@ -1026,7 +1046,8 @@ private:
   SimpleArpeggiator arpeggiator;
   OctaveHarmonizer harmonizer;
   SamplerProcessor sampler;
-  Mp3PlayerProcessor mp3Player;
+  std::unique_ptr<Mp3PlayerProcessor> mp3Player; // lazy — see getMp3Player()
+  int lastMaxBlockSize = 8192;
 
   FanfareDSP::ChannelStripProcessor strip;
 

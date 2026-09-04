@@ -12,7 +12,7 @@
 #include <atomic>
 #include <cmath>
 
-class Mp3PlayerProcessor {
+class Mp3PlayerProcessor : private juce::Timer {
 public:
     enum class LoopMode { Off, RepeatTrack, RepeatAll };
 
@@ -47,8 +47,13 @@ public:
     struct PlaylistBank {
         int index = 0;
         juce::String name;
+        juce::String playlistPath;
         juce::String folderPath;
         std::vector<TrackInfo> tracks;
+
+        PlaylistBank() = default;
+        PlaylistBank(int idx, const juce::String& n, const juce::String& p = {}, const std::vector<TrackInfo>& t = {})
+            : index(idx), name(n), playlistPath(p), folderPath(p), tracks(t) {}
     };
 
     std::function<void()> onPlayStarted;
@@ -64,7 +69,10 @@ public:
         bufferingThreadA.startThread(juce::Thread::Priority::high);
         bufferingThreadB.startThread(juce::Thread::Priority::high);
 
+        startTimerHz(30); // drains audio-thread engine events (see timerCallback)
+
         loadBpmCache();
+        loadPlayerSettings();
         initializeDefaultBanks();
         loadBanksFromSettings();
         loadLastFolderFromSettings();
@@ -73,13 +81,16 @@ public:
     ~Mp3PlayerProcessor() {
         isShuttingDown.store(true);
         playing.store(false);
-        
+        stopTimer();
+
         stopDeckInternal(0);
         stopDeckInternal(1);
 
         bufferingThreadA.stopThread(1000);
         bufferingThreadB.stopThread(1000);
     }
+
+    juce::AudioFormatManager& getFormatManager() { return formatManager; }
 
     // --- Deck State Struct ---
     struct Deck {
@@ -101,6 +112,18 @@ public:
         juce::AudioBuffer<float> rawBuffer;
         juce::AudioBuffer<float> buffer;
 
+        juce::SpinLock deckLock;
+        int playlistTrackIndex = -1;
+
+        // --- Cue-fade state machine ---
+        // Audio thread owns cueEnv (plain float, audio thread is the only
+        // reader/writer while the transport runs). Message thread flips phases
+        // and performs the actual jump via the engine-event queue.
+        enum CuePhase { CueIdle = 0, CueFadeOut = 1, CueMuted = 2, CueFadeIn = 3 };
+        std::atomic<int> cuePhase{CueIdle};
+        float cueEnv = 1.0f;
+        double cueTargetSec = 0.0; // written by message thread, read on the timer jump
+
         void prepare(double hostSampleRate, int maxBlockSize) {
             currentHostSampleRate = hostSampleRate > 0.0 ? hostSampleRate : 44100.0;
             int allocSize = juce::jmax(maxBlockSize * 2, 32768);
@@ -113,11 +136,13 @@ public:
         }
 
         void reset() {
+            juce::SpinLock::ScopedLockType dl(deckLock);
             isPlaying.store(false);
             isLoaded.store(false);
             gain.store(0.0f);
             tempoRatio.store(1.0f);
             sourceSampleRate = 44100.0;
+            playlistTrackIndex = -1;
             timeStretcher.reset();
             timeStretcher.setTempoRatio(1.0f);
 
@@ -126,6 +151,8 @@ public:
             rawSource.reset();
             trackMemory.setSize(0);
             trackInfo = TrackInfo();
+            cuePhase.store(CueIdle);
+            cueEnv = 1.0f;
         }
 
         void setTempoRatio(float ratio) {
@@ -140,6 +167,12 @@ public:
         // Flawless Native JUCE Audio Streaming with Pitch/KeyLock Support
         void renderBlock(int numSamples, bool useKeyLock) {
             if (!isPlaying.load() || !isLoaded.load()) {
+                buffer.clear();
+                return;
+            }
+
+            juce::SpinLock::ScopedTryLockType dl(deckLock);
+            if (!dl.isLocked()) {
                 buffer.clear();
                 return;
             }
@@ -181,6 +214,112 @@ public:
         levelerR.setEnabled(true);
     }
 
+    // --- Audio-thread -> message-thread engine events (lock-free, single producer/single consumer) ---
+    // The audio callback must not allocate, so MessageManager::callAsync is off
+    // limits there. Completion conditions detected while mixing are queued here
+    // and dispatched from timerCallback() on the message thread.
+    enum class EngineEventType { CrossfadeCompleted = 0, AutoDjCrossfade, TrackFinished, CueJumpNow };
+
+    static constexpr int kEngineEventCapacity = 16;
+    juce::AbstractFifo engineEventFifo { kEngineEventCapacity };
+    struct EngineEventSlot { int type = 0; int deckIdx = 0; };
+    EngineEventSlot engineEventSlots[kEngineEventCapacity];
+
+    void pushEngineEvent(EngineEventType type, int deckIdx) {
+        int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+        engineEventFifo.prepareToWrite(1, start1, size1, start2, size2);
+        if (size1 > 0 || size2 > 0) {
+            engineEventSlots[size1 > 0 ? start1 : start2] = { (int) type, deckIdx };
+            engineEventFifo.finishedWrite(1);
+        }
+        // Queue full: drop. The consumer drains at 30Hz and events are rare,
+        // so this should never happen; a dropped CrossfadeCompleted only
+        // defers preloading until the next track change.
+    }
+
+    void timerCallback() override {
+        int start1 = 0, size1 = 0, start2 = 0, size2 = 0;
+        const int numReady = engineEventFifo.getNumReady();
+        if (numReady <= 0) return;
+        engineEventFifo.prepareToRead(numReady, start1, size1, start2, size2);
+        for (int i = 0; i < size1; ++i) handleEngineEvent(engineEventSlots[start1 + i]);
+        for (int i = 0; i < size2; ++i) handleEngineEvent(engineEventSlots[start2 + i]);
+        engineEventFifo.finishedRead(size1 + size2);
+    }
+
+    void handleEngineEvent(const EngineEventSlot& e) {
+        switch ((EngineEventType) e.type) {
+            case EngineEventType::CrossfadeCompleted: {
+                Deck& finishedDeck = (e.deckIdx == 0) ? deckA : deckB;
+                finishedDeck.transportSource.stop();
+                preloadNextTrackIntoOtherDeck();
+                break;
+            }
+            case EngineEventType::AutoDjCrossfade:
+                triggerCrossfadeToDeck(1 - e.deckIdx);
+                break;
+            case EngineEventType::TrackFinished:
+                onTrackFinished();
+                break;
+            case EngineEventType::CueJumpNow: {
+                // Deck is fully muted; safe to move the playhead audibly.
+                Deck& d = (e.deckIdx == 0) ? deckA : deckB;
+                d.transportSource.setPosition(d.cueTargetSec);
+                d.cuePhase.store(Deck::CueFadeIn, std::memory_order_release);
+                break;
+            }
+        }
+    }
+
+    // --- Cue behaviour: hard cut vs. fade ---
+    // HardCut jumps the playhead instantly (classic CDJ cue). Fade mutes the
+    // deck over ~80ms, jumps on the message thread while silent, then ramps
+    // back in — no click, at the cost of a short dip.
+    enum class CueMode { HardCut = 0, Fade = 1 };
+    std::atomic<int> cueMode{(int) CueMode::HardCut};
+
+    void setCueMode(CueMode m) {
+        cueMode.store((int) m);
+        persistPlayerSettings();
+    }
+    CueMode getCueMode() const { return (CueMode) cueMode.load(); }
+
+    void cueToStart(int deckId = -1) {
+        if (deckId < 0) deckId = activeDeckIndex.load();
+        Deck& deck = (deckId == 0) ? deckA : deckB;
+        double target = deck.trackInfo.cueInSeconds > 0.0 ? deck.trackInfo.cueInSeconds : 0.0;
+
+        if ((CueMode) cueMode.load() == CueMode::Fade && deck.isPlaying.load() &&
+            deck.cuePhase.load(std::memory_order_acquire) == Deck::CueIdle) {
+            deck.cueTargetSec = target;
+            deck.cuePhase.store(Deck::CueFadeOut, std::memory_order_release);
+        } else {
+            // Hard cut, deck paused, or a fade already in flight: jump now.
+            deck.cueTargetSec = target;
+            deck.transportSource.setPosition(target);
+        }
+    }
+
+    void loadPlayerSettings() {
+        auto f = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                     .getChildFile("Fanfare").getChildFile("mp3_settings.json");
+        auto parsed = juce::JSON::parse(f);
+        if (auto* obj = parsed.getDynamicObject()) {
+            auto v = obj->getProperty("cueMode");
+            if (! v.isVoid())
+                cueMode.store((int) v);
+        }
+    }
+
+    void persistPlayerSettings() {
+        auto* obj = new juce::DynamicObject();
+        obj->setProperty("cueMode", cueMode.load());
+        auto f = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                     .getChildFile("Fanfare").getChildFile("mp3_settings.json");
+        f.getParentDirectory().createDirectory();
+        f.replaceWithText(juce::JSON::toString(juce::var(obj)));
+    }
+
     void processBlock(juce::AudioBuffer<float>& outBuffer) {
         if (!playing.load() || isShuttingDown.load()) return;
 
@@ -190,9 +329,6 @@ public:
         if (capSamples < numSamples) numSamples = capSamples;
 
         mixBuffer.clear();
-
-        juce::SpinLock::ScopedTryLockType lock(audioLock);
-        if (!lock.isLocked()) return;
 
         // Process active crossfade progression
         float xfadeDuration = crossfadeDurationSec.load();
@@ -213,7 +349,37 @@ public:
             deckB.renderBlock(numSamples, useKeyLock);
         }
 
-        // Sample-by-sample Equal Power Crossfade Mixing
+        // Crossfade progression is advanced once per block (an atomic RMW per
+        // sample is real contention on the audio thread). Gains interpolate
+        // linearly between the block-start and block-end progress values,
+        // which tracks the equal-power curve within one block's resolution.
+        float prog = crossfadeProgress.load();
+        int targetDeck = activeDeckIndex.load();
+        float progStart = prog;
+        float progEnd = prog;
+        if (isCrossfading.load()) {
+            float newProg = (targetDeck == 1)
+                ? juce::jmin(1.0f, prog + xfadeStep * numSamples)
+                : juce::jmax(0.0f, prog - xfadeStep * numSamples);
+            crossfadeProgress.store(newProg);
+            progEnd = newProg;
+            if (newProg >= 1.0f || newProg <= 0.0f) {
+                isCrossfading.store(false);
+                Deck& finishedDeck = (targetDeck == 1) ? deckA : deckB;
+                finishedDeck.isPlaying.store(false);
+                finishedDeck.gain.store(0.0f);
+                autoDjTriggered.store(false);
+                pushEngineEvent(EngineEventType::CrossfadeCompleted, targetDeck == 1 ? 0 : 1);
+            }
+        }
+
+        float manualPos = manualCrossfadePos.load();
+        if (manualPos >= 0.0f) {
+            progStart = manualPos;
+            progEnd = manualPos;
+        }
+
+        // Calculate Equal-Power (3dB Sine/Cosine) gains
         float* mixL = mixBuffer.getWritePointer(0);
         float* mixR = mixBuffer.getNumChannels() > 1 ? mixBuffer.getWritePointer(1) : nullptr;
 
@@ -223,66 +389,66 @@ public:
         const float* deckBL = deckB.buffer.getReadPointer(0);
         const float* deckBR = deckB.buffer.getNumChannels() > 1 ? deckB.buffer.getReadPointer(1) : nullptr;
 
-        for (int i = 0; i < numSamples; ++i) {
-            if (isCrossfading.load()) {
-                float curProg = crossfadeProgress.load();
-                int targetDeck = activeDeckIndex.load();
-                if (targetDeck == 1) {
-                    // Fading from A to B
-                    curProg = juce::jmin(1.0f, curProg + xfadeStep);
-                    crossfadeProgress.store(curProg);
-                    if (curProg >= 1.0f) {
-                        isCrossfading.store(false);
-                        deckA.transportSource.stop();
-                        deckA.isPlaying.store(false);
-                        deckA.gain.store(0.0f);
-                    }
-                } else {
-                    // Fading from B to A
-                    curProg = juce::jmax(0.0f, curProg - xfadeStep);
-                    crossfadeProgress.store(curProg);
-                    if (curProg <= 0.0f) {
-                        isCrossfading.store(false);
-                        deckB.transportSource.stop();
-                        deckB.isPlaying.store(false);
-                        deckB.gain.store(0.0f);
-                    }
+        const float kHalfPi = 1.57079632679f; // pi/2
+        const float progLerp = (numSamples > 1) ? (progEnd - progStart) / (float)(numSamples - 1) : 0.0f;
+
+        // Cue-fade envelopes: ~80ms ramps, stepped per block (inaudible at this
+        // resolution). Mute -> jump -> ramp-in is handed off through the
+        // engine-event queue so the playhead only moves while silent.
+        const float cueEnvStep = numSamples / (0.08f * (float) juce::jmax(8000.0, currentSampleRate));
+        auto stepCueEnv = [&](Deck& deck, float& env) {
+            int phase = deck.cuePhase.load(std::memory_order_acquire);
+            if (phase == Deck::CueFadeOut) {
+                env = juce::jmax(0.0f, env - cueEnvStep);
+                if (env <= 0.0f) {
+                    deck.cuePhase.store(Deck::CueMuted, std::memory_order_release);
+                    pushEngineEvent(EngineEventType::CueJumpNow, deck.deckId);
                 }
+            } else if (phase == Deck::CueFadeIn) {
+                env = juce::jmin(1.0f, env + cueEnvStep);
+                if (env >= 1.0f)
+                    deck.cuePhase.store(Deck::CueIdle, std::memory_order_release);
+            } else if (phase == Deck::CueIdle && env < 1.0f) {
+                env = 1.0f;
             }
+        };
+        float envA = deckA.cueEnv;
+        float envB = deckB.cueEnv;
+        stepCueEnv(deckA, envA);
+        stepCueEnv(deckB, envB);
+        deckA.cueEnv = envA;
+        deckB.cueEnv = envB;
 
-            // Calculate Equal-Power (3dB Sine/Cosine) gains
-            float prog = crossfadeProgress.load(); // 0 = Deck A fully active, 1 = Deck B fully active
-            if (manualCrossfadePos.load() >= 0.0f) {
-                prog = manualCrossfadePos.load();
-            }
+        for (int i = 0; i < numSamples; ++i) {
+            float p = progStart + progLerp * (float) i;
+            float gainA = std::cos(p * kHalfPi); // cos(prog * pi/2)
+            float gainB = std::sin(p * kHalfPi); // sin(prog * pi/2)
 
-            float gainA = std::cos(prog * 1.57079632679f); // cos(prog * pi/2)
-            float gainB = std::sin(prog * 1.57079632679f); // sin(prog * pi/2)
-
-            if (!deckA.isPlaying.load()) gainA = 0.0f;
-            if (!deckB.isPlaying.load()) gainB = 0.0f;
-
-            deckA.gain.store(gainA);
-            deckB.gain.store(gainB);
+            if (!deckAPlaying) gainA = 0.0f;
+            if (!deckBPlaying) gainB = 0.0f;
 
             float sL = 0.0f;
             float sR = 0.0f;
 
             if (deckAPlaying) {
-                sL += deckAL[i] * gainA;
-                if (deckAR != nullptr) sR += deckAR[i] * gainA;
-                else sR += deckAL[i] * gainA;
+                sL += deckAL[i] * gainA * envA;
+                if (deckAR != nullptr) sR += deckAR[i] * gainA * envA;
+                else sR += deckAL[i] * gainA * envA;
             }
 
             if (deckBPlaying) {
-                sL += deckBL[i] * gainB;
-                if (deckBR != nullptr) sR += deckBR[i] * gainB;
-                else sR += deckBL[i] * gainB;
+                sL += deckBL[i] * gainB * envB;
+                if (deckBR != nullptr) sR += deckBR[i] * gainB * envB;
+                else sR += deckBL[i] * gainB * envB;
             }
 
             mixL[i] = sL;
             if (mixR != nullptr) mixR[i] = sR;
         }
+
+        // Publish the end-of-block gains once for UI/meter readers
+        deckA.gain.store(deckAPlaying ? std::cos(progEnd * kHalfPi) : 0.0f);
+        deckB.gain.store(deckBPlaying ? std::sin(progEnd * kHalfPi) : 0.0f);
 
         // Apply Leveler Dynamics (Auto-Normalization)
         if (levelerEnabled.load()) {
@@ -307,7 +473,7 @@ public:
         // Auto-DJ Detection (Check if active song is near completion and crossfade to next track)
         int activeIdx = activeDeckIndex.load();
         Deck& curDeck = (activeIdx == 0) ? deckA : deckB;
-        if (curDeck.isPlaying.load() && !isCrossfading.load()) {
+        if (curDeck.isPlaying.load() && !isCrossfading.load() && !autoDjTriggered.load()) {
             double curPos = curDeck.transportSource.getCurrentPosition();
             double curLen = curDeck.transportSource.getLengthInSeconds();
 
@@ -320,14 +486,11 @@ public:
                 double remaining = effectiveEnd - curPos;
                 float xfadeSec = crossfadeDurationSec.load();
                 if (autoDjEnabled.load() && remaining <= (double)xfadeSec && remaining > 0.1) {
-                    // Trigger seamless Auto-DJ crossfade to next song
-                    juce::MessageManager::callAsync([this]() {
-                        nextTrack(true);
-                    });
+                    autoDjTriggered.store(true);
+                    pushEngineEvent(EngineEventType::AutoDjCrossfade, activeIdx);
                 } else if (remaining <= 0.05 || curDeck.transportSource.hasStreamFinished()) {
-                    juce::MessageManager::callAsync([this]() {
-                        onTrackFinished();
-                    });
+                    autoDjTriggered.store(true);
+                    pushEngineEvent(EngineEventType::TrackFinished, activeIdx);
                 }
             }
         }
@@ -362,6 +525,11 @@ public:
         deckB.transportSource.stop();
         deckA.isPlaying.store(false);
         deckB.isPlaying.store(false);
+        // A pause mid-fade would otherwise leave the deck muted forever.
+        deckA.cuePhase.store(Deck::CueIdle);
+        deckA.cueEnv = 1.0f;
+        deckB.cuePhase.store(Deck::CueIdle);
+        deckB.cueEnv = 1.0f;
         playing.store(false);
         if (onTrackChanged) onTrackChanged();
     }
@@ -369,8 +537,37 @@ public:
     void stop() {
         stopDeckInternal(0);
         stopDeckInternal(1);
+        deckA.cuePhase.store(Deck::CueIdle);
+        deckA.cueEnv = 1.0f;
+        deckB.cuePhase.store(Deck::CueIdle);
+        deckB.cueEnv = 1.0f;
         playing.store(false);
         if (onTrackChanged) onTrackChanged();
+    }
+
+    void preloadNextTrackIntoOtherDeck() {
+        juce::ScopedLock sl(playlistLock);
+        if (playlist.empty() || currentTrackIndex < 0) return;
+
+        int activeIdx = activeDeckIndex.load();
+        int otherDeckIdx = 1 - activeIdx;
+        Deck& otherDeck = (otherDeckIdx == 0) ? deckA : deckB;
+
+        int nextIdx = currentTrackIndex + 1;
+        if (nextIdx >= (int)playlist.size()) {
+            if (loopMode == LoopMode::RepeatAll) nextIdx = 0;
+            else nextIdx = -1;
+        }
+
+        if (nextIdx >= 0 && nextIdx < (int)playlist.size()) {
+            const auto& nextTrack = playlist[nextIdx];
+            if (!otherDeck.isLoaded.load() || otherDeck.trackInfo.file != nextTrack.file) {
+                loadTrackIntoDeck(otherDeckIdx, nextTrack.file, nextTrack, nextIdx);
+                otherDeck.isPlaying.store(false);
+                otherDeck.gain.store(0.0f);
+                if (onTrackChanged) onTrackChanged();
+            }
+        }
     }
 
     void playTrack(int index, bool startPlaying = true) {
@@ -380,56 +577,40 @@ public:
         currentTrackIndex = index;
         const auto& track = playlist[index];
 
-        // Determine which deck to load into
-        int activeIdx = activeDeckIndex.load();
-        int targetDeckIdx = 0;
+        // 1. Selected track loads into Deck A as primary deck
+        activeDeckIndex.store(0);
+        crossfadeProgress.store(0.0f);
+        isCrossfading.store(false);
 
-        if (!deckA.isLoaded.load() && !deckB.isLoaded.load()) {
-            // Initial load into Deck A
-            targetDeckIdx = 0;
-            loadTrackIntoDeck(0, track.file, track);
-            crossfadeProgress.store(0.0f);
-            activeDeckIndex.store(0);
-            isCrossfading.store(false);
-            if (startPlaying) {
-                deckA.transportSource.start();
-                deckA.isPlaying.store(true);
-                playing.store(true);
-            }
+        loadTrackIntoDeck(0, track.file, track, index);
+        if (startPlaying) {
+            deckA.transportSource.start();
+            deckA.isPlaying.store(true);
+            deckA.gain.store(1.0f);
+            playing.store(true);
         } else {
-            // Load into alternate deck and crossfade
-            targetDeckIdx = 1 - activeIdx;
-            loadTrackIntoDeck(targetDeckIdx, track.file, track);
-
-            if (startPlaying) {
-                Deck& targetDeck = (targetDeckIdx == 0) ? deckA : deckB;
-                Deck& outgoingDeck = (targetDeckIdx == 0) ? deckB : deckA;
-
-                targetDeck.transportSource.start();
-                targetDeck.isPlaying.store(true);
-                playing.store(true);
-                activeDeckIndex.store(targetDeckIdx);
-
-                // Auto Beat-Sync if enabled
-                if (beatSyncEnabled.load()) {
-                    syncDeckToOther(targetDeckIdx);
-                }
-
-                float dur = crossfadeDurationSec.load();
-                if (dur > 0.05f && outgoingDeck.isPlaying.load()) {
-                    // Start smooth crossfade
-                    isCrossfading.store(true);
-                } else {
-                    // Instant cut
-                    isCrossfading.store(false);
-                    crossfadeProgress.store((targetDeckIdx == 0) ? 0.0f : 1.0f);
-                    outgoingDeck.transportSource.stop();
-                    outgoingDeck.isPlaying.store(false);
-                    outgoingDeck.gain.store(0.0f);
-                }
-            }
+            deckA.isPlaying.store(false);
+            deckA.gain.store(1.0f);
         }
 
+        // 2. Next track in the playlist automatically cues up in Deck B
+        int nextIdx = index + 1;
+        if (nextIdx >= (int)playlist.size()) {
+            if (loopMode == LoopMode::RepeatAll) nextIdx = 0;
+            else nextIdx = -1;
+        }
+
+        if (nextIdx >= 0 && nextIdx < (int)playlist.size()) {
+            const auto& nextTrack = playlist[nextIdx];
+            loadTrackIntoDeck(1, nextTrack.file, nextTrack, nextIdx);
+            deckB.isPlaying.store(false);
+            deckB.gain.store(0.0f);
+        } else {
+            stopDeckInternal(1);
+        }
+
+        manualCrossfadePos.store(-1.0f);
+        if (startPlaying && onPlayStarted) onPlayStarted();
         if (onTrackChanged) onTrackChanged();
     }
 
@@ -437,23 +618,26 @@ public:
         juce::ScopedLock sl(playlistLock);
         if (playlist.empty()) return;
 
-        int nextIdx = currentTrackIndex + 1;
-        if (shuffleEnabled && playlist.size() > 1) {
-            std::random_device rd;
-            std::mt19937 g(rd());
-            std::uniform_int_distribution<int> dis(0, (int)playlist.size() - 1);
-            int randIdx = dis(g);
-            if (randIdx == currentTrackIndex) randIdx = (randIdx + 1) % playlist.size();
-            nextIdx = randIdx;
-        } else if (nextIdx >= (int)playlist.size()) {
-            if (loopMode == LoopMode::RepeatAll) {
-                nextIdx = 0;
-            } else {
-                return;
-            }
-        }
+        int activeIdx = activeDeckIndex.load();
+        int otherDeckIdx = 1 - activeIdx;
 
-        playTrack(nextIdx, autoCrossfade);
+        if (autoCrossfade) {
+            triggerCrossfadeToDeck(otherDeckIdx);
+        } else {
+            int nextIdx = currentTrackIndex + 1;
+            if (shuffleEnabled && playlist.size() > 1) {
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::uniform_int_distribution<int> dis(0, (int)playlist.size() - 1);
+                int randIdx = dis(g);
+                if (randIdx == currentTrackIndex) randIdx = (randIdx + 1) % playlist.size();
+                nextIdx = randIdx;
+            } else if (nextIdx >= (int)playlist.size()) {
+                if (loopMode == LoopMode::RepeatAll) nextIdx = 0;
+                else return;
+            }
+            playTrack(nextIdx, true);
+        }
     }
 
     void prevTrack() {
@@ -474,56 +658,46 @@ public:
         playTrack(prevIdx, true);
     }
 
-    bool loadTrackIntoDeck(int deckId, const juce::File& file, const TrackInfo& info) {
+    bool loadTrackIntoDeck(int deckId, const juce::File& file, const TrackInfo& info, int playlistIdx = -1) {
         if (!file.existsAsFile()) return false;
 
         Deck& targetDeck = (deckId == 0) ? deckA : deckB;
         auto& bufferThread = (deckId == 0) ? bufferingThreadA : bufferingThreadB;
 
-        // Reset target deck
+        // 1. File reader created entirely OUTSIDE the audio lock
+        std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+        if (reader == nullptr) return false;
+
+        double srcRate = (reader->sampleRate > 0.0) ? reader->sampleRate : (currentSampleRate > 0.0 ? currentSampleRate : 44100.0);
+        auto rawSrc = std::make_unique<juce::AudioFormatReaderSource>(reader.release(), true);
+
+        // 2. Lock ONLY the target deck being loaded (the other playing deck continues with 0 disruption)
         {
-            juce::SpinLock::ScopedLockType al(audioLock);
-            targetDeck.reset();
-        }
+            juce::SpinLock::ScopedLockType dl(targetDeck.deckLock);
+            targetDeck.transportSource.stop();
+            targetDeck.transportSource.setSource(nullptr);
+            targetDeck.rawSource = std::move(rawSrc);
+            targetDeck.sourceSampleRate = srcRate;
+            targetDeck.transportSource.setSource(targetDeck.rawSource.get(), 65536, &bufferThread, srcRate, 2);
+            targetDeck.transportSource.prepareToPlay(4096, currentSampleRate > 0.0 ? currentSampleRate : 44100.0);
 
-        // Cache file into memory for instant seek & glitch-free streaming
-        juce::FileInputStream fin(file);
-        if (fin.openedOk()) {
-            targetDeck.trackMemory.setSize((size_t)fin.getTotalLength());
-            fin.read(targetDeck.trackMemory.getData(), (size_t)targetDeck.trackMemory.getSize());
+            targetDeck.trackInfo = info;
+            targetDeck.playlistTrackIndex = playlistIdx;
+            targetDeck.isLoaded.store(true);
 
-            auto memStream = std::make_unique<juce::MemoryInputStream>(targetDeck.trackMemory.getData(), targetDeck.trackMemory.getSize(), false);
-            std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(std::move(memStream)));
-
-            if (reader != nullptr) {
-                double srcRate = (reader->sampleRate > 0.0) ? reader->sampleRate : currentSampleRate;
-                targetDeck.sourceSampleRate = srcRate;
-                targetDeck.rawSource = std::make_unique<juce::AudioFormatReaderSource>(reader.release(), true);
-                
-                // AudioTransportSource provides high-quality polyphase anti-aliased resampling + thread buffering
-                targetDeck.transportSource.setSource(targetDeck.rawSource.get(), 65536, &bufferThread, srcRate, 2);
-                targetDeck.transportSource.prepareToPlay(4096, currentSampleRate);
-
-                juce::SpinLock::ScopedLockType al(audioLock);
-                targetDeck.trackInfo = info;
-                targetDeck.isLoaded.store(true);
-
-                if (info.cueInSeconds > 0.0) {
-                    targetDeck.transportSource.setPosition(info.cueInSeconds);
-                } else {
-                    targetDeck.transportSource.setPosition(0.0);
-                }
-
-                targetDeck.setTempoRatio(1.0f);
-                return true;
+            if (info.cueInSeconds > 0.0) {
+                targetDeck.transportSource.setPosition(info.cueInSeconds);
+            } else {
+                targetDeck.transportSource.setPosition(0.0);
             }
+
+            targetDeck.setTempoRatio(1.0f);
         }
 
-        return false;
+        return true;
     }
 
     void stopDeckInternal(int deckId) {
-        juce::SpinLock::ScopedLockType al(audioLock);
         Deck& deck = (deckId == 0) ? deckA : deckB;
         deck.reset();
     }
@@ -572,6 +746,7 @@ public:
     void playDeck(int deckId) {
         Deck& d = (deckId == 0) ? deckA : deckB;
         if (d.isLoaded.load()) {
+            autoDjTriggered.store(false);
             if (d.transportSource.hasStreamFinished()) {
                 d.transportSource.setPosition(d.trackInfo.cueInSeconds > 0.0 ? d.trackInfo.cueInSeconds : 0.0);
             }
@@ -619,10 +794,10 @@ public:
     }
 
     void setDeckPosition(int deckId, double seconds) {
-        juce::SpinLock::ScopedLockType al(audioLock);
         Deck& d = (deckId == 0) ? deckA : deckB;
         if (d.isLoaded.load()) {
-            d.transportSource.setPosition(seconds);
+            juce::SpinLock::ScopedLockType dl(d.deckLock);
+            d.transportSource.setPosition(juce::jmax(0.0, seconds));
         }
     }
 
@@ -715,29 +890,63 @@ public:
     void triggerCrossfadeToDeck(int targetDeckId, float customDuration = -1.0f) {
         if (targetDeckId != 0 && targetDeckId != 1) return;
         Deck& target = (targetDeckId == 0) ? deckA : deckB;
+        Deck& outgoing = (targetDeckId == 0) ? deckB : deckA;
+
+        autoDjTriggered.store(false);
+
+        // 1. If target deck is not loaded, auto-load next track from playlist
+        if (!target.isLoaded.load()) {
+            juce::ScopedLock sl(playlistLock);
+            if (!playlist.empty()) {
+                int nextIdx = currentTrackIndex + 1;
+                if (nextIdx >= (int)playlist.size()) {
+                    if (loopMode == LoopMode::RepeatAll) nextIdx = 0;
+                    else nextIdx = -1;
+                }
+                if (nextIdx >= 0 && nextIdx < (int)playlist.size()) {
+                    loadTrackIntoDeck(targetDeckId, playlist[nextIdx].file, playlist[nextIdx], nextIdx);
+                }
+            }
+        }
+
         if (!target.isLoaded.load()) return;
 
-        // Auto Beat-Sync if enabled
-        if (beatSyncEnabled.load()) {
+        // Update currentTrackIndex to target deck's index
+        if (target.playlistTrackIndex >= 0) {
+            currentTrackIndex = target.playlistTrackIndex;
+        }
+
+        // 2. Make sure target transport starts playback from cue-in or playhead
+        if (target.transportSource.hasStreamFinished()) {
+            target.transportSource.setPosition(target.trackInfo.cueInSeconds > 0.0 ? target.trackInfo.cueInSeconds : 0.0);
+        } else if (!target.isPlaying.load() && target.transportSource.getCurrentPosition() <= 0.001) {
+            target.transportSource.setPosition(target.trackInfo.cueInSeconds > 0.0 ? target.trackInfo.cueInSeconds : 0.0);
+        }
+
+        target.transportSource.start();
+        target.isPlaying.store(true);
+        playing.store(true);
+
+        // 3. Auto Beat-Sync if enabled
+        if (beatSyncEnabled.load() && outgoing.isPlaying.load()) {
             syncDeckToOther(targetDeckId);
         }
 
+        // 4. Trigger the smooth equal-power crossfade
         float dur = (customDuration > 0.0f) ? customDuration : crossfadeDurationSec.load();
-        if (dur <= 0.05f) {
+        if (dur <= 0.05f || !outgoing.isPlaying.load()) {
             isCrossfading.store(false);
             crossfadeProgress.store((targetDeckId == 0) ? 0.0f : 1.0f);
             activeDeckIndex.store(targetDeckId);
-            target.isPlaying.store(true);
             stopDeckInternal(1 - targetDeckId);
-            playing.store(true);
+            preloadNextTrackIntoOtherDeck();
         } else {
             crossfadeDurationSec.store(dur);
             isCrossfading.store(true);
             activeDeckIndex.store(targetDeckId);
-            target.isPlaying.store(true);
-            playing.store(true);
         }
         manualCrossfadePos.store(-1.0f);
+        if (onPlayStarted) onPlayStarted();
         if (onTrackChanged) onTrackChanged();
     }
 
@@ -1214,23 +1423,72 @@ public:
     }
 
     // --- Playlist Preset Banks ---
+
     void initializeDefaultBanks() {
         banks.clear();
-        banks.push_back({ 0, "HITS", "", {} });
-        banks.push_back({ 1, "OLDIES", "", {} });
-        banks.push_back({ 2, "DINNER", "", {} });
-        banks.push_back({ 3, "DANCE", "", {} });
-        banks.push_back({ 4, "BALLADS", "", {} });
+        banks.push_back({ 0, "DANCE", "", {} });
+        banks.push_back({ 1, "WARMUP", "", {} });
+        banks.push_back({ 2, "COCKTAIL", "", {} });
+        banks.push_back({ 3, "INTERMISSION", "", {} });
+        banks.push_back({ 4, "PARTY", "", {} });
         banks.push_back({ 5, "BREAK", "", {} });
     }
 
     const std::vector<PlaylistBank>& getBanks() const { return banks; }
 
+    void renameBank(int bankIndex, const juce::String& newName) {
+        if (bankIndex < 0 || bankIndex >= (int)banks.size()) return;
+        banks[bankIndex].name = newName;
+        saveBanksToSettings();
+        if (onBanksChanged) onBanksChanged();
+    }
+
+    void assignBankPlaylistFile(int bankIndex, const juce::File& playlistFile, const juce::String& optionalName = "") {
+        if (bankIndex < 0 || bankIndex >= (int)banks.size()) return;
+        if (!playlistFile.existsAsFile()) return;
+
+        banks[bankIndex].playlistPath = playlistFile.getFullPathName();
+        if (optionalName.isNotEmpty()) {
+            banks[bankIndex].name = optionalName;
+        } else {
+            banks[bankIndex].name = playlistFile.getFileNameWithoutExtension();
+        }
+
+        loadPlaylist(playlistFile);
+        banks[bankIndex].tracks = playlist;
+
+        saveBanksToSettings();
+        if (onBanksChanged) onBanksChanged();
+        if (onPlaylistChanged) onPlaylistChanged();
+    }
+
+    void assignCurrentPlaylistToBank(int bankIndex, const juce::String& optionalName = "") {
+        if (bankIndex < 0 || bankIndex >= (int)banks.size()) return;
+        juce::ScopedLock sl(playlistLock);
+        if (playlist.empty()) return;
+
+        banks[bankIndex].tracks = playlist;
+        if (optionalName.isNotEmpty()) {
+            banks[bankIndex].name = optionalName;
+        }
+
+        auto playlistsDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("Fanfare").getChildFile("Playlists");
+        if (!playlistsDir.exists()) playlistsDir.createDirectory();
+
+        juce::String cleanName = banks[bankIndex].name.replaceCharacter(' ', '_').replaceCharacter('/', '_');
+        auto pFile = playlistsDir.getChildFile("Preset_" + juce::String(bankIndex + 1) + "_" + cleanName + ".json");
+        savePlaylist(pFile);
+        banks[bankIndex].playlistPath = pFile.getFullPathName();
+
+        saveBanksToSettings();
+        if (onBanksChanged) onBanksChanged();
+    }
+
     void assignBankFolder(int bankIndex, const juce::File& folder, const juce::String& optionalName = "") {
         if (bankIndex < 0 || bankIndex >= (int)banks.size()) return;
         if (!folder.isDirectory()) return;
 
-        banks[bankIndex].folderPath = folder.getFullPathName();
+        banks[bankIndex].playlistPath = folder.getFullPathName();
         if (optionalName.isNotEmpty()) {
             banks[bankIndex].name = optionalName;
         }
@@ -1267,25 +1525,27 @@ public:
 
     void loadBank(int bankIndex, bool startPlaying = true) {
         if (bankIndex < 0 || bankIndex >= (int)banks.size()) return;
-        const auto& bank = banks[bankIndex];
+        auto& bank = banks[bankIndex];
 
-        std::vector<TrackInfo> newTracks = bank.tracks;
-        if (newTracks.empty() && bank.folderPath.isNotEmpty()) {
-            juce::File f(bank.folderPath);
-            if (f.isDirectory()) {
+        // 1. If bank has a playlist file path, reload it dynamically from disk to ensure fresh contents
+        if (bank.playlistPath.isNotEmpty()) {
+            juce::File f(bank.playlistPath);
+            if (f.existsAsFile()) {
+                loadPlaylist(f);
+                bank.tracks = playlist;
+            } else if (f.isDirectory()) {
                 assignBankFolder(bankIndex, f, bank.name);
-                newTracks = banks[bankIndex].tracks;
             }
         }
 
-        if (newTracks.empty()) return;
+        if (bank.tracks.empty()) return;
 
         activeBankIndex = bankIndex;
         bool wasPlaying = playing.load();
 
         {
             juce::ScopedLock sl(playlistLock);
-            playlist = newTracks;
+            playlist = bank.tracks;
             currentTrackIndex = 0;
         }
 
@@ -1318,7 +1578,7 @@ public:
             auto* bo = new juce::DynamicObject();
             bo->setProperty("index", b.index);
             bo->setProperty("name", b.name);
-            bo->setProperty("folderPath", b.folderPath);
+            bo->setProperty("playlistPath", b.playlistPath);
             bankArray.add(juce::var(bo));
         }
 
@@ -1347,11 +1607,13 @@ public:
                     const auto& v = arr->getReference(i);
                     if (v.isObject()) {
                         banks[i].name = v.getProperty("name", banks[i].name).toString();
-                        banks[i].folderPath = v.getProperty("folderPath", "").toString();
-                        if (banks[i].folderPath.isNotEmpty()) {
-                            juce::File dir(banks[i].folderPath);
-                            if (dir.isDirectory()) {
-                                assignBankFolder(i, dir, banks[i].name);
+                        banks[i].playlistPath = v.getProperty("playlistPath", v.getProperty("folderPath", "")).toString();
+                        if (banks[i].playlistPath.isNotEmpty()) {
+                            juce::File f(banks[i].playlistPath);
+                            if (f.existsAsFile()) {
+                                assignBankPlaylistFile(i, f, banks[i].name);
+                            } else if (f.isDirectory()) {
+                                assignBankFolder(i, f, banks[i].name);
                             }
                         }
                     }
@@ -1380,6 +1642,8 @@ public:
 
     void setCrossfadeDuration(float seconds) { crossfadeDurationSec.store(juce::jlimit(0.0f, 15.0f, seconds)); }
     float getCrossfadeDuration() const { return crossfadeDurationSec.load(); }
+    float getCrossfadeProgress() const { return crossfadeProgress.load(); }
+    bool isCrossfadingActive() const { return isCrossfading.load(); }
 
     void setAutoDjEnabled(bool enabled) { autoDjEnabled.store(enabled); }
     bool isAutoDjEnabled() const { return autoDjEnabled.load(); }
@@ -1691,6 +1955,7 @@ private:
     std::atomic<float> crossfadeProgress{0.0f}; // 0.0 (Deck A) to 1.0 (Deck B)
     std::atomic<float> crossfadeDurationSec{4.0f}; // 4 seconds equal-power crossfade
     std::atomic<bool> autoDjEnabled{true};
+    std::atomic<bool> autoDjTriggered{false};
     std::atomic<bool> beatSyncEnabled{false};
     std::atomic<SyncMode> syncMode{SyncMode::CleanVinyl};
     std::atomic<float> manualCrossfadePos{-1.0f};

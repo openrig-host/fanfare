@@ -136,10 +136,13 @@ public:
             engine.applyRig(*sharedRig);
             doneEvent->signal();
         });
-        if (!doneEvent->wait(60000)) {
-            logToFile("ERROR: applyRig timed out (60s)");
+        // 120s: applyRig now bounds each reused-plugin state push at 10s
+        // (abandon-and-continue), so several stubborn plugins can legitimately
+        // take a while — but the whole apply must still finish.
+        if (!doneEvent->wait(120000)) {
+            logToFile("ERROR: applyRig timed out (120s)");
             engine.clearStagingCache();
-            postComplete(false, "Apply timed out (60s) — possible plugin hang", 0);
+            postComplete(false, "Apply timed out (120s) — possible plugin hang", 0);
             return;
         }
         logToFile("TRACE: RigTransitioner applyRig finished.");

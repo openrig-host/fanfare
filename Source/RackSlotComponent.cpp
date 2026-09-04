@@ -928,12 +928,8 @@ void RackSlotComponent::resized() {
   arpButton.setBounds(2, centerY - 24, sideWidth, 24);
   samplerButton.setBounds(2, centerY + 4, sideWidth, 24);
   
-  if (slotIndex == 10 || slot.getName() == "Slot 11") {
-    mp3Button.setVisible(true);
-    mp3Button.setBounds(2, centerY + 32, sideWidth, 24);
-  } else {
-    mp3Button.setVisible(false);
-  }
+  mp3Button.setVisible(true);
+  mp3Button.setBounds(2, centerY + 32, sideWidth, 24);
 
   saveStripBtn.setBounds(rightX, centerY - 24, sideWidth, 24);
   loadStripBtn.setBounds(rightX, centerY + 4, sideWidth, 24);

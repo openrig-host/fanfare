@@ -71,6 +71,7 @@ public:
   void resetAudioDevice();
   void showAboutDialog();
   void showConfigOverlay();
+  void prepareForShutdown();
   void setActiveMidiNoteLearner(juce::Component* learner) { activeMidiNoteLearner = learner; }
   double getCpuUsage() { return deviceManager.getCpuUsage() * 100.0; }
   int getAudioUnderruns() const { return audioUnderrunCount.load(); }
@@ -92,8 +93,10 @@ private:
   juce::TextButton loadBtn{"LOAD RIG"};
   juce::TextButton gigNotepadBtn{"NOTEPAD"};
   juce::TextButton webRemoteBtn{"REMOTE"};
-  juce::TextButton prevSetlistBtn{"<<"};
-  juce::TextButton nextSetlistBtn{">>"};
+  juce::TextButton hotspotBtn{"HOTSPOT"};
+  juce::TextButton gigCheckBtn{"GIG OK"};
+  juce::TextButton prevSetlistBtn{"<"};
+  juce::TextButton nextSetlistBtn{">"};
   juce::TextButton panicBtn{"PANIC"};
   juce::TextButton resetAudioBtn{"RESET AUDIO"};
   juce::TextButton exitBtn{"EXIT"};
@@ -118,6 +121,14 @@ private:
   void showResourceInspectorModal();
   void showGigNotepadWindow();
   void showWebRemoteDialog();
+  void updateHotspotButtonState();
+  void updateGigSafetyState();
+  void openAudioMidiSettings();
+
+  // Cached MIDI device enumeration for the gig-safety check: WinMM/MIDI-service
+  // enumeration is not free, so it runs on a slow cadence, not every timer tick.
+  juce::Array<juce::MidiDeviceInfo> gigCheckMidiDevices;
+  juce::int64 gigCheckLastMidiEnumMs = 0;
   
   int currentSetupIndex = 0;
 
@@ -212,11 +223,12 @@ private:
   void logAudioGlitch(double actualMs, double expectedMs);
   void logAudioNanSpike(int channel, int sampleIndex, float badVal);
 
-  juce::Label setupNameLabel{"setupNameLabel", "No rig loaded"};
+  juce::Label setupNameLabel{"setupNameLabel", "CURRENT: No rig loaded"};
+  juce::String currentRigTitle{"No Rig Loaded"};
   juce::ImageComponent logoComponent;
   juce::Image logoImage;
   juce::Label clockLabel{"clockLabel", ""};
-  juce::Label preloadStatusLabel{"preloadStatusLabel", ""};
+  juce::Label preloadStatusLabel{"preloadStatusLabel", "NEXT: -- (End of Set)"};
   juce::Rectangle<int> headerBounds;
   juce::Rectangle<int> masterColumnBounds;
   juce::ComboBox schemeSelector;

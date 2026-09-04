@@ -40,8 +40,27 @@ public:
 
 #ifdef _WIN32
     FanfareLog::setupCrashHandlers();
-#endif
+#else
     juce::SystemStats::setApplicationCrashHandler(FanfareLog::crashHandler);
+#endif
+
+    // Single-instance guard: ASIO drivers are single-client — a second launch
+    // comes up fully functional but SILENT while the first instance keeps the
+    // device. Refuse loudly instead of letting that happen.
+    singleInstanceLock =
+        std::make_unique<juce::InterProcessLock>("OpenRig_Fanfare_SingleInstance");
+    if (!singleInstanceLock->enter(0)) { // try-acquire; held forever after
+      singleInstanceLock.reset();
+      juce::NativeMessageBox::showMessageBoxAsync(
+          juce::MessageBoxIconType::WarningIcon,
+          "OpenRig is already running",
+          "Another OpenRig instance holds the audio device. "
+          "Close it first (check Task Manager for Fanfare.exe), "
+          "then launch again.",
+          nullptr,
+          juce::ModalCallbackFunction::create([this](int) { quit(); }));
+      return; // no window; the alert closes the app on OK
+    }
 
     mainWindow.reset(new MainWindow(getApplicationName()));
   }
@@ -49,12 +68,20 @@ public:
   void shutdown() override {
     LOG_INFO("Fanfare shutting down cleanly. Flushing log and terminating process...");
     FanfareLog::flushLog();
+
+#ifdef _WIN32
+    // Close ASIO device before TerminateProcess to prevent leaving the driver
+    // in a degraded state (680ms callback intervals on next launch).
+    if (mainWindow != nullptr) {
+      if (auto *mc = dynamic_cast<MainComponent *>(mainWindow->getContentComponent()))
+        mc->prepareForShutdown();
+    }
+#endif
+
     mainWindow = nullptr; // (deletes our window)
 
 #ifdef _WIN32
-    // Restore default Windows timer resolution
     timeEndPeriod(1);
-    // Force terminate process to prevent zombie VST threads from locking ASIO/MIDI drivers
     TerminateProcess(GetCurrentProcess(), 0);
 #endif
   }
@@ -119,6 +146,7 @@ public:
   };
 
 private:
+  std::unique_ptr<juce::InterProcessLock> singleInstanceLock;
   std::unique_ptr<MainWindow> mainWindow;
 };
 

@@ -71,12 +71,9 @@ public:
     toFront(true);
   }
   ~PluginWindow() override {
-    if (auto* content = getContentComponent()) {
+    FanfareLog::safeExecutePluginCall([this]() {
       clearContentComponent();
-      FanfareLog::safeExecutePluginCall([content]() {
-        delete content;
-      }, "PluginEditor destructor");
-    }
+    }, "PluginEditor destructor");
   }
 
   void closeButtonPressed() override {
@@ -108,11 +105,11 @@ MainComponent::MainComponent() {
   // libraries when other applications demand RAM. 512 MB min / 2 GB max keeps
   // Kontakt/sample-based plugins resident through system activity spikes.
   SIZE_T wsMin = 512ULL * 1024 * 1024;
-  SIZE_T wsMax = 2048ULL * 1024 * 1024;
+  SIZE_T wsMax = (SIZE_T)-1;
   if (!SetProcessWorkingSetSize(GetCurrentProcess(), wsMin, wsMax)) {
-    LOG_WARN("Failed to lock process working set (512 MB - 2 GB)");
+    LOG_WARN("Failed to set process working set minimum (512 MB)");
   } else {
-    LOG_INFO("Process working set locked: min 512 MB, max 2 GB");
+    LOG_INFO("Process working set configured: min 512 MB, max unlimited");
   }
 #endif
   // Initialize MIDI collector with default rate
@@ -449,9 +446,9 @@ void MainComponent::setupSlotComponents() {
       mp3Overlay.reset(new Mp3PlayerComponent(slot->getMp3Player(), [this] {
         mp3Overlay.reset();
         resized();
-      }));
+      }, slot->getName()));
       addAndMakeVisible(mp3Overlay.get());
-      mp3Overlay->centreWithSize(780, 580);
+      mp3Overlay->centreWithSize(880, 620);
     };
 
     // Note Range Dialog (CallOutBox)
@@ -693,48 +690,24 @@ void MainComponent::setupHeaderButtons() {
   audioSettingsBtn.setColour(juce::TextButton::buttonColourId,
                              ThemeManager::get(Theme::Role::accent));
   audioSettingsBtn.setTooltip("Audio & MIDI Setup: Low-latency driver configuration, sample rates & MIDI routing.");
-  audioSettingsBtn.onClick = [this] {
-    auto *selector = new juce::AudioDeviceSelectorComponent(
-        deviceManager, 0, FanfareConstants::kDefaultInputChannels, 0,
-        FanfareConstants::kDefaultOutputChannels, true, true, true, false);
-    selector->setSize(500, 400);
-    juce::DialogWindow::LaunchOptions options;
-    options.content.setOwned(selector);
-    options.dialogTitle = "Audio & MIDI Settings";
-    options.dialogBackgroundColour = ThemeManager::get(Theme::Role::panel);
-    options.escapeKeyTriggersCloseButton = true;
-    options.useNativeTitleBar = true;
-    options.resizable = false;
-    options.launchAsync();
-  };
+  audioSettingsBtn.onClick = [this] { openAudioMidiSettings(); };
 
-  // MIDI Monitor
-  addAndMakeVisible(midiMonitorLabel);
+  // Gig safety indicator: red + problem list when the rig isn't stage-ready
+  // (wrong driver type, oversized buffer, no MIDI inputs). Click = audio settings.
+  addAndMakeVisible(gigCheckBtn);
+  gigCheckBtn.onClick = [this] { openAudioMidiSettings(); };
+  updateGigSafetyState();
+
+  // MIDI Monitor label and toggle — hidden from header, accessible via gear menu
   midiMonitorLabel.setFont(juce::FontOptions(14.0f, juce::Font::bold));
   midiMonitorLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::midiNote));
+  midiMonitorLabel.setVisible(false);
 
-  // MIDI Monitor toggle button
-  addAndMakeVisible(midiMonitorToggle);
   midiMonitorToggle.setColour(juce::TextButton::buttonColourId,
                               ThemeManager::get(Theme::Role::ok));
   midiMonitorToggle.setColour(juce::TextButton::buttonOnColourId,
                               ThemeManager::get(Theme::Role::ok).brighter(0.3f));
-  midiMonitorToggle.onClick = [this] {
-    midiMonitorVisible = !midiMonitorVisible;
-    if (midiMonitorVisible) {
-      if (!midiMonitorPanel) {
-        midiMonitorPanel = std::make_unique<MidiMonitorComponent>();
-        addChildComponent(midiMonitorPanel.get());
-      }
-      midiMonitorPanel->setVisible(true);
-      midiMonitorToggle.setToggleState(true, juce::dontSendNotification);
-    } else {
-      if (midiMonitorPanel)
-        midiMonitorPanel->setVisible(false);
-      midiMonitorToggle.setToggleState(false, juce::dontSendNotification);
-    }
-    resized();
-  };
+  midiMonitorToggle.setVisible(false);
 
   // Legacy aboutBtn replaced by clickable Fanfare logo
   aboutBtn.setVisible(false);
@@ -747,8 +720,51 @@ void MainComponent::setupHeaderButtons() {
                             juce::Colours::transparentBlack, gearImg, 1.0f,
                             juce::Colours::white.withAlpha(0.25f), gearImg,
                             1.0f, juce::Colours::white.withAlpha(0.5f));
-  settingsGearBtn.onClick = [this] { showConfigOverlay(); };
-  settingsGearBtn.setTooltip("Settings");
+  settingsGearBtn.onClick = [this] {
+    juce::PopupMenu menu;
+    menu.addItem(1, "Gig Notepad (Ctrl+N)");
+    menu.addItem(2, "Web Remote / Tablet HUD");
+    menu.addSeparator();
+    menu.addItem(3, juce::String("MIDI Monitor") + (midiMonitorVisible ? " (ON)" : ""),
+                true, midiMonitorVisible);
+    menu.addSeparator();
+    menu.addItem(10, "Settings (Audio, Plugins, Routing...)");
+
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(settingsGearBtn),
+      [this](int result) {
+        if (result == 1) {
+          showGigNotepadWindow();
+        } else if (result == 2) {
+          showWebRemoteDialog();
+        } else if (result == 3) {
+          midiMonitorVisible = !midiMonitorVisible;
+          if (midiMonitorVisible) {
+            if (!midiMonitorPanel) {
+              midiMonitorPanel = std::make_unique<MidiMonitorComponent>();
+              addChildComponent(midiMonitorPanel.get());
+            }
+            midiMonitorPanel->setVisible(true);
+          } else {
+            if (midiMonitorPanel)
+              midiMonitorPanel->setVisible(false);
+          }
+          resized();
+        } else if (result == 10) {
+          showConfigOverlay();
+        }
+      });
+  };
+  settingsGearBtn.setTooltip("Menu: Notepad, Remote, MIDI Monitor, Settings");
+
+  // Hotspot / Web Remote status button: click opens the Remote & Hotspot panel.
+  // Red = not running · Yellow = hotspot up, no device attached · Green = device connected.
+  addAndMakeVisible(hotspotBtn);
+  hotspotBtn.onClick = [this] { showWebRemoteDialog(); };
+  hotspotBtn.setTooltip(
+      "Stage Hotspot / Web Remote.\n"
+      "RED: hotspot off · YELLOW: hotspot on, no device connected · GREEN: tablet/browser attached.\n"
+      "Click to open the Remote panel (QR pairing, hotspot control).");
+  updateHotspotButtonState();
 
   // The individual settings buttons are now surfaced through the gear overlay.
   // Their handlers are retained so the overlay can invoke them.
@@ -841,17 +857,17 @@ void MainComponent::setupHeaderButtons() {
                           });
   };
 
-  // Gig Notepad & Stage Notes button
-  addAndMakeVisible(gigNotepadBtn);
+  // Gig Notepad & Stage Notes — hidden from header, accessible via gear menu
   gigNotepadBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
   gigNotepadBtn.setTooltip("Open Gig Notepad & Stage Notes for Current Setup (Ctrl+N)");
   gigNotepadBtn.onClick = [this] { showGigNotepadWindow(); };
+  gigNotepadBtn.setVisible(false);
 
-  // Web Remote HUD button
-  addAndMakeVisible(webRemoteBtn);
+  // Web Remote HUD — hidden from header, accessible via gear menu
   webRemoteBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
   webRemoteBtn.setTooltip("Open Web Remote HUD Settings & Tablet Connection URL");
   webRemoteBtn.onClick = [this] { showWebRemoteDialog(); };
+  webRemoteBtn.setVisible(false);
 
   // Prev / Next Setlist buttons
   addAndMakeVisible(prevSetlistBtn);
@@ -878,8 +894,8 @@ void MainComponent::setupHeaderButtons() {
 
   // CPU/RAM monitors
   addAndMakeVisible(cpuLabel);
-  cpuLabel.setFont(juce::FontOptions(12.0f));
-  cpuLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
+  cpuLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
+  cpuLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::ok));
   cpuLabel.setTooltip("Click to view Per-VST Memory & Resource Inspector");
   cpuLabel.addMouseListener(this, false);
 
@@ -896,7 +912,7 @@ void MainComponent::setupHeaderButtons() {
   xrunsLabel.addMouseListener(this, false);
 
   addAndMakeVisible(setupNameLabel);
-  setupNameLabel.setFont(juce::FontOptions(22.0f, juce::Font::bold));
+  setupNameLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
   setupNameLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
   setupNameLabel.setJustificationType(juce::Justification::centredLeft);
 
@@ -916,9 +932,9 @@ void MainComponent::setupHeaderButtons() {
   clockLabel.setJustificationType(juce::Justification::centred);
 
   addAndMakeVisible(preloadStatusLabel);
-  preloadStatusLabel.setFont(juce::FontOptions(13.0f, juce::Font::italic));
-  preloadStatusLabel.setJustificationType(juce::Justification::centredRight);
-  preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
+  preloadStatusLabel.setFont(juce::FontOptions(12.5f, juce::Font::bold));
+  preloadStatusLabel.setJustificationType(juce::Justification::centredLeft);
+  preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::ok));
   updatePreloadStatus();
 }
 
@@ -1309,6 +1325,13 @@ void MainComponent::resetAudioDevice() {
                            true, "", &setup);
 }
 
+void MainComponent::prepareForShutdown() {
+  stopTimer();
+  deviceManager.removeAudioCallback(this);
+  deviceManager.closeAudioDevice();
+  engine.releaseAllPlugins();
+}
+
 void MainComponent::showAboutDialog() {
   auto *w = new juce::AlertWindow(
       "About Fanfare",
@@ -1544,25 +1567,34 @@ void MainComponent::updatePreloadStatus() {
     }
   }
 
+  // Update Current Rig Display
+  juce::String curName = currentRigTitle;
+  if (activeIdx >= 0 && activeIdx < sm.getSetups().size()) {
+    curName = sm.getSetups()[activeIdx].getFileNameWithoutExtension();
+  }
+  setupNameLabel.setText("CURRENT: " + curName, juce::dontSendNotification);
+
+  // Update Next Song Display
   if (preloadTarget.existsAsFile()) {
     preloadStatusLabel.setVisible(true);
     juce::String nextName = preloadTarget.getFileNameWithoutExtension();
     if (sm.isPreloading()) {
-      preloadStatusLabel.setText("Preloading next: " + nextName + "...", juce::dontSendNotification);
+      preloadStatusLabel.setText("NEXT: " + nextName + "  [PRELOADING...]", juce::dontSendNotification);
       preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
     } else if (sm.isPreloaded()) {
-      preloadStatusLabel.setText("Next Ready: " + nextName, juce::dontSendNotification);
+      preloadStatusLabel.setText("NEXT: " + nextName + "  [READY]", juce::dontSendNotification);
       preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::ok));
     } else if (sm.isPreloadFailed()) {
-      preloadStatusLabel.setText("Preload Failed: " + nextName, juce::dontSendNotification);
+      preloadStatusLabel.setText("NEXT: " + nextName + "  [FAILED]", juce::dontSendNotification);
       preloadStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xffff4444));
     } else {
-      preloadStatusLabel.setText("Next: " + nextName + " (Not Preloaded)", juce::dontSendNotification);
-      preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
+      preloadStatusLabel.setText("NEXT: " + nextName + "  [READY]", juce::dontSendNotification);
+      preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::ok));
     }
   } else {
-    preloadStatusLabel.setText("", juce::dontSendNotification);
-    preloadStatusLabel.setVisible(false);
+    preloadStatusLabel.setText("NEXT: -- (End of Set)", juce::dontSendNotification);
+    preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
+    preloadStatusLabel.setVisible(true);
   }
 }
 
@@ -1632,49 +1664,52 @@ void MainComponent::paint(juce::Graphics &g) {
 void MainComponent::resized() {
   auto r = getLocalBounds();
 
-  // Header area - Row 1: Stage View (Logo Emblem + setup name + setlist nav)
-  auto stageHeader = r.removeFromTop(38);
+  // Single Consolidated Master Stage Header (Row 1 - 44px)
+  auto stageHeader = r.removeFromTop(44);
+  headerBounds = stageHeader;
+
+  // Left Section: Emblem, Library toggle, Settings Gear
   if (logoComponent.isVisible()) {
-    logoComponent.setBounds(stageHeader.removeFromLeft(40).reduced(2));
+    logoComponent.setBounds(stageHeader.removeFromLeft(36).reduced(2));
   }
-  setupNameLabel.setBounds(stageHeader.removeFromLeft(350).reduced(4));
+  toggleLibraryBtn.setBounds(stageHeader.removeFromLeft(28).reduced(3));
+  settingsGearBtn.setBounds(stageHeader.removeFromLeft(38).reduced(4));
 
-  // Right side: Setlist Navigation
-  nextSetlistBtn.setBounds(stageHeader.removeFromRight(55).reduced(3));
-  prevSetlistBtn.setBounds(stageHeader.removeFromRight(55).reduced(3));
-  preloadStatusLabel.setBounds(stageHeader.removeFromRight(140).reduced(4));
+  // Unified Song HUD Card: Current & Next together
+  int hudWidth = juce::jmin(440, juce::jmax(260, stageHeader.getWidth() / 4));
+  auto songHudArea = stageHeader.removeFromLeft(hudWidth).reduced(2);
+  setupNameLabel.setBounds(songHudArea.removeFromTop(22));
+  preloadStatusLabel.setBounds(songHudArea);
 
-  // Header area - Row 2: Controls, Telemetry & Clock
-  auto controlBar = r.removeFromTop(34);
-  headerBounds = stageHeader.getUnion(controlBar);
+  // Setlist Nav step buttons (< and >)
+  prevSetlistBtn.setBounds(stageHeader.removeFromLeft(36).reduced(3));
+  nextSetlistBtn.setBounds(stageHeader.removeFromLeft(36).reduced(3));
 
-  // Left Controls
-  toggleLibraryBtn.setBounds(controlBar.removeFromLeft(30).reduced(3));
-  settingsGearBtn.setBounds(controlBar.removeFromLeft(44).reduced(4));
-  midiMonitorLabel.setBounds(controlBar.removeFromLeft(130).reduced(4));
-  midiMonitorToggle.setBounds(controlBar.removeFromLeft(75).reduced(4));
+  // Right Section: Live Actions (Exit, Panic, Save Rig, Load Rig)
+  exitBtn.setBounds(stageHeader.removeFromRight(56).reduced(4));
+  panicBtn.setBounds(stageHeader.removeFromRight(70).reduced(4));
+  saveBtn.setBounds(stageHeader.removeFromRight(82).reduced(4));
+  loadBtn.setBounds(stageHeader.removeFromRight(82).reduced(4));
+  hotspotBtn.setBounds(stageHeader.removeFromRight(124).reduced(4));
+  gigCheckBtn.setBounds(stageHeader.removeFromRight(124).reduced(4));
 
-  // Right Actions
-  exitBtn.setBounds(controlBar.removeFromRight(60).reduced(4));
-  panicBtn.setBounds(controlBar.removeFromRight(75).reduced(4));
-  saveBtn.setBounds(controlBar.removeFromRight(85).reduced(4));
-  loadBtn.setBounds(controlBar.removeFromRight(85).reduced(4));
-  webRemoteBtn.setBounds(controlBar.removeFromRight(75).reduced(4));
-  gigNotepadBtn.setBounds(controlBar.removeFromRight(75).reduced(4));
-
-  // Center: Telemetry + Clock packed together
-  auto centerBar = controlBar.reduced(4, 2);
-  int telemetryWidth = 68;
-  int clockWidth = 90;
-  int xrunsWidth = 85;
-  int totalCenter = telemetryWidth * 3 + xrunsWidth + clockWidth;
+  // Center Section: Enlarged CPU & Telemetry Cluster
+  auto centerBar = stageHeader.reduced(4, 2);
+  int cpuW = 82;
+  int ramW = 68;
+  int latW = 66;
+  int xrunW = 78;
+  int clockW = 84;
+  int totalCenter = cpuW + ramW + latW + xrunW + clockW;
   int startX = centerBar.getCentreX() - totalCenter / 2;
-  cpuLabel.setBounds(startX, centerBar.getY(), telemetryWidth, centerBar.getHeight());
-  ramLabel.setBounds(startX + telemetryWidth, centerBar.getY(), telemetryWidth, centerBar.getHeight());
+  if (startX < centerBar.getX()) startX = centerBar.getX();
+
+  cpuLabel.setBounds(startX, centerBar.getY(), cpuW, centerBar.getHeight());
+  ramLabel.setBounds(startX + cpuW, centerBar.getY(), ramW, centerBar.getHeight());
   latencyLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
-  latencyLabel.setBounds(startX + telemetryWidth * 2, centerBar.getY(), telemetryWidth, centerBar.getHeight());
-  xrunsLabel.setBounds(startX + telemetryWidth * 3, centerBar.getY(), xrunsWidth, centerBar.getHeight());
-  clockLabel.setBounds(startX + telemetryWidth * 3 + xrunsWidth, centerBar.getY(), clockWidth, centerBar.getHeight());
+  latencyLabel.setBounds(startX + cpuW + ramW, centerBar.getY(), latW, centerBar.getHeight());
+  xrunsLabel.setBounds(startX + cpuW + ramW + latW, centerBar.getY(), xrunW, centerBar.getHeight());
+  clockLabel.setBounds(startX + cpuW + ramW + latW + xrunW, centerBar.getY(), clockW, centerBar.getHeight());
 
   // Header area - Row 2: stage queue buttons
   auto presetRow = r.removeFromTop(38);
@@ -1789,7 +1824,7 @@ void MainComponent::resized() {
   if (samplerOverlay)
     samplerOverlay->centreWithSize(720, 600);
   if (mp3Overlay)
-    mp3Overlay->centreWithSize(680, 520);
+    mp3Overlay->centreWithSize(880, 620);
   if (setupBuilderOverlay)
     setupBuilderOverlay->centreWithSize(400, 480);
   if (resourceInspectorOverlay)
@@ -1849,13 +1884,15 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
                 hideLoadingOverlay();
                 closeOrphanedPluginWindows();
                 if (ok) {
-                    setupNameLabel.setText(fileName, juce::dontSendNotification);
+                    currentRigTitle = fileName;
+                    setupNameLabel.setText("CURRENT: " + fileName, juce::dontSendNotification);
                     for (auto *comp : rackSlotComponents) {
                         comp->updateOutputSelector();
                         comp->repaint();
                     }
                     repaint();
                     refreshSceneButtons();
+                    updatePreloadStatus();
                     // Active-queue highlighting is driven by updatePreloadStatus()
                     // via the SetlistManager change broadcaster (setActiveIndex).
                     midiMonitorLabel.setText("RIG: " + message,
@@ -1958,9 +1995,19 @@ void MainComponent::loadButtonMappings() {
 }
 
 void MainComponent::timerCallback() {
+  updateHotspotButtonState();
+  updateGigSafetyState();
+
   double cpu = deviceManager.getCpuUsage() * 100.0;
-  cpuLabel.setText("CPU: " + juce::String(cpu, 1) + "%",
+  cpuLabel.setText("CPU: " + juce::String((int)std::round(cpu)) + "%",
                    juce::dontSendNotification);
+  if (cpu < 50.0) {
+    cpuLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::ok));
+  } else if (cpu < 75.0) {
+    cpuLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
+  } else {
+    cpuLabel.setColour(juce::Label::textColourId, juce::Colour(0xffff4444));
+  }
 
   static int memUpdateTicks = 19;
   if (++memUpdateTicks >= 20) {
@@ -2139,8 +2186,8 @@ void MainComponent::loadRigFromFile(const juce::File &file, int targetSetlistInd
   if (!file.existsAsFile())
     return;
   loadRigAsync(file, -1, targetSetlistIndex);
-  setupNameLabel.setText(file.getFileNameWithoutExtension(),
-                         juce::dontSendNotification);
+  currentRigTitle = file.getFileNameWithoutExtension();
+  updatePreloadStatus();
 }
 
 void MainComponent::showScanResultsDialog(const FanfareEngine::ScanResults &results) {
@@ -2362,6 +2409,104 @@ void MainComponent::showWebRemoteDialog() {
   addAndMakeVisible(*stageRemoteOverlay);
   stageRemoteOverlay->setBounds(getLocalBounds());
   stageRemoteOverlay->toFront(true);
+}
+
+void MainComponent::updateHotspotButtonState() {
+  int clients = webServer ? webServer->getConnectedClientCount() : 0;
+  auto hsState = hotspotController ? hotspotController->getState()
+                                   : OpenRig::StageHotspotController::State::Stopped;
+
+  juce::Colour colour;
+  juce::String text;
+  if (clients > 0) {
+    // A device browser is attached — the remote is genuinely live, whether it
+    // arrived via the hotspot or via venue Wi-Fi / USB tethering.
+    colour = juce::Colour(0xFF3FB950); // green
+    text = "HOTSPOT: " + juce::String(clients);
+  } else if (hsState == OpenRig::StageHotspotController::State::Active ||
+             hsState == OpenRig::StageHotspotController::State::Starting) {
+    colour = juce::Colour(0xFFD29922); // yellow
+    text = "HOTSPOT READY";
+  } else {
+    colour = juce::Colour(0xFFDA3633); // red
+    text = "HOTSPOT OFF";
+  }
+
+  if (hotspotBtn.getButtonText() != text) {
+    hotspotBtn.setButtonText(text);
+    hotspotBtn.setColour(juce::TextButton::buttonColourId, colour);
+    hotspotBtn.repaint();
+  }
+}
+
+void MainComponent::openAudioMidiSettings() {
+  auto *selector = new juce::AudioDeviceSelectorComponent(
+      deviceManager, 0, FanfareConstants::kDefaultInputChannels, 0,
+      FanfareConstants::kDefaultOutputChannels, true, true, true, false);
+  selector->setSize(500, 400);
+  juce::DialogWindow::LaunchOptions options;
+  options.content.setOwned(selector);
+  options.dialogTitle = "Audio & MIDI Settings";
+  options.dialogBackgroundColour = ThemeManager::get(Theme::Role::panel);
+  options.escapeKeyTriggersCloseButton = true;
+  options.useNativeTitleBar = true;
+  options.resizable = false;
+  options.launchAsync();
+}
+
+void MainComponent::updateGigSafetyState() {
+  juce::StringArray problems;
+
+  // 1. The ASIO lesson: a non-ASIO driver silently costs 10-50x the latency.
+  auto *device = deviceManager.getCurrentAudioDevice();
+  if (device == nullptr) {
+    problems.add("no audio device active");
+  } else {
+    juce::String typeName = device->getTypeName();
+    if (! typeName.containsIgnoreCase("ASIO"))
+      problems.add("audio driver is " + typeName + " (not ASIO)");
+
+    // 2. Buffer sanity: >512 samples means double-digit milliseconds of
+    //    latency — fine for desktop tinkering, hostile on stage.
+    int buf = deviceManager.getAudioDeviceSetup().bufferSize;
+    if (buf > 512)
+      problems.add(juce::String(buf) + "-sample buffer (~" +
+                   juce::String(1000.0 * buf / juce::jmax(1.0, device->getCurrentSampleRate()), 1) + "ms)");
+  }
+
+  // 3. A rig with zero enabled MIDI inputs can't make a sound on stage.
+  //    isMidiInputDeviceEnabled (by identifier) is the modern API — the
+  //    name-based isMidiInputEnabled() is deprecated and never matches
+  //    devices enabled via addMidiInputDeviceCallback(identifier).
+  //    Device enumeration is cached: only re-enumerate every 10 seconds.
+  juce::int64 nowMs = juce::Time::getMillisecondCounter();
+  if (gigCheckMidiDevices.isEmpty() || nowMs - gigCheckLastMidiEnumMs > 10000) {
+    gigCheckMidiDevices = juce::MidiInput::getAvailableDevices();
+    gigCheckLastMidiEnumMs = nowMs;
+  }
+  int enabledMidi = 0;
+  for (const auto &midiDev : gigCheckMidiDevices)
+    if (deviceManager.isMidiInputDeviceEnabled(midiDev.identifier))
+      ++enabledMidi;
+  if (enabledMidi == 0)
+    problems.add("no MIDI inputs enabled");
+
+  if (problems.isEmpty()) {
+    if (gigCheckBtn.getButtonText() != "GIG OK") {
+      gigCheckBtn.setButtonText("GIG OK");
+      gigCheckBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF238636));
+      gigCheckBtn.repaint();
+    }
+    gigCheckBtn.setTooltip("Gig safety: ASIO driver, latency and MIDI inputs all look stage-ready.\nClick to open Audio & MIDI Settings.");
+  } else {
+    if (gigCheckBtn.getButtonText() != "NOT GIG-SAFE") {
+      gigCheckBtn.setButtonText("NOT GIG-SAFE");
+      gigCheckBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFFDA3633));
+      gigCheckBtn.repaint();
+    }
+    gigCheckBtn.setTooltip("NOT GIG-SAFE:\n- " + problems.joinIntoString("\n- ")
+                           + "\nClick to open Audio & MIDI Settings.");
+  }
 }
 
 

@@ -1,4 +1,5 @@
 #include "StageRemoteModalOverlay.h"
+#include "OpenRigWebServer.h"
 #include "../Theme.h"
 
 namespace OpenRig {
@@ -134,7 +135,10 @@ void StageRemoteModalOverlay::updateQrCodes() {
     auto ips = StageHotspotController::getAvailableIpAddresses();
     juce::String primaryIp = ips[0];
     if (hotspotController.isActive()) primaryIp = "192.168.137.1";
-    juce::String url = "http://" + primaryIp + ":" + juce::String(port);
+    // The pairing token rides in the URL (?k=...); the server rejects API and
+    // WebSocket traffic from clients that don't present it.
+    juce::String url = "http://" + primaryIp + ":" + juce::String(port)
+                     + "?k=" + WebServer::getPairingToken();
 
     primaryUrlLabel.setText(url, juce::dontSendNotification);
     webQrComponent.setPayload(url);
@@ -164,7 +168,11 @@ void StageRemoteModalOverlay::updateStatusDisplay(StageHotspotController::State 
     } else if (state == StageHotspotController::State::Error) {
         hotspotToggleBtn.setButtonText("START STAGE HOTSPOT");
         hotspotToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF238636));
-        hotspotStatusLabel.setText("Error: " + msg, juce::dontSendNotification);
+        // Most common cause: the rig has no active network at all (Windows
+        // needs one connection profile to anchor the hotspot). USB tethering
+        // works with zero networks — and creates a profile as a side effect.
+        hotspotStatusLabel.setText("Error: " + msg + "  —  No network? Plug in the tablet via USB-C and enable USB tethering, then retry.",
+                                   juce::dontSendNotification);
         hotspotStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xFFF85149));
     } else {
         hotspotToggleBtn.setButtonText("START STAGE HOTSPOT");
