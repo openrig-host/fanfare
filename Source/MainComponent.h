@@ -125,6 +125,23 @@ private:
   void applyEngineTuningSettings();
   void loadEngineTuningSettings();
   void saveEngineTuningSettings();
+
+  // USB Audio & MIDI Hotplug / Auto-Recovery state
+  juce::String desiredAudioDeviceType;
+  juce::AudioDeviceManager::AudioDeviceSetup desiredAudioSetup;
+  bool hasDesiredAudioSetup = false;
+  bool inAudioRecoveryMode = false;
+  bool isSyncingMidiInputs = false;
+  bool isRecoveringAudioDevice = false;
+  juce::int64 lastAudioRecoveryAttemptMs = 0;
+  int audioRecoveryAttemptCount = 0;
+  juce::StringArray activeMidiInputIds;
+  juce::Component::SafePointer<juce::Component> activeAudioSelector;
+
+  void stripLegacyDirectSoundDeviceType();
+  void captureDesiredAudioSetup();
+  void syncHotplugMidiInputs(bool isInitialSetup = false);
+  void checkAndRecoverAudioDevice();
   std::unique_ptr<LibraryPanel> libraryPanel;
   std::unique_ptr<SetupBuilderOverlay> setupBuilderOverlay;
   std::unique_ptr<ResourceInspectorModal> resourceInspectorOverlay;

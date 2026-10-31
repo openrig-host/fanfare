@@ -205,3 +205,6 @@ Never break these invariants when modifying `FanfareEngine.h`, `MainComponent.cp
    - **UI + `SetlistPreloaderThread` + `RigBuilder` mask**: steered to E-cores (`0xFF0`) so background VST3 builds never contend with live ASIO.
 4. **Preserve Exact `numSamples` Logical Sizing on `RackSlot::scratchBuffer`**:
    - Pre-allocating `scratchBuffer` capacity (`32 x 8192`) in `RackSlot::prepare()` must immediately resize logical length back to `maxBlockSize` (`avoidReallocating = true`), and `RackSlot::processBlock()` must check `!= numSamp` so VST3 `processBlock()` never receives `numSamples > maxSamplesPerBlock`.
+5. **Preserve USB Hotplug & ASIO Auto-Recovery (`syncHotplugMidiInputs` + `checkAndRecoverAudioDevice` + `juce_ASIO_windows.cpp` reset guard)**:
+   - Never pass `selectDefaultDeviceOnFailure = true` when loading a saved ASIO configuration, and never call `saveAudioSettings()` while `inAudioRecoveryMode` is active (prevents overwriting `audio_settings.xml` with fallback `Windows Audio`).
+   - On USB MIDI disconnect/reconnect, always close stale WinMM handles (`setMidiInputDeviceEnabled(id, false)`) before re-enabling (`setMidiInputDeviceEnabled(id, true)`).

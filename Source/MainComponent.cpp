@@ -291,10 +291,14 @@ MainComponent::MainComponent() {
   startTimer(FanfareConstants::kTimerIntervalMs);
 
   // Setup MIDI inputs
-  auto midiInputs = juce::MidiInput::getAvailableDevices();
+  // Setup MIDI inputs (wildcard listener + hotplug auto-enable)
+  deviceManager.addMidiInputDeviceCallback({}, this);
+  syncHotplugMidiInputs(true);
+  if (false) {
+    auto midiInputs = juce::MidiInput::getAvailableDevices();
   for (auto &input : midiInputs) {
     deviceManager.setMidiInputDeviceEnabled(input.identifier, true);
-    deviceManager.addMidiInputDeviceCallback(input.identifier, this);
+    deviceManager.addMidiInputDeviceCallback(input.identifier, this); }
   }
 
   // Add audio callback
@@ -345,9 +349,14 @@ MainComponent::~MainComponent() {
   ThemeManager::getInstance().removeChangeListener(this);
   saveAudioSettings();
   deviceManager.removeMidiInputDeviceCallback({}, this);
-  auto midiInputs = juce::MidiInput::getAvailableDevices();
+  // Setup MIDI inputs (wildcard listener + hotplug auto-enable)
+  deviceManager.addMidiInputDeviceCallback({}, this);
+  syncHotplugMidiInputs(true);
+  if (false) {
+    auto midiInputs = juce::MidiInput::getAvailableDevices();
   for (auto &input : midiInputs)
-    deviceManager.removeMidiInputDeviceCallback(input.identifier, this);
+    deviceManager.removeMidiInputDeviceCallback(input.identifier, this); }
+  deviceManager.removeMidiInputDeviceCallback({}, this);
 
   deviceManager.removeAudioCallback(this);
   engine.releaseAllPlugins();
@@ -456,8 +465,29 @@ void MainComponent::setupSlotComponents() {
   // Build input selector data
   std::vector<std::pair<juce::String, int>> inputItems;
   inputItems.push_back({"No Input", -1});
-
   auto *device = deviceManager.getCurrentAudioDevice();
+  if (false) {
+
+  juce::ScopedValueSetter<bool> recoveryGuard(isRecoveringAudioDevice, true);
+  auto *device = deviceManager.getCurrentAudioDevice();
+  auto setup = (device != nullptr && device->isOpen())
+                   ? deviceManager.getAudioDeviceSetup()
+                   : (hasDesiredAudioSetup ? desiredAudioSetup : deviceManager.getAudioDeviceSetup());
+  deviceManager.closeAudioDevice();
+  if (desiredAudioDeviceType.isNotEmpty() &&
+      deviceManager.getCurrentAudioDeviceType() != desiredAudioDeviceType) {
+    deviceManager.setCurrentAudioDeviceType(desiredAudioDeviceType, true);
+  }
+  deviceManager.setAudioDeviceSetup(setup, true);
+  syncHotplugMidiInputs(false);
+  if (auto *newDev = deviceManager.getCurrentAudioDevice()) {
+    if (newDev->isOpen() && newDev->isPlaying()) {
+      inAudioRecoveryMode = false;
+      audioRecoveryAttemptCount = 0;
+    }
+  }
+  if (false) {
+  } }
   if (device != nullptr) {
     auto inputs = device->getInputChannelNames();
     for (int hw = 0; hw < inputs.size(); ++hw) {
@@ -900,6 +930,7 @@ void MainComponent::setupHeaderButtons() {
         deviceManager, 0, FanfareConstants::kDefaultInputChannels, 0,
         FanfareConstants::kDefaultOutputChannels, true, true, true, false);
     selector->setSize(500, 400);
+    activeAudioSelector = selector;
     juce::DialogWindow::LaunchOptions options;
     options.content.setOwned(selector);
     options.dialogTitle = "Audio & MIDI Settings";
@@ -1629,7 +1660,156 @@ void MainComponent::audioDeviceIOCallbackWithContext(
           juce::Time::getHighResolutionTicks() - nowTicks) * 1000.0);
 }
 
+void MainComponent::stripLegacyDirectSoundDeviceType() {
+  const auto &types = deviceManager.getAvailableDeviceTypes();
+  for (int i = types.size() - 1; i >= 0; --i) {
+    if (auto *t = types[i]) {
+      if (t->getTypeName().containsIgnoreCase("DirectSound") &&
+          deviceManager.getCurrentAudioDeviceType() != t->getTypeName()) {
+        deviceManager.removeAudioDeviceType(t);
+        LOG_INFO("Removed legacy DirectSound device type (prevents USB hotplug scan stalls)");
+      }
+    }
+  }
+}
+
+void MainComponent::captureDesiredAudioSetup() {
+  if (auto *dev = deviceManager.getCurrentAudioDevice()) {
+    if (dev->isOpen() && !dev->getActiveOutputChannels().isZero()) {
+      desiredAudioDeviceType = deviceManager.getCurrentAudioDeviceType();
+      desiredAudioSetup = deviceManager.getAudioDeviceSetup();
+      if (desiredAudioSetup.outputDeviceName.isEmpty())
+        desiredAudioSetup.outputDeviceName = dev->getName();
+      hasDesiredAudioSetup = true;
+    }
+  }
+}
+
+void MainComponent::syncHotplugMidiInputs(bool isInitialSetup) {
+  if (isSyncingMidiInputs)
+    return;
+  juce::ScopedValueSetter<bool> guard(isSyncingMidiInputs, true);
+
+  auto currentInputs = juce::MidiInput::getAvailableDevices();
+  juce::StringArray currentIds;
+  for (const auto &in : currentInputs)
+    currentIds.add(in.identifier);
+
+  bool anyDisconnected = false;
+  for (const auto &oldId : activeMidiInputIds) {
+    if (!currentIds.contains(oldId)) {
+      deviceManager.setMidiInputDeviceEnabled(oldId, false);
+      anyDisconnected = true;
+      LOG_WARN("USB MIDI input disconnected: " + oldId);
+    }
+  }
+  if (anyDisconnected && !isInitialSetup) {
+    engine.triggerPanic();
+    if (auto *dev = deviceManager.getCurrentAudioDevice()) {
+      if (dev->getCurrentSampleRate() > 0.0)
+        midiCollector.reset(dev->getCurrentSampleRate());
+    }
+  }
+
+  bool anyNewlyConnected = false;
+  for (const auto &in : currentInputs) {
+    const bool wasActive = activeMidiInputIds.contains(in.identifier);
+    const bool isEnabled = deviceManager.isMidiInputDeviceEnabled(in.identifier);
+    if (!wasActive || !isEnabled) {
+      if (isEnabled && !wasActive) {
+        deviceManager.setMidiInputDeviceEnabled(in.identifier, false);
+      }
+      deviceManager.setMidiInputDeviceEnabled(in.identifier, true);
+      if (!isInitialSetup) {
+        anyNewlyConnected = true;
+        LOG_INFO("USB MIDI input connected & enabled: " + in.name);
+      }
+    }
+  }
+
+  activeMidiInputIds = currentIds;
+
+  if (anyNewlyConnected && inAudioRecoveryMode) {
+    lastAudioRecoveryAttemptMs = (juce::int64)juce::Time::getMillisecondCounter() - 1900;
+  }
+}
+
+void MainComponent::checkAndRecoverAudioDevice() {
+  syncHotplugMidiInputs(false);
+
+  if (!hasDesiredAudioSetup || isRecoveringAudioDevice ||
+      activeAudioSelector != nullptr || (transitioner != nullptr && transitioner->isBusy()))
+    return;
+
+  auto *dev = deviceManager.getCurrentAudioDevice();
+  const juce::int64 nowTicks = juce::Time::getHighResolutionTicks();
+  const juce::int64 lastCbTicks = lastAudioCallbackTicks.load(std::memory_order_relaxed);
+  const double msSinceLastCallback =
+      (lastCbTicks > 0)
+          ? juce::Time::highResolutionTicksToSeconds(nowTicks - lastCbTicks) * 1000.0
+          : 0.0;
+
+  const bool deviceMissingOrClosed =
+      (dev == nullptr) || !dev->isOpen() || !dev->isPlaying() ||
+      dev->getActiveOutputChannels().isZero();
+  const bool callbackStalled =
+      (dev != nullptr && dev->isOpen() && lastCbTicks > 0 && msSinceLastCallback > 1500.0);
+
+  if (!deviceMissingOrClosed && !callbackStalled) {
+    if (inAudioRecoveryMode) {
+      inAudioRecoveryMode = false;
+      audioRecoveryAttemptCount = 0;
+      LOG_INFO("Audio interface streaming normally again.");
+    }
+    return;
+  }
+
+  const juce::int64 nowMs = (juce::int64)juce::Time::getMillisecondCounter();
+  if (!inAudioRecoveryMode) {
+    inAudioRecoveryMode = true;
+    audioRecoveryAttemptCount = 0;
+    lastAudioRecoveryAttemptMs = nowMs - 1300;
+    engine.triggerPanic();
+    LOG_WARN("Audio interface disconnected or stopped responding (" +
+             juce::String(deviceMissingOrClosed ? "device closed" : "callbacks stalled") +
+             ") - entering USB auto-recovery mode for '" +
+             desiredAudioSetup.outputDeviceName + "'");
+    return;
+  }
+
+  const juce::int64 retryIntervalMs = (audioRecoveryAttemptCount < 3) ? 2000 : 3000;
+  if (nowMs - lastAudioRecoveryAttemptMs < retryIntervalMs)
+    return;
+
+  lastAudioRecoveryAttemptMs = nowMs;
+  ++audioRecoveryAttemptCount;
+
+  juce::ScopedValueSetter<bool> recoveryGuard(isRecoveringAudioDevice, true);
+  suppressGlitchDetectionForMs(3500);
+
+  deviceManager.closeAudioDevice();
+  if (desiredAudioDeviceType.isNotEmpty() &&
+      deviceManager.getCurrentAudioDeviceType() != desiredAudioDeviceType) {
+    deviceManager.setCurrentAudioDeviceType(desiredAudioDeviceType, true);
+  }
+
+  juce::String err = deviceManager.setAudioDeviceSetup(desiredAudioSetup, true);
+  auto *newDev = deviceManager.getCurrentAudioDevice();
+  if (err.isEmpty() && newDev != nullptr && newDev->isOpen() && newDev->isPlaying()) {
+    inAudioRecoveryMode = false;
+    audioRecoveryAttemptCount = 0;
+    syncHotplugMidiInputs(false);
+    LOG_INFO("USB Audio Auto-Recovery succeeded: '" + newDev->getName() + "' is back online!");
+  }
+}
+
 void MainComponent::saveAudioSettings() {
+  if (inAudioRecoveryMode || isRecoveringAudioDevice)
+    return;
+  auto *dev = deviceManager.getCurrentAudioDevice();
+  if (dev == nullptr || !dev->isOpen() || dev->getActiveOutputChannels().isZero())
+    return;
+  captureDesiredAudioSetup();
   auto xml = deviceManager.createStateXml();
   if (xml != nullptr) {
     auto file = FanfareConstants::getAppDirectory().getChildFile("audio_settings.xml");
@@ -1643,9 +1823,30 @@ void MainComponent::loadAudioSettings() {
   if (file.existsAsFile()) {
     auto xml = juce::XmlDocument::parse(file);
     if (xml != nullptr)
-      deviceManager.initialise(0, 8, xml.get(), true);
+      if (xml->hasTagName("DEVICESETUP")) {
+        desiredAudioDeviceType = xml->getStringAttribute("deviceType", "ASIO");
+        juce::String devName = xml->getStringAttribute("audioDeviceName");
+        desiredAudioSetup.outputDeviceName = devName.isNotEmpty()
+            ? devName
+            : xml->getStringAttribute("audioOutputDeviceName");
+        desiredAudioSetup.inputDeviceName = devName.isNotEmpty()
+            ? devName
+            : xml->getStringAttribute("audioInputDeviceName");
+        desiredAudioSetup.sampleRate = xml->getDoubleAttribute("audioDeviceRate", 44100.0);
+        desiredAudioSetup.bufferSize = xml->getIntAttribute("audioDeviceBufferSize", 192);
+        desiredAudioSetup.inputChannels.parseString(xml->getStringAttribute("audioDeviceInChans", "11"), 2);
+        desiredAudioSetup.outputChannels.parseString(xml->getStringAttribute("audioDeviceOutChans", "11"), 2);
+        desiredAudioSetup.useDefaultInputChannels = !xml->hasAttribute("audioDeviceInChans");
+        desiredAudioSetup.useDefaultOutputChannels = !xml->hasAttribute("audioDeviceOutChans");
+        hasDesiredAudioSetup = desiredAudioSetup.outputDeviceName.isNotEmpty();
+      }
+      deviceManager.initialise(0, 8, xml.get(), !hasDesiredAudioSetup);
+      stripLegacyDirectSoundDeviceType();
+      captureDesiredAudioSetup();
   } else {
     deviceManager.initialiseWithDefaultDevices(0, 2);
+    stripLegacyDirectSoundDeviceType();
+    captureDesiredAudioSetup();
   }
 }
 
@@ -1938,7 +2139,25 @@ void MainComponent::resetAudioDevice() {
     }
   }
 #endif
+  juce::ScopedValueSetter<bool> recoveryGuard(isRecoveringAudioDevice, true);
   auto *device = deviceManager.getCurrentAudioDevice();
+  auto setup = (device != nullptr && device->isOpen())
+                   ? deviceManager.getAudioDeviceSetup()
+                   : (hasDesiredAudioSetup ? desiredAudioSetup : deviceManager.getAudioDeviceSetup());
+  deviceManager.closeAudioDevice();
+  if (desiredAudioDeviceType.isNotEmpty() &&
+      deviceManager.getCurrentAudioDeviceType() != desiredAudioDeviceType) {
+    deviceManager.setCurrentAudioDeviceType(desiredAudioDeviceType, true);
+  }
+  deviceManager.setAudioDeviceSetup(setup, true);
+  syncHotplugMidiInputs(false);
+  if (auto *newDev = deviceManager.getCurrentAudioDevice()) {
+    if (newDev->isOpen() && newDev->isPlaying()) {
+      inAudioRecoveryMode = false;
+      audioRecoveryAttemptCount = 0;
+    }
+  }
+  if (false) {
   if (!device)
     return;
   auto setup = deviceManager.getAudioDeviceSetup();
@@ -1946,6 +2165,7 @@ void MainComponent::resetAudioDevice() {
   deviceManager.initialise(setup.inputChannels.countNumberOfSetBits(),
                            setup.outputChannels.countNumberOfSetBits(), nullptr,
                            true, "", &setup);
+  }
 }
 
 void MainComponent::showAboutDialog() {
@@ -2152,6 +2372,7 @@ void MainComponent::showSetupBuilderOverlay() {
 
 void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source) {
   if (source == &deviceManager) {
+    syncHotplugMidiInputs(false);
     saveAudioSettings();
   } else if (source == &ThemeManager::getInstance()) {
     // Theme changed: re-apply LookAndFeel colours and repaint everything.
@@ -2216,6 +2437,11 @@ void MainComponent::audioDeviceAboutToStart(juce::AudioIODevice *device) {
     }
   }
 #endif
+  if (device == nullptr || !device->isOpen() ||
+      device->getCurrentSampleRate() <= 0.0 ||
+      device->getCurrentBufferSizeSamples() <= 0) {
+    return;
+  }
   midiCollector.reset(device->getCurrentSampleRate());
   engine.prepareToPlay(device->getCurrentBufferSizeSamples(),
                        device->getCurrentSampleRate());
@@ -2707,6 +2933,7 @@ void MainComponent::timerCallback() {
     }
 #endif
     FanfareLog::flushLog();
+    checkAndRecoverAudioDevice();
     auto memStats = FanfareLog::getMemoryStats();
     juce::String appRamStr = ResourceInspectorModal::formatBytes(memStats.workingSetBytes);
     ramLabel.setText("RAM: " + appRamStr + " (" + juce::String(memStats.systemRamLoadPercent) + "%)", juce::dontSendNotification);
@@ -2724,10 +2951,11 @@ void MainComponent::timerCallback() {
       else
         ms = dev->getCurrentBufferSizeSamples() * 2.0 / sr * 1000.0;
     }
-    latencyLabel.setText("LAT: " + juce::String(ms, 1) + "ms",
+    latencyLabel.setText(inAudioRecoveryMode ? "LAT: RECONNECT..." : ("LAT: " + juce::String(ms, 1) + "ms"),
                          juce::dontSendNotification);
   } else {
-    latencyLabel.setText("LAT: --", juce::dontSendNotification);
+    latencyLabel.setText(inAudioRecoveryMode ? "LAT: RECONNECT..." : "LAT: --",
+                         juce::dontSendNotification);
   }
 
   // Surface any audio underruns: callback-gap count + engine-side stalls,

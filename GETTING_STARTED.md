@@ -25,6 +25,7 @@ When Fanfare launches for the first time, click the **Settings** gear icon in th
 
 2. **MIDI Input Device**:
    - Enable your keyboard controller(s) in the same Audio & MIDI Settings dialog (for example, *Yamaha CK88*, *Roland RD-88*, *Impact LX61+*, *KeyLab Essential 88*).
+   - **Live USB Hotplug & Auto-Recovery (New in v1.3):** When your bass player accidentally yanks your USB cable out of the computer, just put it back in, count to three, go back to playing, and smile at your bass player. Possibly the single most important update in Fanfare history! Fanfare automatically silences any held notes on disconnect, shows `LAT: RECONNECT...` in the top bar, and brings both your ASIO audio driver and USB MIDI inputs right back online within a couple of seconds of plugging the cable back in.
 
 ---
 

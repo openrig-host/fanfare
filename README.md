@@ -109,10 +109,12 @@ It's not a DAW. It's an instrument.
 - **Parallel loading.** Plugins load at the same time, with safe handling for plugins that need it.
 - **Safe saves.** Files are written atomically and backed up automatically.
 - **Crash containment.** A misbehaving VST3 doesn't take down the show.
+- **Stage-proof USB hotplug & ASIO auto-recovery (New in v1.3).** When your bass player accidentally yanks your USB cable out of the computer, just put it back in, count to three, go back to playing, and smile at your bass player. Possibly the single most important update in Fanfare history!
 - **Per-plugin isolation.** One plugin failing doesn't stop the audio.
 - **Rig migration.** Older rig files upgrade automatically. Files from newer versions are refused instead of half-loaded.
 
-### Engine and CPU Optimization (New in v1.2)
+### Engine, CPU & USB Hotplug Reliability (New in v1.2 & v1.3)
+- **Live USB Hotplug & Automatic ASIO Recovery (v1.3).** When your bass player accidentally yanks your USB cable out of the computer, just put it back in, count to three, go back to playing, and smile at your bass player. Possibly the single most important update in Fanfare history! Fanfare detects disconnected or stalled ASIO interfaces and unplugged USB MIDI controllers, immediately sends All Notes Off so nothing hangs, protects `audio_settings.xml` from falling back to laptop speakers, and automatically reconnects your ASIO driver and MIDI inputs as soon as the USB cable is plugged back in.
 - **Lock-free Parallel Work-Sharing DSP.** Persistent real-time DSP helper threads share active instrument slots with the ASIO audio thread itself using lock-free atomics. There are no mutexes, no heap allocations on the audio thread, and no `ThreadPool` dropped-job stalls. Active worker count scales automatically to one worker per physical Performance core.
 - **Hybrid CPU Core Split (P-Cores for Audio, E-Cores for Everything Else).** On Intel 12th Gen and newer hybrid laptops, real-time ASIO and DSP threads are pinned exclusively to fast Performance cores while the UI, graphics rendering, plugin disk streaming, and background setlist preloading run on Efficiency cores. Preloading the next song never steals cycles from live audio.
 - **CPU Core 0 Interrupt Shielding.** Keeps real-time audio off Core 0, where Windows and laptop firmware dump Wi-Fi, USB hub, ACPI, and battery-polling driver interrupts (DPCs).
