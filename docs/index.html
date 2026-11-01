@@ -123,7 +123,7 @@
 								<li><a href="#architecture">Architecture</a></li>
 								<li><a href="#download">Download</a></li>
 								<li><a href="manual.html">Manual</a></li>
-								<li><a href="https://github.com/openrig-host/openrig" target="_blank" rel="noopener">GitHub</a></li>
+								<li><a href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a></li>
 							</ul>
 						</nav>
 					</header>
@@ -134,15 +134,15 @@
 						<!-- Intro -->
 							<article id="intro">
 								<h2 class="major">Intro</h2>
-								<a href="https://github.com/openrig-host/openrig/releases/latest" id="latest-release-badge" class="release-badge" target="_blank" rel="noopener">
+								<a href="https://github.com/openrig-host/fanfare/releases/latest" id="latest-release-badge" class="release-badge" target="_blank" rel="noopener">
 									<span id="badge-release-text">Latest Release &middot; Windows VST3 Host</span>
 								</a>
 								<p><strong>Fanfare</strong> makes your rig easy to set up and then stays out of your way on stage. You play music. You don't run an IT desk.</p>
 								<p>Splits, sample triggers, arpeggiators, octaves, harmonizers. Set them up once. While you play, the next song loads in the background, so when you call it, it's already there.</p>
 								<ul class="actions">
-									<li><a href="https://github.com/openrig-host/openrig/releases/latest" class="button primary icon solid fa-download" target="_blank" rel="noopener">Download for Windows</a></li>
+									<li><a href="https://github.com/openrig-host/fanfare/releases/latest" class="button primary icon solid fa-download" target="_blank" rel="noopener">Download for Windows</a></li>
 									<li><a href="manual.html" class="button icon solid fa-book">User's Manual</a></li>
-									<li><a href="https://github.com/openrig-host/openrig" class="button" target="_blank" rel="noopener">Source Code</a></li>
+									<li><a href="https://github.com/openrig-host/fanfare" class="button" target="_blank" rel="noopener">Source Code</a></li>
 								</ul>
 								<span class="image main"><img src="vu_meters_detail.png" alt="Analog peak VU metering and dual FOH/IEM bus faders" /></span>
 								<p>Separate master faders and VU meters for <strong>FOH</strong> (front of house) and <strong>IEM</strong> (in-ear monitors). Turn up your ears without touching what the room hears.</p>
@@ -287,8 +287,8 @@
 									<li>GPL v3 License</li>
 								</ul>
 								<ul class="actions" style="justify-content:center;">
-									<li><a href="https://github.com/openrig-host/openrig/releases/latest" class="button primary icon solid fa-download" target="_blank" rel="noopener">Download Latest Release</a></li>
-									<li><a href="https://github.com/openrig-host/openrig/blob/trunk/BUILDING.md" class="button" target="_blank" rel="noopener">Build Instructions</a></li>
+									<li><a href="https://github.com/openrig-host/fanfare/releases/latest" class="button primary icon solid fa-download" target="_blank" rel="noopener">Download Latest Release</a></li>
+									<li><a href="https://github.com/openrig-host/fanfare/blob/trunk/BUILDING.md" class="button" target="_blank" rel="noopener">Build Instructions</a></li>
 								</ul>
 								<p style="text-align:center; font-size:0.8em; color:rgba(255,255,255,0.5);">Windows 10/11 (64-bit) · VST3 plugin support · ASIO drivers for live low-latency use</p>
 							</article>
@@ -352,7 +352,7 @@
 
 				async function fetchLatestRelease() {
 					try {
-						const res = await fetch('https://api.github.com/repos/openrig-host/openrig/releases/latest');
+						const res = await fetch('https://api.github.com/repos/openrig-host/fanfare/releases/latest');
 						if (!res.ok) return;
 						const data = await res.json();
 						const badgeText = document.getElementById('badge-release-text');

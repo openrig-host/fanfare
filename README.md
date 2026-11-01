@@ -4,8 +4,8 @@
 
 ### A live performance host for keyboard players
 
-[![Latest Release](https://img.shields.io/github/v/release/openrig-host/openrig?sort=date&cacheSeconds=900&color=ed786a&label=Latest%20Release)](https://github.com/openrig-host/openrig/releases/latest)
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue.svg)](https://github.com/openrig-host/openrig/releases)
+[![Latest Release](https://img.shields.io/github/v/release/openrig-host/fanfare?sort=date&cacheSeconds=900&color=ed786a&label=Latest%20Release)](https://github.com/openrig-host/fanfare/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue.svg)](https://github.com/openrig-host/fanfare/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
 
 A rack-based VST3 host and MIDI router for playing live. No dropouts, no stuck notes, no failed song changes.
@@ -48,7 +48,7 @@ It's not a DAW. It's an instrument.
 
 ## Quick Start
 
-1. **Download the latest release.** Grab `Fanfare.exe` from [GitHub Releases](https://github.com/openrig-host/openrig/releases/latest). No installer.
+1. **Download the latest release.** Grab `Fanfare.exe` from [GitHub Releases](https://github.com/openrig-host/fanfare/releases/latest). No installer.
 2. **Set up audio and MIDI.** Open `Settings`, pick your **ASIO** driver (or WASAPI), and enable your MIDI controller.
 3. **Load a rig or fill a slot.** Click **LOAD RIG** to open a setlist or song, or click **[EMPTY]** on any slot to load a VST3.
 4. **Set key ranges and MIDI mappings.** Click **NR** on a strip to set a split by playing the notes, or **CC** to open the CC Assignment Manager.
@@ -214,11 +214,11 @@ Used on stage with:
 
 ## Download
 
-Windows builds with **ASIO support** are on the [Releases page](https://github.com/openrig-host/openrig/releases). It's a single `Fanfare.exe`. Download it and run it.
+Windows builds with **ASIO support** are on the [Releases page](https://github.com/openrig-host/fanfare/releases). It's a single `Fanfare.exe`. Download it and run it.
 
 > Releases are built with ASIO enabled and uploaded to GitHub directly. There's no CI build because Steinberg's ASIO SDK license doesn't allow it to live in a public repo or on a public build server.
 
-**Latest release:** https://github.com/openrig-host/openrig/releases/latest
+**Latest release:** https://github.com/openrig-host/fanfare/releases/latest
 
 ### Requirements
 - Windows 10 or 11 (64-bit)

@@ -17,7 +17,7 @@
 | **Primary Solution** | `C:\davecore\Builds\VisualStudio2026\Fanfare.sln` |
 | **Primary Project** | `C:\davecore\Builds\VisualStudio2026\Fanfare_App.vcxproj` |
 | **Output Executable** | `C:\davecore\Builds\VisualStudio2026\x64\Release\App\Fanfare.exe` |
-| **Active Git Branch** | `trunk` (`origin https://github.com/openrig-host/openrig.git`) |
+| **Active Git Branch** | `trunk` (`origin https://github.com/openrig-host/fanfare.git`) |
 
 ---
 

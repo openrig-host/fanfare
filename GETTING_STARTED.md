@@ -6,7 +6,7 @@ Welcome to **Fanfare**! This guide walks you through your first 5 minutes with F
 
 ## 1. Download & Launch
 
-1. Go to the [Fanfare Releases Page](https://github.com/openrig-host/openrig/releases/latest).
+1. Go to the [Fanfare Releases Page](https://github.com/openrig-host/fanfare/releases/latest).
 2. Download `Fanfare.exe`.
 3. **No installation is required.** Place `Fanfare.exe` in any local folder on your Windows 10/11 PC and double-click to launch.
 4. **Stage Power Rule:** Always run your laptop plugged into its **AC power supply** during rehearsals and gigs. On battery power, Windows and laptop firmware aggressively downclock the CPU, sleep USB ports, and generate battery-polling interrupts that cause audio clicks.

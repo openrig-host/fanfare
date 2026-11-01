@@ -22,7 +22,7 @@ inline void openHelpManual(const juce::String& anchor = {}) {
 
     juce::String urlStr = hasLocalManual
         ? "http://127.0.0.1:8080/manual.html"
-        : "https://openrig-host.github.io/openrig/manual.html";
+        : "https://openrig-host.github.io/fanfare/manual.html";
 
     if (frag.isNotEmpty())
         urlStr += "#" + frag;
