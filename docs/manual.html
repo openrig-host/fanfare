@@ -132,7 +132,7 @@
 		<!-- Header (Right Sidebar in Read Only) -->
 			<section id="header">
 				<header>
-					<span class="image avatar"><img src="OpenRig_Icon.png" alt="Fanfare" /></span>
+					<span class="image avatar"><img src="Fanfare_Icon.png" alt="Fanfare" /></span>
 					<h1 id="logo"><a href="#workflow">Fanfare v1.3.1</a></h1>
 					<p>The Stage Survival Manual</p>
 					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. B3, Wolf, USB)..." />
@@ -151,7 +151,7 @@
 						<li><a href="#cc-assignments">10. CCs &amp; B3 Drawbars</a></li>
 						<li><a href="#midi-effects">11. Transpose, Arp &amp; Octaver</a></li>
 						<li><a href="#sampler">12. 8-Pad Sampler</a></li>
-						<li><a href="#break-music">13. Strip 10: Break DJ</a></li>
+						<li><a href="#break-music">13. Break DJ Strip</a></li>
 						<li><a href="#song-builder">14. The Song Builder</a></li>
 						<li><a href="#scenes">15. Scenes (Snapshots)</a></li>
 						<li><a href="#stage-queue">16. Stage Queue &amp; Preload</a></li>
@@ -202,7 +202,7 @@
 										</div>
 										<div class="col-6 col-12-xsmall">
 											<h4>Level 2: Song (<code>.json</code>)</h4>
-											<p><strong>The Arrangement.</strong> A complete 10-strip mixer rack assembled for a specific tune, plus Master FOH/IEM effects and song-specific chord charts.</p>
+											<p><strong>The Arrangement.</strong> A complete 24-strip mixer rack assembled for a specific tune, plus Master FOH/IEM effects and song-specific chord charts.</p>
 										</div>
 										<div class="col-6 col-12-xsmall">
 											<h4>Level 3: Scene</h4>
@@ -307,7 +307,7 @@
 							<section id="main-mixer">
 								<div class="container">
 									<h3>4. Main Console &amp; Header Bar</h3>
-									<p>The top of the Fanfare window is organized into four horizontal rows above your 10-strip mixer console:</p>
+									<p>The top of the Fanfare window is organized into four horizontal rows above your 24-strip mixer console:</p>
 
 									<div class="table-wrapper">
 										<table class="alt">
@@ -381,11 +381,12 @@
 							<section id="strips">
 								<div class="container">
 									<h3>6. Channel Strips &amp; Dual FOH/IEM Faders</h3>
-									<p><span class="image right"><img src="vu_meters_detail.png" alt="Dual FOH and IEM faders and VU meters" /></span>Fanfare gives you 10 main Channel Strips (plus 2 Aux Return strips):</p>
+									<p><span class="image right"><img src="vu_meters_detail.png" alt="Dual FOH and IEM faders and VU meters" /></span>Fanfare gives you 24 main Channel Strips (plus 2 Aux Return strips):</p>
 									<ul>
 										<li><strong>Strip 1 (Monitor In):</strong> Defaults to your live audio input monitor strip, positioned right next to the Aux Returns for quick reach.</li>
-										<li><strong>Strips 2 through 9:</strong> Full instrument/audio strips, each capable of hosting a <strong>3-slot vertical plugin chain</strong> (e.g., Piano VST in slot 1 &rarr; Vintage Philly Phaser in slot 2 &rarr; Tape Delay in slot 3) OR forwarding filtered/transposed MIDI out to an external hardware synth.</li>
-										<li><strong>Strip 10 (MP3 / DJ Player):</strong> Dedicated dual-deck break music and backing track player.</li>
+										<li><strong>Strips 2 through 23:</strong> Full instrument/audio strips, each capable of hosting a <strong>3-slot vertical plugin chain</strong> (e.g., Piano VST in slot 1 &rarr; Vintage Philly Phaser in slot 2 &rarr; Tape Delay in slot 3) OR forwarding filtered/transposed MIDI out to an external hardware synth.</li>
+										<!-- VERIFY(dj-strip): which strip number hosts the dedicated DJ console in the 24-strip layout? Draft said Strip 10; now written as Strip 24. Also confirms the Strip 1 Monitor In + 2-23 instrument range. -->
+										<li><strong>Strip 24 (MP3 / DJ Player):</strong> Dedicated dual-deck break music and backing track player.</li>
 									</ul>
 									<p>Every strip has <strong>two independent vertical faders</strong> and routing buttons:</p>
 									<ul>
@@ -394,7 +395,7 @@
 										<li><strong><code>LINK</code>:</strong> Locks the FOH and IEM faders together so moving one moves the other at their relative offset. Unlink them when you need more of yourself in your ears without touching the house mix.</li>
 										<li><strong>Output Routing Selector (Bottom Dropdown):</strong> Route any strip to <code>Master (FOH/IEM)</code>, directly out to hardware pairs (<code>Direct: Out 1+2</code> through <code>7+8</code> or mono <code>Out 1..8</code>), or <strong>Subgroup to Strip</strong> (routing audio into any higher-numbered strip so one strip acts as a submix bus).</li>
 									</ul>
-									<p>Each strip also carries an orange <strong>AUX SENDS</strong> group with two knobs. These feed the two <strong>Aux Return</strong> strips at the far left of the console, and the returns are full channel strips in their own right: load a reverb into Aux Return 1, send a taste of every keyboard to it with the AUX 1 knob, and ten strips share one reverb instead of ten plugins doing ten impressions of the same room.</p>
+									<p>Each strip also carries an orange <strong>AUX SENDS</strong> group with two knobs. These feed the two <strong>Aux Return</strong> strips at the far left of the console, and the returns are full channel strips in their own right: load a reverb into Aux Return 1, send a taste of every keyboard to it with the AUX 1 knob, and every strip in the console shares one reverb instead of two dozen plugins doing two dozen impressions of the same room.</p>
 									<p>One more strip trick: any of the three chain slots can be switched from hosting a plugin to acting as a <strong>MIDI OUT</strong> destination for a hardware synth's MIDI port. The strip's note range, transposes, and arpeggiator all still apply before the notes leave the building, so your split points and one-finger synth bubbles work identically on software and hardware voices alike.</p>
 
 									<blockquote>
@@ -603,9 +604,9 @@
 						<!-- 11. BREAK MUSIC -->
 							<section id="break-music">
 								<div class="container">
-									<h3>13. Strip 10: Dual-Deck Break Music &amp; Auto-DJ</h3>
+									<h3>13. The Break DJ Strip: Dual-Deck Break Music &amp; Auto-DJ</h3>
 									<span class="image fit"><img src="break_music_player.png" alt="Break Music Dual-Deck DJ Player" /></span>
-									<p>Strip 10 is hardwired to Fanfare's <strong>Dual-Deck DJ &amp; Break Music Player</strong>. Click <code>MP3 / DJ</code> on Strip 10 (or switch to the <code>BREAK / DJ</code> tab on your Tablet HUD) to open it:</p>
+									<p>The Break DJ strip is hardwired to Fanfare's <strong>Dual-Deck DJ &amp; Break Music Player</strong>. Click <code>MP3 / DJ</code> on the strip (or switch to the <code>BREAK / DJ</code> tab on your Tablet HUD) to open it:</p>
 									<ul>
 										<li><strong>6 Preset Playlist Banks:</strong> Six instant buttons across the top (e.g., <em>Hits, Oldies, Dinner, Dance, Ballads, Break</em>). Left-click to load and play; right-click to assign a folder on your hard drive or rename the bank.</li>
 										<li><strong>Dual Decks (Deck A &amp; Deck B) + Equal-Power Crossfader:</strong> Load tracks into Deck A and Deck B, set non-destructive <code>SET IN</code> and <code>SET OUT</code> trim cues to skip long radio intros/outros, and crossfade manually or with one-click <code>&lt;&lt; FADE A</code> / <code>FADE B &gt;&gt;</code> buttons.</li>
@@ -616,7 +617,7 @@
 
 									<blockquote>
 										<span class="use-case-label">Real-World Stage Use Case</span><br />
-										<strong>Surviving the 20-Minute Set Break Without Phone Notifications:</strong> If you plug your phone into the mixer for break music, three things are guaranteed to happen: a text message ding will blast through the PA at 110 dB, a YouTube ad for lawnmowers will play right after a ballad, or you'll walk to the bar and your Bluetooth will disconnect. With Strip 10, your break music runs inside Fanfare through its own broadcast leveler compressor, routed to FOH (and muted in your IEMs if you want peace and quiet), and you can skip tracks or adjust volume from your tablet across the room.
+										<strong>Surviving the 20-Minute Set Break Without Phone Notifications:</strong> If you plug your phone into the mixer for break music, three things are guaranteed to happen: a text message ding will blast through the PA at 110 dB, a YouTube ad for lawnmowers will play right after a ballad, or you'll walk to the bar and your Bluetooth will disconnect. With the Break DJ strip, your break music runs inside Fanfare through its own broadcast leveler compressor, routed to FOH (and muted in your IEMs if you want peace and quiet), and you can skip tracks or adjust volume from your tablet across the room.
 									</blockquote>
 								</div>
 							</section>
@@ -627,7 +628,7 @@
 									<h3>14. The Song Builder</h3>
 									<p>Click the <strong><code>BUILD SONG</code></strong> button on the Stage Queue row to open the <strong>Song Builder</strong> overlay. It scans your saved <code>.orstrip</code> presets folder and presents them as a checklist:</p>
 									<ol>
-										<li>Check the boxes next to the Strips you want in your new Song (up to 10 strips).</li>
+										<li>Check the boxes next to the Strips you want in your new Song (up to 24 strips).</li>
 										<li>Set the default volume <code>CC:</code> number for each checked strip (defaults to CC 7).</li>
 										<li>Type a <strong>Song Name</strong> (e.g., <code>Superstition</code> or <code>Rosanna</code>).</li>
 										<li>Optionally tick <strong>Pre-assign Consecutive MIDI Channels</strong> (assigns Ch 1, Ch 2, Ch 3... to each strip) and/or <strong>Clean Slate Load</strong>.</li>
@@ -645,7 +646,7 @@
 							<section id="scenes">
 								<div class="container">
 									<h3>15. Scenes (Instant Zero-Latency Snapshots)</h3>
-									<p>Row 4 of the header bar is your <strong>Scene Bar</strong> (<code>+ SCENE</code>, <code>SAVE SCENE</code>, <code>RENAME</code>, <code>DELETE</code>, followed by your Scene buttons). While a <strong>Song</strong> defines <em>which</em> VST plugins are loaded in your 10 strips, a <strong>Scene</strong> is an instantaneous snapshot of your mixer state <em>within</em> that Song:</p>
+									<p>Row 4 of the header bar is your <strong>Scene Bar</strong> (<code>+ SCENE</code>, <code>SAVE SCENE</code>, <code>RENAME</code>, <code>DELETE</code>, followed by your Scene buttons). While a <strong>Song</strong> defines <em>which</em> VST plugins are loaded in your 24 strips, a <strong>Scene</strong> is an instantaneous snapshot of your mixer state <em>within</em> that Song:</p>
 									<ul>
 										<li>Strip Mute / Unmute states (and auto-collapse states when <code>STAGE COMPACT</code> is on)</li>
 										<li>FOH &amp; IEM fader levels, Aux sends, and Link toggles</li>
@@ -690,7 +691,7 @@
 										<li><strong><code>SONGS</code>:</strong> Browse, search, favorite (star), organize into folders, and double-click to load any <code>.json</code> Song.</li>
 										<!-- VERIFY(extension): stale Oct-12 source writes setlists as "*.set" (default.set); this manual says ".orset". Confirm which extension the current build actually saves before publishing. -->
 											<li><strong><code>SETS</code>:</strong> Browse and double-click to load saved <code>.orset</code> Setlists.</li>
-										<li><strong><code>STRIPS</code>:</strong> Browse your <code>.orstrip</code> building blocks. Drag and drop any strip from this tab directly onto any of the 10 mixer strips to load it.</li>
+										<li><strong><code>STRIPS</code>:</strong> Browse your <code>.orstrip</code> building blocks. Drag and drop any strip from this tab directly onto any of the 24 mixer strips to load it.</li>
 										<li><strong><code>SETLIST</code>:</strong> Reorder tonight's show, add the current Song, remove songs, or step through the setlist.</li>
 									</ul>
 								</div>
@@ -727,7 +728,7 @@
 												<li><strong>SONGS:</strong> Color-coded touch grid of your entire Song library with instant tag filtering (<code>PIANO</code>, <code>B3 ORGAN</code>, <code>SYNTH / PAD</code>, <code>BRASS / HORNS</code>, <code>FAVORITES</code>).</li>
 												<li><strong>GIG NOTEPAD:</strong> Full-screen live chord chart &amp; lyric viewer/editor.</li>
 												<li><strong>TOUCH MIXER:</strong> Multi-touch FOH, IEM, Mute, and Master faders.</li>
-												<li><strong>BREAK / DJ:</strong> Remote control for Strip 10's Dual-Deck DJ player, including the YouTube MP3 grabber.</li>
+												<li><strong>BREAK / DJ:</strong> Remote control for the Break DJ strip's Dual-Deck player, including the YouTube MP3 grabber.</li>
 											</ol>
 										</li>
 										<li><strong>USB Tethering Tip:</strong> Want wired, interference-free reliability without Wi-Fi? Plug a USB cable from your tablet to your laptop and enable <em>USB Tethering</em> on the tablet.</li>
