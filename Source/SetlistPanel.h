@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "SetlistManager.h"
 #include "BoutiqueLookAndFeel.h"
+#include "ButtonRoles.h"
 #include "ThemeManager.h"
 
 namespace Fanfare {
@@ -14,22 +15,20 @@ class SetlistPanel : public juce::Component,
 public:
     SetlistPanel() {
         listBox.setModel(this);
+        listBox.setRowHeight(24);
+        listBox.setColour(juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
         addAndMakeVisible(listBox);
 
-        addBtn.setButtonText("Add Current");
+        addBtn.setButtonText("+ SONG");
+        setButtonRole(addBtn, ButtonRole::Primary);
         addBtn.onClick = [this] {
-            if (auto* parent = getParentComponent()) {
-                // Get active setup file from MainComponent or SetlistManager
-                auto active = SetlistManager::getInstance().getActiveFile();
-                // Wait, if SetlistManager has no active file yet, we can load currently loaded rig
-                // Let's call a callback or look up the loaded rig file.
-                if (onAddCurrentRequested)
-                    onAddCurrentRequested();
-            }
+            if (onAddCurrentRequested)
+                onAddCurrentRequested();
         };
         addAndMakeVisible(addBtn);
 
-        removeBtn.setButtonText("Remove");
+        removeBtn.setButtonText("REMOVE");
+        setButtonRole(removeBtn, ButtonRole::Danger);
         removeBtn.onClick = [this] {
             int sel = listBox.getSelectedRow();
             if (sel >= 0) {
@@ -38,7 +37,8 @@ public:
         };
         addAndMakeVisible(removeBtn);
 
-        moveUpBtn.setButtonText("Up");
+        moveUpBtn.setButtonText("UP");
+        setButtonRole(moveUpBtn, ButtonRole::Standard);
         moveUpBtn.onClick = [this] {
             int sel = listBox.getSelectedRow();
             if (sel > 0) {
@@ -48,7 +48,8 @@ public:
         };
         addAndMakeVisible(moveUpBtn);
 
-        moveDownBtn.setButtonText("Down");
+        moveDownBtn.setButtonText("DN");
+        setButtonRole(moveDownBtn, ButtonRole::Standard);
         moveDownBtn.onClick = [this] {
             int sel = listBox.getSelectedRow();
             if (sel >= 0 && sel < SetlistManager::getInstance().getSetups().size() - 1) {
@@ -58,7 +59,8 @@ public:
         };
         addAndMakeVisible(moveDownBtn);
 
-        saveBtn.setButtonText("Save List");
+        saveBtn.setButtonText("SAVE");
+        setButtonRole(saveBtn, ButtonRole::Standard);
         saveBtn.onClick = [this] {
             fileChooser = std::make_unique<juce::FileChooser>(
                 "Save Setlist",
@@ -76,7 +78,8 @@ public:
         };
         addAndMakeVisible(saveBtn);
 
-        loadBtn.setButtonText("Load List");
+        loadBtn.setButtonText("LOAD");
+        setButtonRole(loadBtn, ButtonRole::Standard);
         loadBtn.onClick = [this] {
             fileChooser = std::make_unique<juce::FileChooser>(
                 "Load Setlist",
@@ -92,7 +95,8 @@ public:
         };
         addAndMakeVisible(loadBtn);
 
-        clearBtn.setButtonText("Clear");
+        clearBtn.setButtonText("CLEAR");
+        setButtonRole(clearBtn, ButtonRole::Danger);
         clearBtn.onClick = [this] {
             SetlistManager::getInstance().clearSetlist();
         };
@@ -113,7 +117,6 @@ public:
         listBox.repaint();
     }
 
-    // --- ListBoxModel implementation ---
     int getNumRows() override {
         return SetlistManager::getInstance().getSetups().size();
     }
@@ -123,23 +126,40 @@ public:
         if (row < 0 || row >= setups.size())
             return;
 
+        const auto& t = ThemeManager::getInstance().active();
         int activeIdx = SetlistManager::getInstance().getActiveIndex();
+        const bool isLive = (row == activeIdx);
 
-        if (row == activeIdx) {
-            g.fillAll(ThemeManager::get(Theme::Role::foh).withAlpha(0.2f)); // active song highlight
+        if (isLive) {
+            g.fillAll(t.foh.withAlpha(t.dark ? 0.18f : 0.14f));
+            g.setColour(t.foh);
+            g.fillRect(0.0f, 0.0f, 3.0f, (float)height);
         } else if (isSelected) {
-            g.fillAll(ThemeManager::get(Theme::Role::accent).withAlpha(0.25f));
+            g.fillAll(t.accent.withAlpha(t.dark ? 0.22f : 0.15f));
+            g.setColour(t.accent);
+            g.fillRect(0.0f, 0.0f, 2.5f, (float)height);
+        } else if (row % 2 == 1) {
+            g.fillAll(t.text.withAlpha(0.02f));
         }
 
-        g.setColour(ThemeManager::get(Theme::Role::text));
+        // Row number
+        g.setFont(BoutiqueLookAndFeel::monoFont(10.5f, true));
+        g.setColour(isLive ? t.foh : t.engrave);
+        g.drawText(juce::String(row + 1).paddedLeft('0', 2),
+                   6, 0, 20, height, juce::Justification::centredLeft, false);
+
+        // Song title
         juce::String name = setups[row].getFileNameWithoutExtension();
+        g.setFont(BoutiqueLookAndFeel::uiFont(13.0f, isLive || isSelected));
+        g.setColour(isLive ? t.foh : t.text);
+        g.drawText(name, 28, 0, width - (isLive ? 68 : 34), height,
+                   juce::Justification::centredLeft, true);
 
-        if (row == activeIdx) {
-            name = "▶  " + name;
-            g.setColour(ThemeManager::get(Theme::Role::foh));
+        if (isLive) {
+            g.setFont(BoutiqueLookAndFeel::condensedFont(10.0f, 0.08f));
+            g.setColour(t.foh);
+            g.drawText("LIVE", width - 38, 0, 32, height, juce::Justification::centredRight, false);
         }
-
-        g.drawText(name, 6, 0, width - 12, height, juce::Justification::centredLeft, true);
     }
 
     void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override {
@@ -150,7 +170,6 @@ public:
         }
     }
 
-    // --- DragAndDropTarget implementation ---
     bool isInterestedInDragSource(const SourceDetails& details) override {
         juce::String desc = details.description.toString();
         return desc.endsWithIgnoreCase(".json");
@@ -165,19 +184,20 @@ public:
 
     void resized() override {
         auto b = getLocalBounds().reduced(4);
-        
-        auto controlRow = b.removeFromBottom(28);
-        int w = controlRow.getWidth() / 4;
-        addBtn.setBounds(controlRow.removeFromLeft(w).reduced(2));
-        removeBtn.setBounds(controlRow.removeFromLeft(w).reduced(2));
-        moveUpBtn.setBounds(controlRow.removeFromLeft(w).reduced(2));
-        moveDownBtn.setBounds(controlRow.reduced(2));
 
-        auto fileRow = b.removeFromBottom(28);
+        auto controlRow = b.removeFromBottom(26);
+        int w1 = controlRow.getWidth();
+        addBtn.setBounds(controlRow.removeFromLeft((w1 * 32) / 100).reduced(1));
+        removeBtn.setBounds(controlRow.removeFromLeft((w1 * 30) / 100).reduced(1));
+        moveUpBtn.setBounds(controlRow.removeFromLeft((w1 * 19) / 100).reduced(1));
+        moveDownBtn.setBounds(controlRow.reduced(1));
+
+        b.removeFromBottom(2);
+        auto fileRow = b.removeFromBottom(26);
         int w2 = fileRow.getWidth() / 3;
-        loadBtn.setBounds(fileRow.removeFromLeft(w2).reduced(2));
-        saveBtn.setBounds(fileRow.removeFromLeft(w2).reduced(2));
-        clearBtn.setBounds(fileRow.reduced(2));
+        loadBtn.setBounds(fileRow.removeFromLeft(w2).reduced(1));
+        saveBtn.setBounds(fileRow.removeFromLeft(w2).reduced(1));
+        clearBtn.setBounds(fileRow.reduced(1));
 
         b.removeFromBottom(4);
         listBox.setBounds(b);

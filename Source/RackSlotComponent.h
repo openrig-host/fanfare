@@ -12,10 +12,12 @@
 
 class RackSlotComponent : public juce::Component,
                           public juce::Timer,
-                          public juce::DragAndDropTarget {
+                          public juce::DragAndDropTarget,
+                          public juce::SettableTooltipClient {
 public:
   RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &laf);
   ~RackSlotComponent() override;
+  void lookAndFeelChanged() override;
 
   void timerCallback() override;
   void paint(juce::Graphics &g) override;
@@ -48,10 +50,13 @@ public:
   bool isCollapsed = false;
   void setCollapsed(bool shouldCollapse);
   bool getIsCollapsed() const { return isCollapsed; }
+  bool isUnusedEmptyStrip() const;
   std::function<void(bool)> onCollapseChanged;
   std::function<void(bool)> onBypassChanged;
   std::function<void(int deltaX)> onDragWidth;
   std::function<void()> onStartDragWidth;
+  std::function<void(int deltaPx)> onHorizontalScroll;
+  std::function<void()> onRightClickUnusedEmpty;
   bool isDraggingRightEdge = false;
 
   void mouseDoubleClick(const juce::MouseEvent &e) override;
@@ -59,6 +64,10 @@ public:
   void mouseDrag(const juce::MouseEvent &e) override;
   void mouseUp(const juce::MouseEvent &e) override;
   void mouseMove(const juce::MouseEvent &e) override;
+  void mouseEnter(const juce::MouseEvent &e) override;
+  void mouseExit(const juce::MouseEvent &e) override;
+  void mouseWheelMove(const juce::MouseEvent &e,
+                      const juce::MouseWheelDetails &wheel) override;
   void showButtonHelpPopup(juce::Component *src);
 
   static const juce::Array<juce::Colour> &getPalette();
@@ -145,9 +154,11 @@ private:
   bool prevBypassed = false;
   bool prevFohEnabled = false;
   bool prevIemEnabled = false;
+  float prevIemOffset = -1.0f;
   int prevLowNote = -1;
   int prevHighNote = -1;
   bool cachedHasAnyPlugin = false;
+  bool prevUnusedEmpty = false;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RackSlotComponent)
 };

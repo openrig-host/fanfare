@@ -3,6 +3,7 @@
 #include "MidiLearnBus.h"
 #include "RackSlot.h"
 #include <JuceHeader.h>
+#include "ButtonRoles.h"
 #include "HelpLauncher.h"
 #include "ThemeManager.h"
 
@@ -58,7 +59,8 @@ public:
     };
     addAndMakeVisible(fohLearnBtn);
     fohLearnBtn.setButtonText("L");
-    fohLearnBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::ok));
+    fohLearnBtn.setClickingTogglesState(false);
+    Fanfare::setButtonRole(fohLearnBtn, Fanfare::ButtonRole::Primary);
     fohLearnBtn.setTooltip("Learn FOH fader CC");
     fohLearnBtn.onClick = [this] { armFaderLearn(true); };
 
@@ -72,7 +74,8 @@ public:
     };
     addAndMakeVisible(iemLearnBtn);
     iemLearnBtn.setButtonText("L");
-    iemLearnBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::ok));
+    iemLearnBtn.setClickingTogglesState(false);
+    Fanfare::setButtonRole(iemLearnBtn, Fanfare::ButtonRole::Primary);
     iemLearnBtn.setTooltip("Learn IEM fader CC");
     iemLearnBtn.onClick = [this] { armFaderLearn(false); };
 
@@ -87,7 +90,7 @@ public:
     };
     addAndMakeVisible(muteLearnBtn);
     muteLearnBtn.setButtonText("L");
-    muteLearnBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::danger));
+    Fanfare::setButtonRole(muteLearnBtn, Fanfare::ButtonRole::Danger);
     muteLearnBtn.setTooltip("Learn mute toggle CC (press = mute, press again = unmute)");
     muteLearnBtn.onClick = [this] { armMuteLearn(); };
 
@@ -104,7 +107,7 @@ public:
     swapCCEditor.setTooltip("CC that toggles the swap (press = B plays, press again = A plays)");
     addAndMakeVisible(swapLearnBtn);
     swapLearnBtn.setButtonText("L");
-    swapLearnBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::ok));
+    Fanfare::setButtonRole(swapLearnBtn, Fanfare::ButtonRole::Primary);
     swapLearnBtn.setTooltip("Learn instrument swap CC (press = B plays, press again = A plays)");
     swapLearnBtn.onClick = [this] { armSwapLearn(); };
     refreshSwapCombos();
@@ -136,7 +139,10 @@ public:
     addAndMakeVisible(mappingList);
     mappingList.setModel(this);
     mappingList.setColour(juce::ListBox::backgroundColourId,
-                          juce::Colours::black.withAlpha(0.3f));
+                          ThemeManager::get(Theme::Role::sunken));
+    mappingList.setColour(juce::ListBox::outlineColourId,
+                          ThemeManager::get(Theme::Role::border));
+    mappingList.setOutlineThickness(1);
     mappingList.setRowHeight(24);
 
     // --- New mapping controls ---
@@ -168,26 +174,25 @@ public:
 
     addAndMakeVisible(learnBtn);
     learnBtn.setButtonText("LEARN");
-    learnBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::iem));
+    Fanfare::setButtonRole(learnBtn, Fanfare::ButtonRole::Primary);
     learnBtn.setTooltip("Arm learn: wiggle a knob to bind the selected param");
     learnBtn.addListener(this);
 
     addAndMakeVisible(mapBtn);
     mapBtn.setButtonText("MAP");
+    Fanfare::setButtonRole(mapBtn, Fanfare::ButtonRole::Standard);
     mapBtn.addListener(this);
 
     addAndMakeVisible(invBtn);
     invBtn.setButtonText("INV");
-    invBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::warn).darker(0.3f));
-    invBtn.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::warn));
+    Fanfare::setButtonRole(invBtn, Fanfare::ButtonRole::Foh);
     invBtn.setTooltip("Invert CC direction (pull-down increases value, for B3 drawbars)");
     invBtn.setClickingTogglesState(true);
     invBtn.addListener(this);
 
     addAndMakeVisible(togBtn);
     togBtn.setButtonText("TOG");
-    togBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::warn).darker(0.3f));
-    togBtn.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::warn));
+    Fanfare::setButtonRole(togBtn, Fanfare::ButtonRole::Foh);
     togBtn.setTooltip("Toggle mode: each press flips the parameter between Min and Max (press = on, press again = off)");
     togBtn.setClickingTogglesState(true);
     togBtn.addListener(this);
@@ -208,20 +213,20 @@ public:
 
     addAndMakeVisible(passBtn);
     passBtn.setButtonText("PASS");
-    passBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::warn).darker(0.5f));
+    Fanfare::setButtonRole(passBtn, Fanfare::ButtonRole::Standard);
     passBtn.setTooltip("Add CC passthrough remap (for plugins with internal MIDI learn)");
     passBtn.addListener(this);
 
     addAndMakeVisible(ck88PresetBtn);
     ck88PresetBtn.setButtonText("CK88");
-    ck88PresetBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::iem).darker(0.5f));
+    Fanfare::setButtonRole(ck88PresetBtn, Fanfare::ButtonRole::Standard);
     ck88PresetBtn.setTooltip("Allow common CK88 CCs on this slot (mod, volume, expression, etc.)");
     ck88PresetBtn.addListener(this);
 
     // --- Quick Learn ---
     addAndMakeVisible(quickLearnBtn);
     quickLearnBtn.setButtonText("QUICK");
-    quickLearnBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::midiPC));
+    Fanfare::setButtonRole(quickLearnBtn, Fanfare::ButtonRole::Foh);
     quickLearnBtn.setClickingTogglesState(true);
     quickLearnBtn.setTooltip("Quick Learn: wiggle a CC then wiggle a plugin parameter (either order). Binds instantly.");
     quickLearnBtn.onClick = [this] {
@@ -246,39 +251,46 @@ public:
 
     addAndMakeVisible(selLearnBtn);
     selLearnBtn.setButtonText("RE-LEARN");
-    selLearnBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::iem));
+    Fanfare::setButtonRole(selLearnBtn, Fanfare::ButtonRole::Primary);
     selLearnBtn.onClick = [this] { armSelectedRelearn(); };
 
     addAndMakeVisible(selInvBtn);
     selInvBtn.setButtonText("INV");
-    selInvBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::warn).darker(0.3f));
-    selInvBtn.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::warn));
+    Fanfare::setButtonRole(selInvBtn, Fanfare::ButtonRole::Foh);
     selInvBtn.setTooltip("Toggle invert on selected mapping");
     selInvBtn.setClickingTogglesState(true);
     selInvBtn.onClick = [this] { toggleSelectedInvert(); };
 
     addAndMakeVisible(selTogBtn);
     selTogBtn.setButtonText("TOG");
-    selTogBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::warn).darker(0.3f));
-    selTogBtn.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::warn));
+    Fanfare::setButtonRole(selTogBtn, Fanfare::ButtonRole::Foh);
     selTogBtn.setTooltip("Toggle latch mode on selected mapping (press = on, press again = off)");
     selTogBtn.setClickingTogglesState(true);
     selTogBtn.onClick = [this] { toggleSelectedToggleMode(); };
 
     addAndMakeVisible(delBtn);
     delBtn.setButtonText("DELETE");
-    delBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::danger));
+    Fanfare::setButtonRole(delBtn, Fanfare::ButtonRole::Danger);
     delBtn.onClick = [this] { deleteSelected(); };
 
+    for (auto* lbl : { &fohLabel, &iemLabel, &muteLabel, &swapLabel, &chLabel,
+                       &minLabel, &maxLabel, &ccLabel, &passFromLabel, &passToLabel,
+                       &selMinLabel, &selMaxLabel }) {
+      lbl->setFont(juce::FontOptions("Barlow Condensed", 12.0f, juce::Font::bold));
+      lbl->setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
+    }
+    fohLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::foh));
+    iemLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::iem));
+
     addAndMakeVisible(statusLabel);
-    statusLabel.setColour(juce::Label::textColourId, juce::Colours::orange);
+    statusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
     statusLabel.setFont(juce::FontOptions(12.0f));
 
     updateMappingList();
     mappingList.updateContent();
     setSize(660, 510);
 
-    // Opened via long-press on the strip's MUTE / FOH / IEM button — arm the
+    // Opened via long-press on the strip's MUTE / FOH / IEM button - arm the
     // matching learn right away so the next CC captured binds it.
     if (autoArmLearn == 1)
       armFaderLearn(true);
@@ -431,7 +443,7 @@ public:
     int a = swapACombo.getSelectedId() - 1;
     int b = swapBCombo.getSelectedId() - 1;
     if (a < 0 || b < 0) {
-      slot.setSwapPair(-1, a, b); // incomplete — clear any binding
+      slot.setSwapPair(-1, a, b); // incomplete - clear any binding
       return;
     }
     if (a == b) {
@@ -613,7 +625,7 @@ public:
       return;
     }
 
-    // Both captured — bind
+    // Both captured - bind
     completeQuickLearn(cc, quickLearn.chainIndex, quickLearn.paramIndex,
                        quickLearn.paramId);
   }
@@ -647,7 +659,7 @@ public:
       return;
     }
 
-    // Both captured — bind
+    // Both captured - bind
     completeQuickLearn(quickLearn.cc, chainIdx, paramIdx, paramId);
   }
 
@@ -712,18 +724,19 @@ public:
     if (rowNumber >= (int)mappings.size())
       return;
     auto &m = mappings[rowNumber];
-    g.setColour(rowIsSelected ? ThemeManager::get(Theme::Role::active).darker(0.3f)
-                              : ThemeManager::get(Theme::Role::panelAlt));
+    g.setColour(rowIsSelected ? ThemeManager::get(Theme::Role::accent).withAlpha(0.18f)
+                              : ((rowNumber % 2 == 0) ? ThemeManager::get(Theme::Role::sunken)
+                                                      : ThemeManager::get(Theme::Role::panelAlt)));
     g.fillRect(0, 0, width, height - 1);
 
     g.setColour(ThemeManager::get(Theme::Role::text));
-    g.setFont(13.0f);
+    g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
 
     if (m.type == MappingItem::Passthrough) {
       juce::String text = "CC" + juce::String(m.cc).paddedLeft('0', 3) +
                           "  >  CC" + juce::String(m.outgoingCC).paddedLeft('0', 3) +
                           "  [PASSTHRU]";
-      g.setColour(ThemeManager::get(Theme::Role::meterMid));
+      g.setColour(ThemeManager::get(Theme::Role::foh));
       g.drawText(text, 6, 0, width - 8, height, juce::Justification::centredLeft,
                  true);
     } else {
@@ -919,13 +932,9 @@ public:
   }
 
   void paint(juce::Graphics &g) override {
-    g.fillAll(ThemeManager::get(Theme::Role::panel));
-    g.setColour(ThemeManager::get(Theme::Role::text));
-    g.setFont(16.0f);
-    g.drawText("CC Assignment Manager", 10, 10, getWidth() - 20, 24,
-               juce::Justification::centred);
-    g.setColour(juce::Colours::grey);
-    g.drawHorizontalLine(40, 10.0f, (float)getWidth() - 10.0f);
+    Fanfare::ModalFrame::paintOverlayScrimAndPanel(
+        g, getLocalBounds(), getLocalBounds(),
+        "CC ASSIGNMENT MANAGER // " + slot.getName().toUpperCase(), 40);
   }
 
   void resized() override {

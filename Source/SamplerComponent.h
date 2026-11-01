@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "RackSlot.h"
 #include "BoutiqueLookAndFeel.h"
+#include "ButtonRoles.h"
 #include "WaveformSpliceEditor.h"
 #include "HelpLauncher.h"
 #include "ThemeManager.h"
@@ -14,14 +15,14 @@ public:
         : slotRef(slot), idx(slotIndex)
     {
         padLabel.setText("PAD " + juce::String(idx + 1), juce::dontSendNotification);
-        padLabel.setFont(juce::FontOptions(13.0f, juce::Font::bold));
-        padLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
+        padLabel.setFont(juce::FontOptions("Barlow Condensed", 13.0f, juce::Font::bold));
+        padLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
         addAndMakeVisible(padLabel);
 
         // MIDI Learn Button (L)
         learnBtn.setButtonText("L");
         learnBtn.setTooltip("MIDI Learn Root & Range");
-        learnBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel));
+        Fanfare::setButtonRole(learnBtn, Fanfare::ButtonRole::Standard);
         learnBtn.onClick = [this] {
             isLearning = !isLearning;
             setLearningState(isLearning);
@@ -29,12 +30,12 @@ public:
         };
         addAndMakeVisible(learnBtn);
 
-        dropButton.setButtonText("[ Drag & Drop WAV here or Click ]");
-        dropButton.onClick = [this] { 
+        dropButton.setButtonText("+ Load WAV or Drop File");
+        Fanfare::setButtonRole(dropButton, Fanfare::ButtonRole::PluginSlot);
+        dropButton.onClick = [this] {
             if (onRowSelected) onRowSelected();
-            chooseFile(); 
+            chooseFile();
         };
-        dropButton.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel).darker(0.3f));
         addAndMakeVisible(dropButton);
 
         volSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
@@ -46,15 +47,14 @@ public:
 
         volCcBtn.setButtonText("CC: --");
         volCcBtn.setTooltip("Set MIDI CC mapping for pad volume");
-        volCcBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel));
+        Fanfare::setButtonRole(volCcBtn, Fanfare::ButtonRole::Standard);
         volCcBtn.onClick = [this] { showCcMenu(); };
         addAndMakeVisible(volCcBtn);
 
         loopBtn.setButtonText("LOOP");
         loopBtn.setClickingTogglesState(true);
         loopBtn.setTooltip("Enable sample looping");
-        loopBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel));
-        loopBtn.setColour(juce::TextButton::buttonOnColourId, juce::Colours::orange.darker(0.3f));
+        Fanfare::setButtonRole(loopBtn, Fanfare::ButtonRole::Foh);
         loopBtn.onClick = [this] { updateConfig(); };
         addAndMakeVisible(loopBtn);
 
@@ -81,8 +81,6 @@ public:
         rootSlider.setTextBoxIsEditable(true);
         addAndMakeVisible(rootSlider);
 
-        // Two-value horizontal slider for Key Range. The built-in text box
-        // can't edit per-thumb values, so dedicated editors drive lo/hi.
         rangeSlider.setSliderStyle(juce::Slider::TwoValueHorizontal);
         rangeSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
         rangeSlider.setRange(0, 127, 1);
@@ -94,14 +92,14 @@ public:
         };
         addAndMakeVisible(rangeSlider);
 
-        rangeLoEditor.setFont(juce::FontOptions(12.0f));
+        rangeLoEditor.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 11.5f, juce::Font::plain));
         rangeLoEditor.setJustification(juce::Justification::centred);
         rangeLoEditor.setInputRestrictions(4);
         rangeLoEditor.onReturnKey = [this] { commitRangeEditor(true); };
         rangeLoEditor.onFocusLost = [this] { commitRangeEditor(true); };
         addAndMakeVisible(rangeLoEditor);
 
-        rangeHiEditor.setFont(juce::FontOptions(12.0f));
+        rangeHiEditor.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 11.5f, juce::Font::plain));
         rangeHiEditor.setJustification(juce::Justification::centred);
         rangeHiEditor.setInputRestrictions(4);
         rangeHiEditor.onReturnKey = [this] { commitRangeEditor(false); };
@@ -110,8 +108,7 @@ public:
 
         clearBtn.setButtonText("X");
         clearBtn.setTooltip("Clear sample");
-        clearBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::red.darker(0.3f));
-        clearBtn.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+        Fanfare::setButtonRole(clearBtn, Fanfare::ButtonRole::Danger);
         clearBtn.onClick = [this] {
             auto cfg = slotRef.getSampler().getSlotConfig(idx);
             cfg.wavPath = "";
@@ -125,10 +122,11 @@ public:
 
     void paint(juce::Graphics& g) override {
         if (isSelected) {
-            g.setColour(juce::Colours::cyan.withAlpha(0.12f));
-            g.fillRoundedRectangle(getLocalBounds().toFloat(), 4.0f);
-            g.setColour(juce::Colours::cyan.withAlpha(0.35f));
-            g.drawRoundedRectangle(getLocalBounds().toFloat(), 4.0f, 1.0f);
+            const auto accent = ThemeManager::get(Theme::Role::accent);
+            g.setColour(accent.withAlpha(0.12f));
+            g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), 3.0f);
+            g.setColour(accent.withAlpha(0.45f));
+            g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), 3.0f, 1.0f);
         }
     }
 
@@ -137,7 +135,7 @@ public:
         padLabel.setBounds(bounds.removeFromLeft(40).reduced(2));
         learnBtn.setBounds(bounds.removeFromLeft(20).reduced(2));
         clearBtn.setBounds(bounds.removeFromRight(25).reduced(2));
-        
+
         int w = bounds.getWidth();
         dropButton.setBounds(bounds.removeFromLeft((int)(w * 0.28f)).reduced(2));
         volSlider.setBounds(bounds.removeFromLeft((int)(w * 0.10f)).reduced(2));
@@ -171,19 +169,18 @@ public:
     void setSelected(bool s) {
         if (isSelected != s) {
             isSelected = s;
+            padLabel.setColour(juce::Label::textColourId,
+                               isSelected ? ThemeManager::get(Theme::Role::accent)
+                                          : ThemeManager::get(Theme::Role::engrave));
             repaint();
         }
     }
 
     void setLearningState(bool l) {
         isLearning = l;
-        if (isLearning) {
-            learnBtn.setButtonText("L");
-            learnBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::red);
-        } else {
-            learnBtn.setButtonText("L");
-            learnBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel));
-        }
+        learnBtn.setButtonText("L");
+        Fanfare::setButtonRole(learnBtn, isLearning ? Fanfare::ButtonRole::Panic : Fanfare::ButtonRole::Standard);
+        learnBtn.repaint();
     }
 
     void updateUI() {
@@ -191,11 +188,14 @@ public:
         if (cfg.wavPath.isNotEmpty()) {
             juce::File f(cfg.wavPath);
             dropButton.setButtonText(f.getFileName());
-            dropButton.setColour(juce::TextButton::buttonColourId, juce::Colours::green.darker(0.5f));
+            dropButton.getProperties().set("hasPlugin", true);
+            dropButton.getProperties().set("slotAccent", (juce::int64)ThemeManager::get(Theme::Role::ok).getARGB());
         } else {
-            dropButton.setButtonText("[ Drag & Drop WAV here ]");
-            dropButton.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel).darker(0.3f));
+            dropButton.setButtonText("+ Load WAV or Drop File");
+            dropButton.getProperties().set("hasPlugin", false);
+            dropButton.getProperties().remove("slotAccent");
         }
+        dropButton.repaint();
 
         volSlider.setValue(cfg.volume, juce::dontSendNotification);
         pitchSlider.setValue(cfg.pitchOffsetSemitones, juce::dontSendNotification);
@@ -207,11 +207,12 @@ public:
         loopBtn.setToggleState(cfg.isLooping, juce::dontSendNotification);
         if (cfg.volumeCC >= 0) {
             volCcBtn.setButtonText("CC: " + juce::String(cfg.volumeCC));
-            volCcBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::cyan.darker(0.6f));
+            Fanfare::setButtonRole(volCcBtn, Fanfare::ButtonRole::Primary);
         } else {
             volCcBtn.setButtonText("CC: --");
-            volCcBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel));
+            Fanfare::setButtonRole(volCcBtn, Fanfare::ButtonRole::Standard);
         }
+        volCcBtn.repaint();
     }
 
     std::function<void()> onRowSelected;
@@ -239,7 +240,7 @@ private:
         cfg.wavPath = file.getFullPathName();
         slotRef.getSampler().setSlotConfig(idx, cfg);
         updateUI();
-        if (onRowSelected) onRowSelected(); // refresh thumbnail editor
+        if (onRowSelected) onRowSelected();
     }
 
     void updateConfig() {
@@ -261,9 +262,6 @@ private:
         return juce::String(names[note % 12]) + juce::String(octave);
     }
 
-    // Inverse of noteToText. Returns -1.0 if unparseable. Accepts sharps (#),
-    // flats (b or U+266D), optional sign, and a required integer octave
-    // (MIDI 0 == C-1, 60 == C4). Round-trips with noteToText().
     double noteFromText(const juce::String& input) const {
         static const int baseSemitone[] = {9, 11, 0, 2, 4, 5, 7}; // A..G
         juce::String s = input.trim();
@@ -400,62 +398,40 @@ public:
               }
           })
     {
-        titleLabel.setText("SAMPLE PLAYBACK (8 ONE-SHOT PADS)", juce::dontSendNotification);
-        titleLabel.setFont(juce::FontOptions(18.0f, juce::Font::bold));
-        titleLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
-        addAndMakeVisible(titleLabel);
-
         enableBtn.setButtonText(slotRef.getSampler().enabled.load() ? "SAMPLER: ON" : "SAMPLER: OFF");
         enableBtn.setClickingTogglesState(true);
         enableBtn.setToggleState(slotRef.getSampler().enabled.load(), juce::dontSendNotification);
-        enableBtn.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::ok));
+        Fanfare::setButtonRole(enableBtn, enableBtn.getToggleState() ? Fanfare::ButtonRole::Primary : Fanfare::ButtonRole::Standard);
         enableBtn.onClick = [this] {
             bool on = enableBtn.getToggleState();
             slotRef.getSampler().enabled.store(on);
             enableBtn.setButtonText(on ? "SAMPLER: ON" : "SAMPLER: OFF");
+            Fanfare::setButtonRole(enableBtn, on ? Fanfare::ButtonRole::Primary : Fanfare::ButtonRole::Standard);
+            enableBtn.repaint();
         };
         addAndMakeVisible(enableBtn);
 
+        closeBtn.setButtonText("CLOSE");
+        Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Danger);
         closeBtn.onClick = [this] { if (closeCallback) closeCallback(); };
-        closeBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::black.withAlpha(0.2f));
         addAndMakeVisible(closeBtn);
         Fanfare::styleHelpButton(helpBtn, "#sampler", "HAAALP! Open the 8-Pad Sampler section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
-        fileHeader.setText("Sample Audio File", juce::dontSendNotification);
-        fileHeader.setFont(juce::FontOptions(11.0f));
-        fileHeader.setColour(juce::Label::textColourId, juce::Colours::grey);
-        addAndMakeVisible(fileHeader);
+        auto styleHeader = [this](juce::Label& lbl, const juce::String& text, juce::Justification just = juce::Justification::centred) {
+            lbl.setText(text, juce::dontSendNotification);
+            lbl.setFont(juce::FontOptions("Barlow Condensed", 12.0f, juce::Font::bold));
+            lbl.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
+            lbl.setJustificationType(just);
+            addAndMakeVisible(lbl);
+        };
 
-        volHeader.setText("Vol", juce::dontSendNotification);
-        volHeader.setFont(juce::FontOptions(11.0f));
-        volHeader.setColour(juce::Label::textColourId, juce::Colours::grey);
-        volHeader.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(volHeader);
-
-        pitchHeader.setText("Pitch", juce::dontSendNotification);
-        pitchHeader.setFont(juce::FontOptions(11.0f));
-        pitchHeader.setColour(juce::Label::textColourId, juce::Colours::grey);
-        pitchHeader.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(pitchHeader);
-
-        rootHeader.setText("Root", juce::dontSendNotification);
-        rootHeader.setFont(juce::FontOptions(11.0f));
-        rootHeader.setColour(juce::Label::textColourId, juce::Colours::grey);
-        rootHeader.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(rootHeader);
-
-        rangeHeader.setText("Key Map Range", juce::dontSendNotification);
-        rangeHeader.setFont(juce::FontOptions(11.0f));
-        rangeHeader.setColour(juce::Label::textColourId, juce::Colours::grey);
-        rangeHeader.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(rangeHeader);
-
-        learnHeader.setText("Lrn", juce::dontSendNotification);
-        learnHeader.setFont(juce::FontOptions(11.0f));
-        learnHeader.setColour(juce::Label::textColourId, juce::Colours::grey);
-        learnHeader.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(learnHeader);
+        styleHeader(learnHeader, "LRN");
+        styleHeader(fileHeader, "SAMPLE AUDIO FILE", juce::Justification::centredLeft);
+        styleHeader(volHeader, "VOL");
+        styleHeader(pitchHeader, "PITCH");
+        styleHeader(rootHeader, "ROOT");
+        styleHeader(rangeHeader, "KEY MAP RANGE");
 
         for (int i = 0; i < 8; ++i) {
             auto* row = new SamplerSlotRow(slotRef, i);
@@ -478,36 +454,31 @@ public:
 
         addAndMakeVisible(spliceEditor);
 
-        // Select first row by default
         selectRow(0);
     }
 
     void paint(juce::Graphics& g) override {
-        auto bounds = getLocalBounds().toFloat();
-        
-        g.fillAll(ThemeManager::get(Theme::Role::panel));
-        
-        g.setColour(ThemeManager::get(Theme::Role::iem).withAlpha(0.2f));
-        g.drawRoundedRectangle(bounds, 8.0f, 2.0f);
+        Fanfare::ModalFrame::paintOverlayScrimAndPanel(
+            g, getLocalBounds(), getLocalBounds(),
+            "SAMPLE PLAYBACK (8 ONE-SHOT PADS) // " + slotRef.getName().toUpperCase(), 48);
     }
 
     void resized() override {
-        auto bounds = getLocalBounds().reduced(15);
-        
-        auto topArea = bounds.removeFromTop(35);
-        closeBtn.setBounds(topArea.removeFromRight(35).reduced(2));
+        auto bounds = getLocalBounds().reduced(12);
+
+        auto topArea = bounds.removeFromTop(32);
+        closeBtn.setBounds(topArea.removeFromRight(58).reduced(2));
         helpBtn.setBounds(topArea.removeFromRight(76).reduced(2));
         enableBtn.setBounds(topArea.removeFromRight(120).reduced(2));
-        titleLabel.setBounds(topArea.reduced(2));
-        
-        bounds.removeFromTop(5);
-        
+
+        bounds.removeFromTop(8);
+
         auto headerArea = bounds.removeFromTop(20);
         headerArea.removeFromLeft(40);
         learnHeader.setBounds(headerArea.removeFromLeft(20));
         headerArea.removeFromLeft(5);
         headerArea.removeFromRight(27);
-        
+
         int w = headerArea.getWidth();
         fileHeader.setBounds(headerArea.removeFromLeft((int)(w * 0.35f)));
         volHeader.setBounds(headerArea.removeFromLeft((int)(w * 0.12f)));
@@ -516,12 +487,12 @@ public:
         rangeHeader.setBounds(headerArea);
 
         bounds.removeFromTop(2);
-        
+
         auto editorArea = bounds.removeFromBottom(120);
         spliceEditor.setBounds(editorArea);
 
         bounds.removeFromBottom(10);
-        
+
         int rowHeight = bounds.getHeight() / 8;
         for (auto* row : rows) {
             row->setBounds(bounds.removeFromTop(rowHeight));
@@ -533,7 +504,7 @@ public:
         for (int i = 0; i < 8; ++i) {
             rows[i]->setSelected(i == idx);
         }
-        
+
         auto cfg = slotRef.getSampler().getSlotConfig(idx);
         if (cfg.wavPath.isNotEmpty()) {
             spliceEditor.setFile(juce::File(cfg.wavPath), cfg.startRatio, cfg.endRatio);
@@ -546,23 +517,22 @@ public:
         if (learningSlotIndex >= 0 && learningSlotIndex < 8) {
             auto* row = rows[learningSlotIndex];
             auto cfg = slotRef.getSampler().getSlotConfig(learningSlotIndex);
-            
+
             if (learnedLow < 0) {
                 learnedLow = noteNum;
                 learnedHigh = noteNum;
-                cfg.rootNote = noteNum; // First note sets the root
+                cfg.rootNote = noteNum;
             } else {
                 learnedLow = std::min(learnedLow, noteNum);
                 learnedHigh = std::max(learnedHigh, noteNum);
             }
-            
+
             cfg.keyLow = learnedLow;
             cfg.keyHigh = learnedHigh;
             slotRef.getSampler().setSlotConfig(learningSlotIndex, cfg);
-            
+
             row->updateUI();
-            
-            // Refresh waveform editor if this row is selected
+
             if (learningSlotIndex == selectedRowIndex) {
                 selectRow(selectedRowIndex);
             }
@@ -573,9 +543,8 @@ private:
     RackSlot& slotRef;
     std::function<void()> closeCallback;
 
-    juce::Label titleLabel;
     juce::TextButton enableBtn;
-    juce::TextButton closeBtn{"X"};
+    juce::TextButton closeBtn{"CLOSE"};
     juce::TextButton helpBtn{"HAAALP!"};
 
     juce::Label learnHeader, fileHeader, volHeader, pitchHeader, rootHeader, rangeHeader;

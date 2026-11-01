@@ -1,11 +1,13 @@
 #include "QueueButtonComponent.h"
+#include "BoutiqueLookAndFeel.h"
 #include "RigLibrary.h"
 
 namespace Fanfare {
 
 QueueButtonComponent::QueueButtonComponent(int index)
     : juce::Button("QueueButton_" + juce::String(index)), slotIndex(index) {
-    setTooltip(slotIndex == 0 ? "CORE SONG (Default stage song)" : "Stage Queue Slot " + juce::String(slotIndex));
+    setTooltip(slotIndex == 0 ? "CORE SONG (Default stage song - click to load, right-click or drag to assign)"
+                              : "Stage Queue Slot " + juce::String(slotIndex) + " (Click to load, drag a .json song or right-click to assign)");
 }
 
 void QueueButtonComponent::setAssignedFile(const juce::File& file) {
@@ -72,80 +74,92 @@ void QueueButtonComponent::mouseDown(const juce::MouseEvent& e) {
     juce::Button::mouseDown(e);
 }
 
-void QueueButtonComponent::paintButton(juce::Graphics& g, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) {
-    auto bounds = getLocalBounds().toFloat();
+void QueueButtonComponent::paintButton(juce::Graphics& g,
+                                       bool shouldDrawButtonAsHighlighted,
+                                       bool shouldDrawButtonAsDown) {
+    const auto& t = ThemeManager::getInstance().active();
+    auto bounds = getLocalBounds().toFloat().reduced(0.5f);
+    const float radius = 3.0f;
 
-    // Background color determination
-    juce::Colour bgColour = ThemeManager::get(Theme::Role::panelAlt);
-    juce::Colour borderColour = juce::Colour(0xFF33383F);
+    const bool isCore = (slotIndex == 0);
+    const bool hasSong = assignedFile.existsAsFile();
 
-    bool isCore = (slotIndex == 0);
+    // Hardware cap vs recessed empty slot
+    juce::Colour topCol = hasSong || isCore ? t.faceTop : t.sunken;
+    juce::Colour botCol = hasSong || isCore ? t.faceBot : t.sunken;
+    juce::Colour borderCol = isActive ? t.accent : (hasSong ? t.borderStrong : t.hairline);
 
     if (isActive) {
-        bgColour = isCore ? juce::Colour(0xFF005A9E) : ThemeManager::get(Theme::Role::accent).darker(0.3f);
-        borderColour = ThemeManager::get(Theme::Role::accent);
+        topCol = t.raised.interpolatedWith(t.accent, 0.14f);
+        botCol = t.panelAlt.interpolatedWith(t.accent, 0.08f);
     } else if (isPreloaded) {
-        bgColour = juce::Colour(0xFF1B3D2F); // Ready green tint
-        borderColour = ThemeManager::get(Theme::Role::ok);
-    } else if (isCore) {
-        bgColour = juce::Colour(0xFF1E2638);
-        borderColour = juce::Colour(0xFF2A3C5A);
+        topCol = t.faceTop.interpolatedWith(t.ok, 0.10f);
+        botCol = t.faceBot.interpolatedWith(t.ok, 0.06f);
+        borderCol = t.ok.withAlpha(0.75f);
     }
 
     if (shouldDrawButtonAsDown) {
-        bgColour = bgColour.darker(0.3f);
+        topCol = t.pressTop;
+        botCol = t.pressBot;
+        bounds = bounds.translated(0.0f, 1.0f);
     } else if (shouldDrawButtonAsHighlighted || isDragHover) {
-        bgColour = bgColour.brighter(0.2f);
+        topCol = topCol.interpolatedWith(t.text, 0.06f);
+        botCol = botCol.interpolatedWith(t.text, 0.04f);
     }
 
     if (isDragHover) {
-        borderColour = juce::Colour(0xFF00E5FF);
+        borderCol = t.accent;
     }
 
-    g.setColour(bgColour);
-    g.fillRoundedRectangle(bounds.reduced(1.0f), 5.0f);
+    juce::ColourGradient grad(topCol, bounds.getX(), bounds.getY(),
+                              botCol, bounds.getX(), bounds.getBottom(), false);
+    g.setGradientFill(grad);
+    g.fillRoundedRectangle(bounds, radius);
 
-    g.setColour(borderColour);
-    g.drawRoundedRectangle(bounds.reduced(1.0f), 5.0f, isDragHover || isActive ? 2.5f : 1.2f);
-
-    // Slot Category Header Tag
-    auto tagArea = bounds.removeFromTop(14.0f).reduced(4.0f, 2.0f);
-    g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
-    if (isCore) {
-        g.setColour(juce::Colour(0xFF00E5FF));
-        g.drawText("CORE SONG", tagArea, juce::Justification::centredLeft, true);
-    } else {
-        g.setColour(juce::Colour(0xFF8E8E93));
-        g.drawText("NEXT " + juce::String(slotIndex), tagArea, juce::Justification::centredLeft, true);
+    // Top bevel highlight on populated caps
+    if ((hasSong || isCore) && !shouldDrawButtonAsDown) {
+        g.setColour(t.bevelHi);
+        g.drawHorizontalLine((int)bounds.getY() + 1, bounds.getX() + 2.0f, bounds.getRight() - 2.0f);
     }
 
-    // Preload Status Badge
-    if (isPreloaded) {
-        g.setColour(ThemeManager::get(Theme::Role::ok));
-        g.drawText("READY", tagArea, juce::Justification::centredRight, true);
+    // Bottom 2px status bar (Active = teal, Ready = ok sage, Preloading = warn amber, Assigned = dim hairline)
+    if (isActive || isPreloaded || isPreloading || hasSong) {
+        juce::Colour barCol = isActive ? t.accent
+                            : (isPreloaded ? t.ok
+                            : (isPreloading ? t.warn : t.borderStrong));
+        g.setColour(barCol);
+        g.fillRect(bounds.getX() + 2.0f, bounds.getBottom() - 2.5f,
+                   bounds.getWidth() - 4.0f, 2.0f);
+    }
+
+    g.setColour(borderCol);
+    g.drawRoundedRectangle(bounds, radius, (isActive || isDragHover) ? 1.5f : 1.0f);
+
+    // Top engraved index row
+    auto inner = bounds.reduced(5.0f, 2.0f);
+    auto tagArea = inner.removeFromTop(12.0f);
+    g.setFont(BoutiqueLookAndFeel::condensedFont(10.0f, 0.08f));
+    g.setColour(isCore ? t.accent : t.engrave);
+    g.drawText(isCore ? "CORE" : juce::String(slotIndex).paddedLeft('0', 2),
+               tagArea, juce::Justification::centredLeft, false);
+
+    if (isActive) {
+        g.setColour(t.accent);
+        g.drawText("LIVE", tagArea, juce::Justification::centredRight, false);
+    } else if (isPreloaded) {
+        g.setColour(t.ok);
+        g.drawText("READY", tagArea, juce::Justification::centredRight, false);
     } else if (isPreloading) {
-        g.setColour(juce::Colours::orange);
-        g.drawText("PRELOADING...", tagArea, juce::Justification::centredRight, true);
-    } else if (isActive) {
-        g.setColour(juce::Colours::white);
-        g.drawText("PLAYING", tagArea, juce::Justification::centredRight, true);
+        g.setColour(t.warn);
+        g.drawText("LOAD", tagArea, juce::Justification::centredRight, false);
     }
 
-    // Main Song Title text
-    juce::String title;
-    if (assignedFile.existsAsFile()) {
-        title = assignedFile.getFileNameWithoutExtension();
-    } else if (isCore) {
-        title = "CORE SONG";
-    } else {
-        title = "[ Drag Song Here ]";
-    }
-
-    g.setFont(juce::FontOptions(isActive ? 15.0f : 13.5f, juce::Font::bold));
-    g.setColour(assignedFile.existsAsFile() ? juce::Colours::white : juce::Colours::grey.withAlpha(0.6f));
-    
-    auto titleArea = bounds.reduced(6.0f, 2.0f);
-    g.drawText(title, titleArea, juce::Justification::centred, true);
+    // Main Song Title
+    juce::String title = hasSong ? assignedFile.getFileNameWithoutExtension()
+                                 : (isCore ? "CORE SONG" : "EMPTY");
+    g.setFont(BoutiqueLookAndFeel::condensedFont(hasSong ? 13.5f : 11.5f, hasSong ? 0.02f : 0.06f));
+    g.setColour(hasSong ? t.text : (isCore ? t.textDim : t.textFaint));
+    g.drawText(title, inner.withTrimmedBottom(2.0f), juce::Justification::centred, true);
 }
 
 } // namespace Fanfare

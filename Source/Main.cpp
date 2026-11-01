@@ -96,17 +96,138 @@ public:
       setFullScreen(true);
 #else
       setResizable(true, true);
-      centreWithSize(getWidth(), getHeight());
+      setResizeLimits(960, 560, 16384, 16384);
+
+      const auto *display =
+          juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();
+      const juce::Rectangle<int> workArea =
+          display != nullptr ? display->userArea : getParentMonitorArea();
+
+      // Reserve vertical headroom for the native OS title bar + frame border
+      // before the peer exists so AdjustWindowRectEx never pushes top < 0.
+      const int maxClientW = juce::jmax(960, workArea.getWidth() - 16);
+      const int maxClientH = juce::jmax(560, workArea.getHeight() - 48);
+      int initW = juce::jmin(getWidth(), maxClientW);
+      int initH = juce::jmin(getHeight(), maxClientH);
+
+      bool restoredSavedBounds = false;
+      bool wantMaximised = false;
+      auto settingsFile =
+          FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
+      if (settingsFile.existsAsFile()) {
+        auto v = juce::JSON::parse(settingsFile.loadFileAsString());
+        if (v.isObject()) {
+          if (v.hasProperty("windowMaximised"))
+            wantMaximised = (bool)v["windowMaximised"];
+          juce::String savedBounds =
+              v.getProperty("windowBounds", "").toString().trim();
+          if (savedBounds.isNotEmpty()) {
+            auto r = juce::Rectangle<int>::fromString(savedBounds);
+            if (r.getWidth() >= 960 && r.getHeight() >= 560) {
+              setBoundsConstrained(r);
+              restoredSavedBounds = true;
+            }
+          }
+        }
+      }
+
+      if (!restoredSavedBounds) {
+        centreWithSize(initW, initH);
+        // Shift client area down slightly to account for native top title bar
+        setTopLeftPosition(getX(),
+                           juce::jmax(workArea.getY() + 34, getY() + 14));
+      }
 #endif
 
       setVisible(true);
+
+#if !(JUCE_IOS || JUCE_ANDROID)
+      if (wantMaximised) {
+        setFullScreen(true);
+      } else {
+        clampNativeFrameToWorkArea();
+        juce::Component::SafePointer<MainWindow> safeThis(this);
+        juce::MessageManager::callAsync([safeThis]() {
+          if (safeThis != nullptr && !safeThis->isFullScreen())
+            safeThis->clampNativeFrameToWorkArea();
+        });
+      }
+#endif
     }
 
+    ~MainWindow() override { saveWindowBoundsToSettings(); }
+
     void closeButtonPressed() override {
+      saveWindowBoundsToSettings();
       // This is called when the user tries to close this window. Here, we'll
       // just ask the app to quit when this happens, but you can change this to
       // do whatever you need.
       JUCEApplication::getInstance()->systemRequestedQuit();
+    }
+
+    void clampNativeFrameToWorkArea() {
+#ifdef _WIN32
+      if (auto *peer = getPeer()) {
+        HWND hwnd = static_cast<HWND>(peer->getNativeHandle());
+        if (hwnd != nullptr && !IsIconic(hwnd) && !IsZoomed(hwnd)) {
+          HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+          MONITORINFO mi{};
+          mi.cbSize = sizeof(mi);
+          RECT wr{};
+          if (GetMonitorInfo(hMon, &mi) && GetWindowRect(hwnd, &wr)) {
+            const int workW = mi.rcWork.right - mi.rcWork.left;
+            const int workH = mi.rcWork.bottom - mi.rcWork.top;
+            int winW = wr.right - wr.left;
+            int winH = wr.bottom - wr.top;
+            int winX = wr.left;
+            int winY = wr.top;
+
+            if (winW > workW)
+              winW = workW;
+            if (winH > workH)
+              winH = workH;
+
+            if (winX + winW > mi.rcWork.right)
+              winX = mi.rcWork.right - winW;
+            if (winX < mi.rcWork.left)
+              winX = mi.rcWork.left;
+
+            if (winY + winH > mi.rcWork.bottom)
+              winY = mi.rcWork.bottom - winH;
+            if (winY < mi.rcWork.top)
+              winY = mi.rcWork.top;
+
+            if (winX != wr.left || winY != wr.top ||
+                winW != (wr.right - wr.left) || winH != (wr.bottom - wr.top)) {
+              SetWindowPos(hwnd, nullptr, winX, winY, winW, winH,
+                           SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+          }
+        }
+      }
+#endif
+    }
+
+    void saveWindowBoundsToSettings() const {
+#if !(JUCE_IOS || JUCE_ANDROID)
+      auto f =
+          FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
+      juce::var v;
+      if (f.existsAsFile())
+        v = juce::JSON::parse(f.loadFileAsString());
+      if (!v.isObject())
+        v = juce::var(new juce::DynamicObject());
+      if (auto *obj = v.getDynamicObject()) {
+        const bool maximised = isFullScreen();
+        obj->setProperty("windowMaximised", maximised);
+        if (!maximised && !isMinimised() && getWidth() >= 960 &&
+            getHeight() >= 560) {
+          obj->setProperty("windowBounds", getBounds().toString());
+        }
+      }
+      f.getParentDirectory().createDirectory();
+      f.replaceWithText(juce::JSON::toString(v));
+#endif
     }
 
     /* Note: Be careful if you override any DocumentWindow methods - the base

@@ -1,4 +1,5 @@
 #include "SceneButtonComponent.h"
+#include "BoutiqueLookAndFeel.h"
 #include "RigLibrary.h"
 
 namespace Fanfare {
@@ -64,69 +65,79 @@ void SceneButtonComponent::mouseDown(const juce::MouseEvent& e) {
         }
         return;
     }
-    
+
     if (onClicked) {
         onClicked(sceneIndex);
     }
-    
+
     juce::Button::mouseDown(e);
 }
 
-void SceneButtonComponent::paintButton(juce::Graphics& g, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) {
-    auto bounds = getLocalBounds().toFloat();
+void SceneButtonComponent::paintButton(juce::Graphics& g,
+                                       bool shouldDrawButtonAsHighlighted,
+                                       bool shouldDrawButtonAsDown) {
+    const auto& t = ThemeManager::getInstance().active();
+    auto bounds = getLocalBounds().toFloat().reduced(0.5f);
+    const float radius = 3.0f;
+    const bool hasSetupFile = assignedFile.existsAsFile();
 
-    juce::Colour bgColour = ThemeManager::get(Theme::Role::panelAlt);
-    juce::Colour borderColour = juce::Colour(0xFF33383F);
-
-    bool hasSetupFile = assignedFile.existsAsFile();
-
-    if (isActive) {
-        bgColour = hasSetupFile ? juce::Colour(0xFF005A9E) : ThemeManager::get(Theme::Role::accent);
-        borderColour = ThemeManager::get(Theme::Role::accent);
-    } else if (hasSetupFile) {
-        bgColour = juce::Colour(0xFF1E2638);
-        borderColour = juce::Colour(0xFF2A3C5A);
-    } else if (midiPC >= 0) {
-        bgColour = ThemeManager::get(Theme::Role::iem).darker(0.4f);
-    }
+    juce::Colour topCol = isActive ? t.raised.interpolatedWith(t.accent, 0.14f) : t.faceTop;
+    juce::Colour botCol = isActive ? t.panelAlt.interpolatedWith(t.accent, 0.08f) : t.faceBot;
+    juce::Colour borderCol = isActive ? t.accent : t.borderStrong;
 
     if (shouldDrawButtonAsDown) {
-        bgColour = bgColour.darker(0.3f);
+        topCol = t.pressTop;
+        botCol = t.pressBot;
+        bounds = bounds.translated(0.0f, 1.0f);
     } else if (shouldDrawButtonAsHighlighted || isDragHover) {
-        bgColour = bgColour.brighter(0.2f);
+        topCol = topCol.interpolatedWith(t.text, 0.06f);
+        botCol = botCol.interpolatedWith(t.text, 0.04f);
     }
 
     if (isDragHover) {
-        borderColour = juce::Colour(0xFF00E5FF);
+        borderCol = t.accent;
     }
 
-    g.setColour(bgColour);
-    g.fillRoundedRectangle(bounds.reduced(1.0f), 4.0f);
+    juce::ColourGradient grad(topCol, bounds.getX(), bounds.getY(),
+                              botCol, bounds.getX(), bounds.getBottom(), false);
+    g.setGradientFill(grad);
+    g.fillRoundedRectangle(bounds, radius);
 
-    g.setColour(borderColour);
-    g.drawRoundedRectangle(bounds.reduced(1.0f), 4.0f, isDragHover || isActive ? 2.5f : 1.2f);
-
-    // Text Display
-    juce::String title;
-    if (hasSetupFile) {
-        title = assignedFile.getFileNameWithoutExtension();
-    } else {
-        title = defaultName;
+    if (!shouldDrawButtonAsDown) {
+        g.setColour(t.bevelHi);
+        g.drawHorizontalLine((int)bounds.getY() + 1, bounds.getX() + 2.0f, bounds.getRight() - 2.0f);
     }
 
-    g.setFont(juce::FontOptions(isActive ? 14.0f : 12.5f, juce::Font::bold));
-    g.setColour(isActive ? juce::Colours::white : (hasSetupFile ? juce::Colour(0xFF00E5FF) : juce::Colours::white.withAlpha(0.85f)));
-    
-    auto titleArea = bounds.reduced(4.0f, 2.0f);
-    g.drawText(title, titleArea, juce::Justification::centred, true);
+    // Active scene gets a crisp 2px bottom accent bar (rather than a neon flood)
+    if (isActive) {
+        g.setColour(t.accent);
+        g.fillRect(bounds.getX() + 2.0f, bounds.getBottom() - 2.5f,
+                   bounds.getWidth() - 4.0f, 2.0f);
+    }
 
-    // Indicator badge for assigned Setup or MIDI trigger
+    g.setColour(borderCol);
+    g.drawRoundedRectangle(bounds, radius, (isActive || isDragHover) ? 1.5f : 1.0f);
+
+    // Scene index tag on left + title centered
+    juce::String title = hasSetupFile ? assignedFile.getFileNameWithoutExtension() : defaultName;
+    auto textRect = bounds.reduced(8.0f, 2.0f);
+
+    g.setFont(BoutiqueLookAndFeel::condensedFont(10.0f, 0.06f));
+    g.setColour(isActive ? t.accent : t.engrave);
+    g.drawText(juce::String(sceneIndex + 1), textRect.removeFromLeft(14.0f),
+               juce::Justification::centredLeft, false);
+
+    g.setFont(BoutiqueLookAndFeel::condensedFont(isActive ? 13.5f : 12.5f, 0.03f));
+    g.setColour(isActive ? t.text : (hasSetupFile ? t.iem : t.textDim));
+    g.drawText(title, textRect.withTrimmedRight(10.0f), juce::Justification::centred, true);
+
+    // Subtle hardware LED indicator dot for linked Song or MIDI PC trigger
     if (hasSetupFile) {
-        g.setColour(juce::Colour(0xFF00E5FF));
-        g.fillEllipse(bounds.getRight() - 8.0f, bounds.getY() + 4.0f, 4.0f, 4.0f);
+        g.setColour(t.iem);
+        g.fillEllipse(bounds.getRight() - 8.5f, bounds.getY() + 5.0f, 4.5f, 4.5f);
     } else if (midiPC >= 0) {
-        g.setColour(juce::Colours::orange);
-        g.fillEllipse(bounds.getRight() - 8.0f, bounds.getY() + 4.0f, 4.0f, 4.0f);
+        g.setColour(t.warn);
+        g.fillEllipse(bounds.getRight() - 8.5f, bounds.getY() + 5.0f, 4.5f, 4.5f);
     }
 }
 

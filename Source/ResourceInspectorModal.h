@@ -1,48 +1,47 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "BoutiqueLookAndFeel.h"
+#include "ButtonRoles.h"
 #include "FanfareEngine.h"
 #include "HelpLauncher.h"
 #include "ThemeManager.h"
 
 class ResourceInspectorModal : public juce::Component,
-                              public juce::TableListBoxModel,
-                              public juce::Timer {
+                               public juce::TableListBoxModel,
+                               public juce::Timer {
 public:
     ResourceInspectorModal(FanfareEngine& eng, std::function<void()> onClose)
-        : engine(eng), closeCallback(onClose)
+        : engine(eng), closeCallback(std::move(onClose))
     {
-        setOpaque(true);
+        setOpaque(false);
+        titleLabel.setVisible(false);
 
-        titleLabel.setText("FANFARE RESOURCE & DSP INSPECTOR", juce::dontSendNotification);
-        titleLabel.setFont(juce::FontOptions(16.0f, juce::Font::bold));
-        titleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
-        addAndMakeVisible(titleLabel);
-
-        closeBtn.setButtonText("X");
-        closeBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::red.darker(0.3f));
+        closeBtn.setButtonText("CLOSE");
+        Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Subtle);
         closeBtn.onClick = [this] {
             if (closeCallback) closeCallback();
         };
         addAndMakeVisible(closeBtn);
+
         Fanfare::styleHelpButton(helpBtn, "#resource-inspector", "HAAALP! Open the Resource & DSP Inspector section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
         refreshBtn.setButtonText("REFRESH STATS");
-        refreshBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
+        Fanfare::setButtonRole(refreshBtn, Fanfare::ButtonRole::Standard);
         refreshBtn.onClick = [this] {
             updateData();
         };
         addAndMakeVisible(refreshBtn);
 
         infoLabel.setText("Note: In-process VST/VST3 memory is pooled into Host Process RAM. DSP CPU % is measured per-slot in real-time.", juce::dontSendNotification);
-        infoLabel.setFont(juce::FontOptions(11.0f));
+        infoLabel.setFont(BoutiqueLookAndFeel::uiFont(11.5f, false));
         infoLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
         addAndMakeVisible(infoLabel);
 
-        // Configure Table
         table.setModel(this);
-        table.setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff12161a));
+        table.setColour(juce::ListBox::backgroundColourId, ThemeManager::get(Theme::Role::sunken));
+        table.setColour(juce::ListBox::outlineColourId, ThemeManager::get(Theme::Role::border));
         table.setOutlineThickness(1);
 
         auto& header = table.getHeader();
@@ -53,7 +52,7 @@ public:
         addAndMakeVisible(table);
 
         updateData();
-        startTimer(1000); // Live refresh every second while modal is open
+        startTimer(1000);
         setSize(740, 520);
     }
 
@@ -80,7 +79,6 @@ public:
         rows.clear();
         float totalSlotDsp = 0.0f;
 
-        // 1. Channel Slots
         std::vector<RowData> slotRows;
         for (int i = 0; i < engine.getNumSlots(); ++i) {
             if (auto* slot = engine.getSlot(i)) {
@@ -89,20 +87,17 @@ public:
                 juce::String pName = slot->getPluginName(0);
                 if (pName.isEmpty()) pName = "(Empty / Passthrough)";
                 r.pluginName = pName;
-                r.status = slot->isBypassed() ? "Bypassed" : "Active";
-                
+                r.status = slot->isBypassed() ? "Muted" : "Active";
+
                 if (!slot->isBypassed()) {
                     r.cpuUsage = slot->getCpuUsage();
                     r.hasCpu = true;
                     totalSlotDsp += r.cpuUsage;
-                } else {
-                    r.hasCpu = false;
                 }
                 slotRows.push_back(r);
             }
         }
 
-        // 2. Aux Returns
         std::vector<RowData> auxRows;
         for (int i = 0; i < engine.getNumAuxReturns(); ++i) {
             if (auto* slot = engine.getAuxReturn(i)) {
@@ -111,14 +106,12 @@ public:
                 juce::String pName = slot->getPluginName(0);
                 if (pName.isEmpty()) pName = "(Empty / Passthrough)";
                 r.pluginName = pName;
-                r.status = slot->isBypassed() ? "Bypassed" : "Active";
-                
+                r.status = slot->isBypassed() ? "Muted" : "Active";
+
                 if (!slot->isBypassed()) {
                     r.cpuUsage = slot->getCpuUsage();
                     r.hasCpu = true;
                     totalSlotDsp += r.cpuUsage;
-                } else {
-                    r.hasCpu = false;
                 }
                 auxRows.push_back(r);
             }
@@ -126,7 +119,6 @@ public:
 
         totalEngineDsp = totalSlotDsp;
 
-        // 0. Process Core Row
         RowData coreRow;
         coreRow.componentName = "Fanfare Process Core";
         coreRow.pluginName = "JUCE Host Engine";
@@ -136,12 +128,14 @@ public:
         coreRow.isCore = true;
         rows.push_back(coreRow);
 
-        // Append slots and auxes
         for (const auto& sr : slotRows)
             rows.push_back(sr);
         for (const auto& ar : auxRows)
             rows.push_back(ar);
 
+        table.setColour(juce::ListBox::backgroundColourId, ThemeManager::get(Theme::Role::sunken));
+        table.setColour(juce::ListBox::outlineColourId, ThemeManager::get(Theme::Role::border));
+        infoLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
         table.updateContent();
         repaint();
     }
@@ -150,52 +144,44 @@ public:
         return (int)rows.size();
     }
 
-    void paintRowBackground(juce::Graphics& g, int rowNumber, int /*width*/, int /*height*/, bool rowIsSelected) override {
+    void paintRowBackground(juce::Graphics& g, int rowNumber, int, int, bool rowIsSelected) override {
+        const auto& t = ThemeManager::getInstance().active();
         if (rowIsSelected) {
-            g.fillAll(ThemeManager::get(Theme::Role::accent).withAlpha(0.25f));
+            g.fillAll(t.accent.withAlpha(t.dark ? 0.22f : 0.16f));
         } else if (rowNumber == 0) {
-            g.fillAll(juce::Colour(0xff161e27));
+            g.fillAll(t.panelAlt);
         } else if (rowNumber % 2 == 1) {
-            g.fillAll(juce::Colours::white.withAlpha(0.02f));
+            g.fillAll(t.text.withAlpha(0.02f));
         }
     }
 
-    void paintCell(juce::Graphics& g, int rowNumber, int columnId, int width, int height, bool /*rowIsSelected*/) override {
+    void paintCell(juce::Graphics& g, int rowNumber, int columnId, int width, int height, bool) override {
         if (rowNumber < 0 || rowNumber >= (int)rows.size()) return;
 
+        const auto& t = ThemeManager::getInstance().active();
         const auto& r = rows[rowNumber];
-        g.setFont(juce::FontOptions(13.0f, r.isCore ? juce::Font::bold : juce::Font::plain));
+        g.setFont(columnId == 3 ? BoutiqueLookAndFeel::monoFont(11.5f, r.isCore)
+                                : BoutiqueLookAndFeel::uiFont(12.5f, r.isCore));
 
         if (columnId == 1) {
-            g.setColour(r.isCore ? ThemeManager::get(Theme::Role::accent) : ThemeManager::get(Theme::Role::text));
+            g.setColour(r.isCore ? t.accent : t.text);
             g.drawText(r.componentName, 8, 0, width - 16, height, juce::Justification::centredLeft, true);
         } else if (columnId == 2) {
-            g.setColour(r.isCore ? ThemeManager::get(Theme::Role::text) : ThemeManager::get(Theme::Role::textDim));
+            g.setColour(r.isCore ? t.text : t.textDim);
             g.drawText(r.pluginName, 8, 0, width - 16, height, juce::Justification::centredLeft, true);
         } else if (columnId == 3) {
             if (r.hasCpu) {
                 float pct = r.cpuUsage * 100.0f;
-                juce::Colour cpuColour = ThemeManager::get(Theme::Role::ok);
-                if (pct >= 40.0f) {
-                    cpuColour = juce::Colours::coral;
-                } else if (pct >= 15.0f) {
-                    cpuColour = ThemeManager::get(Theme::Role::meterMid);
-                }
+                juce::Colour cpuColour = (pct >= 40.0f) ? t.danger : ((pct >= 15.0f) ? t.warn : t.ok);
                 g.setColour(cpuColour);
-
-                juce::String cpuText;
-                if (pct < 0.05f) {
-                    cpuText = "< 0.1%";
-                } else {
-                    cpuText = juce::String(pct, 1) + "%";
-                }
+                juce::String cpuText = (pct < 0.05f) ? "< 0.1%" : (juce::String(pct, 1) + "%");
                 g.drawText(cpuText, 8, 0, width - 16, height, juce::Justification::centredLeft, true);
             } else {
-                g.setColour(ThemeManager::get(Theme::Role::textDim));
+                g.setColour(t.textFaint);
                 g.drawText("--", 8, 0, width - 16, height, juce::Justification::centredLeft, true);
             }
         } else if (columnId == 4) {
-            g.setColour(r.status == "Active" ? ThemeManager::get(Theme::Role::ok) : juce::Colours::orange);
+            g.setColour(r.status == "Active" ? t.ok : t.textDim);
             g.drawText(r.status, 8, 0, width - 16, height, juce::Justification::centredLeft, true);
         }
     }
@@ -211,66 +197,68 @@ public:
     }
 
     void paint(juce::Graphics& g) override {
-        g.fillAll(ThemeManager::get(Theme::Role::panel));
-        g.setColour(ThemeManager::get(Theme::Role::border));
-        g.drawRect(getLocalBounds(), 1);
+        const auto& t = ThemeManager::getInstance().active();
+        Fanfare::ModalFrame::paintOverlayScrimAndPanel(
+            g, getLocalBounds(), getLocalBounds(), "RESOURCE & DSP INSPECTOR", 38);
 
         auto bounds = getLocalBounds().reduced(15);
-        bounds.removeFromTop(35); // Title space
+        bounds.removeFromTop(36);
 
-        // 4 Stat Cards Row
         auto cardRow = bounds.removeFromTop(68);
-        int numCards = 4;
-        int gap = 8;
-        int cardW = (cardRow.getWidth() - (gap * (numCards - 1))) / numCards;
+        const int numCards = 4;
+        const int gap = 8;
+        const int cardW = (cardRow.getWidth() - (gap * (numCards - 1))) / numCards;
 
-        // Card 1: Process Working Set RAM
-        drawStatCard(g, cardRow.removeFromLeft(cardW), "PROCESS RAM (WS)", formatBytes(memStats.workingSetBytes), "Physical RAM in use", ThemeManager::get(Theme::Role::accent));
+        drawStatCard(g, cardRow.removeFromLeft(cardW), "PROCESS RAM (WS)",
+                     formatBytes(memStats.workingSetBytes), "Physical RAM in use", t.accent);
         cardRow.removeFromLeft(gap);
 
-        // Card 2: Private Commit Charge
-        drawStatCard(g, cardRow.removeFromLeft(cardW), "COMMIT CHARGE", formatBytes(memStats.privateCommitBytes), "Virtual Memory Allocated", ThemeManager::get(Theme::Role::raised));
+        drawStatCard(g, cardRow.removeFromLeft(cardW), "COMMIT CHARGE",
+                     formatBytes(memStats.privateCommitBytes), "Virtual Memory Allocated", t.text);
         cardRow.removeFromLeft(gap);
 
-        // Card 3: Total Engine DSP Load
         float dspPct = totalEngineDsp * 100.0f;
         juce::String dspStr = (dspPct < 0.1f) ? "< 0.1%" : (juce::String(dspPct, 1) + "%");
-        juce::Colour dspCol = (dspPct >= 40.0f) ? juce::Colours::coral : ((dspPct >= 15.0f) ? ThemeManager::get(Theme::Role::meterMid) : ThemeManager::get(Theme::Role::meterLow));
-        drawStatCard(g, cardRow.removeFromLeft(cardW), "TOTAL DSP LOAD", dspStr, "Real-Time Audio Thread", dspCol);
+        juce::Colour dspCol = (dspPct >= 40.0f) ? t.danger : ((dspPct >= 15.0f) ? t.warn : t.ok);
+        drawStatCard(g, cardRow.removeFromLeft(cardW), "TOTAL DSP LOAD",
+                     dspStr, "Real-Time Audio Thread", dspCol);
         cardRow.removeFromLeft(gap);
 
-        // Card 4: Free System RAM
-        drawStatCard(g, cardRow, "FREE SYSTEM RAM", formatBytes(memStats.freeSystemRamBytes), "Load: " + juce::String(memStats.systemRamLoadPercent) + "% of " + formatBytes(memStats.totalSystemRamBytes), ThemeManager::get(Theme::Role::ok));
+        drawStatCard(g, cardRow, "FREE SYSTEM RAM",
+                     formatBytes(memStats.freeSystemRamBytes),
+                     "Load: " + juce::String(memStats.systemRamLoadPercent) + "% of " + formatBytes(memStats.totalSystemRamBytes),
+                     t.ok);
     }
 
-    void drawStatCard(juce::Graphics& g, juce::Rectangle<int> area, const juce::String& title, const juce::String& val, const juce::String& sub, juce::Colour accent) {
-        g.setColour(juce::Colour(0xff161b22));
-        g.fillRoundedRectangle(area.toFloat(), 4.0f);
-        g.setColour(juce::Colour(0xff30363d));
-        g.drawRoundedRectangle(area.toFloat(), 4.0f, 1.0f);
+    void drawStatCard(juce::Graphics& g, juce::Rectangle<int> area, const juce::String& title,
+                      const juce::String& val, const juce::String& sub, juce::Colour accent) {
+        const auto& t = ThemeManager::getInstance().active();
+        Fanfare::ModalFrame::paintRecessedWell(g, area.toFloat(), 3.0f);
 
-        g.setColour(ThemeManager::get(Theme::Role::textDim));
-        g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+        g.setColour(t.engrave);
+        g.setFont(BoutiqueLookAndFeel::condensedFont(10.5f, 0.08f));
         g.drawText(title, area.getX() + 8, area.getY() + 6, area.getWidth() - 16, 14, juce::Justification::left);
 
         g.setColour(accent);
-        g.setFont(juce::FontOptions(17.0f, juce::Font::bold));
+        g.setFont(BoutiqueLookAndFeel::monoFont(16.0f, true));
         g.drawText(val, area.getX() + 8, area.getY() + 22, area.getWidth() - 16, 22, juce::Justification::left);
 
-        g.setColour(juce::Colours::white.withAlpha(0.6f));
-        g.setFont(juce::FontOptions(9.5f));
+        g.setColour(t.textDim);
+        g.setFont(BoutiqueLookAndFeel::uiFont(10.5f, false));
         g.drawText(sub, area.getX() + 8, area.getY() + 46, area.getWidth() - 16, 14, juce::Justification::left);
     }
 
     void resized() override {
-        closeBtn.setBounds(getWidth() - 35, 10, 25, 25);
-        helpBtn.setBounds(getWidth() - 115, 10, 74, 25);
-        titleLabel.setBounds(15, 10, getWidth() - 150, 25);
+        auto full = getLocalBounds();
+        auto top = full.removeFromTop(38).reduced(10, 6);
+        closeBtn.setBounds(top.removeFromRight(52));
+        top.removeFromRight(4);
+        helpBtn.setBounds(top.removeFromRight(68));
 
-        int topY = 125;
-        refreshBtn.setBounds(15, topY, 130, 26);
-        infoLabel.setBounds(155, topY, getWidth() - 170, 26);
-        table.setBounds(15, topY + 35, getWidth() - 30, getHeight() - topY - 45);
+        int topY = 128;
+        refreshBtn.setBounds(15, topY, 120, 26);
+        infoLabel.setBounds(144, topY, getWidth() - 159, 26);
+        table.setBounds(15, topY + 34, getWidth() - 30, getHeight() - topY - 46);
     }
 
 private:

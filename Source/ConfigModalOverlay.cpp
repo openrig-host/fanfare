@@ -1,26 +1,20 @@
 #include "ConfigModalOverlay.h"
+#include "BoutiqueLookAndFeel.h"
+#include "ButtonRoles.h"
 #include "HelpLauncher.h"
 #include "ThemeManager.h"
 #include "Version.h"
 
 ConfigModalOverlay::ConfigModalOverlay(Actions a) : actions(std::move(a)) {
-  titleLabel.setText("CONFIGURATION", juce::dontSendNotification);
-  titleLabel.setFont(juce::FontOptions(20.0f, juce::Font::bold));
-  titleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
-  titleLabel.setJustificationType(juce::Justification::centred);
-  addAndMakeVisible(titleLabel);
+  // Title is drawn as an engraved header in ModalFrame::paintOverlayScrimAndPanel
+  titleLabel.setVisible(false);
 
-  infoLabel.setColour(juce::Label::backgroundColourId,
-                      ThemeManager::get(Theme::Role::panelAlt));
-  infoLabel.setColour(juce::Label::textColourId,
-                      ThemeManager::get(Theme::Role::text).withAlpha(0.85f));
-  infoLabel.setFont(juce::FontOptions(13.0f));
-  infoLabel.setJustificationType(juce::Justification::topLeft);
+  infoLabel.setColour(juce::Label::backgroundColourId, juce::Colours::transparentBlack);
+  infoLabel.setFont(BoutiqueLookAndFeel::monoFont(11.5f, true));
+  infoLabel.setJustificationType(juce::Justification::centredLeft);
   addAndMakeVisible(infoLabel);
 
-  // Theme selector
-  themeLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
-  themeLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
+  themeLabel.setFont(BoutiqueLookAndFeel::condensedFont(12.0f, 0.08f));
   themeLabel.setJustificationType(juce::Justification::centredLeft);
   addAndMakeVisible(themeLabel);
 
@@ -29,10 +23,15 @@ ConfigModalOverlay::ConfigModalOverlay(Actions a) : actions(std::move(a)) {
                                   juce::dontSendNotification);
   themeCombo.onChange = [this] {
     ThemeManager::getInstance().setCurrentByIndex(themeCombo.getSelectedItemIndex());
+    lookAndFeelChanged();
+    themeCombo.sendLookAndFeelChange();
+    repaint();
   };
   addAndMakeVisible(themeCombo);
+  lookAndFeelChanged();
 
-  addSettingButton(audioSettingsBtn, "AUDIO SETTINGS");
+  addSettingButton(audioSettingsBtn, "AUDIO & MIDI SETTINGS");
+  Fanfare::setButtonRole(audioSettingsBtn, Fanfare::ButtonRole::Primary);
   audioSettingsBtn.setTooltip("Low-latency audio driver configuration, buffer size & sample rates.");
   audioSettingsBtn.onClick = [this] { clicked(actions.onAudioSettings); };
 
@@ -41,6 +40,7 @@ ConfigModalOverlay::ConfigModalOverlay(Actions a) : actions(std::move(a)) {
   engineTuningBtn.onClick = [this] { clicked(actions.onEngineTuning); };
 
   addSettingButton(scanPluginsBtn, "SCAN FOR PLUGINS");
+  Fanfare::setButtonRole(scanPluginsBtn, Fanfare::ButtonRole::Primary);
   scanPluginsBtn.setTooltip("Scans system VST3 directories to register installed instruments & effects.");
   scanPluginsBtn.onClick = [this] { clicked(actions.onScanPlugins); };
 
@@ -48,7 +48,8 @@ ConfigModalOverlay::ConfigModalOverlay(Actions a) : actions(std::move(a)) {
   busRoutingBtn.setTooltip("Configure FOH (Front of House) and IEM (In-Ear Monitor) output channel offsets.");
   busRoutingBtn.onClick = [this] { clicked(actions.onBusRouting); };
 
-  addSettingButton(resetAudioBtn, "RESET AUDIO");
+  addSettingButton(resetAudioBtn, "RESET AUDIO DRIVER");
+  Fanfare::setButtonRole(resetAudioBtn, Fanfare::ButtonRole::Danger);
   resetAudioBtn.setTooltip("Re-initializes audio driver threads and clears sample-rate locks mid-gig.");
   resetAudioBtn.onClick = [this] { clicked(actions.onResetAudio); };
 
@@ -58,32 +59,36 @@ ConfigModalOverlay::ConfigModalOverlay(Actions a) : actions(std::move(a)) {
     clicked(actions.onStressTestToggle);
     updateStressTestButtonState();
   };
+
   addSettingButton(aboutBtn, "ABOUT FANFARE (v" OPENRIG_VERSION_STRING ")");
   aboutBtn.setTooltip("Fanfare Stage Engine philosophy, version & stage credits.");
   aboutBtn.onClick = [this] { clicked(actions.onAbout); };
 
-  closeBtn.setButtonText("X");
-  closeBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::danger));
+  closeBtn.setButtonText("CLOSE");
+  Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Subtle);
   closeBtn.onClick = [this] {
     if (actions.onClose)
       actions.onClose();
   };
   addAndMakeVisible(closeBtn);
+
   Fanfare::styleHelpButton(helpBtn, "#settings", "HAAALP! Open the Configuration & Settings section of the User's Manual");
   addAndMakeVisible(helpBtn);
 
   refreshInfo();
   updateStressTestButtonState();
-  setSize(360, 490);
+  setSize(376, 488);
 }
 
 void ConfigModalOverlay::updateStressTestButtonState() {
-  if (actions.isStressTestActive && actions.isStressTestActive()) {
+  const bool running = (actions.isStressTestActive && actions.isStressTestActive());
+  stressTestBtn.setToggleState(running, juce::dontSendNotification);
+  if (running) {
     stressTestBtn.setButtonText("STOP STRESS TEST");
-    stressTestBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::danger).darker(0.3f));
+    Fanfare::setButtonRole(stressTestBtn, Fanfare::ButtonRole::Mute);
   } else {
     stressTestBtn.setButtonText("RUN STRESS TEST");
-    stressTestBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
+    Fanfare::setButtonRole(stressTestBtn, Fanfare::ButtonRole::Standard);
   }
 }
 
@@ -93,40 +98,50 @@ void ConfigModalOverlay::refreshInfo() {
 }
 
 void ConfigModalOverlay::paint(juce::Graphics &g) {
-  g.fillAll(ThemeManager::get(Theme::Role::scrim));
-  g.setColour(ThemeManager::get(Theme::Role::accent));
-  g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), 8.0f, 1.5f);
+  Fanfare::ModalFrame::paintOverlayScrimAndPanel(
+      g, getLocalBounds(), getLocalBounds(), "CONFIGURATION", 38);
+
+  if (!infoLabel.getBounds().isEmpty()) {
+    Fanfare::ModalFrame::paintRecessedWell(g, infoLabel.getBounds().toFloat().expanded(2.0f, 1.0f), 2.5f);
+  }
 }
 
 void ConfigModalOverlay::resized() {
-  auto area = getLocalBounds().reduced(14);
-  auto top = area.removeFromTop(30);
-  titleLabel.setBounds(top.removeFromLeft(top.getWidth() - 115));
-  helpBtn.setBounds(top.removeFromLeft(74).reduced(2, 2));
-  closeBtn.setBounds(top.removeFromRight(30));
+  auto full = getLocalBounds();
+  auto top = full.removeFromTop(38).reduced(10, 6);
+  closeBtn.setBounds(top.removeFromRight(52));
+  top.removeFromRight(4);
+  helpBtn.setBounds(top.removeFromRight(68));
 
-  infoLabel.setBounds(area.removeFromTop(70).reduced(2));
+  auto area = full.reduced(14, 10);
+  infoLabel.setBounds(area.removeFromTop(62).reduced(6, 2));
+  area.removeFromTop(8);
 
-  // Theme selector row
-  auto themeRow = area.removeFromTop(28).reduced(2);
-  themeLabel.setBounds(themeRow.removeFromLeft(70));
+  auto themeRow = area.removeFromTop(28);
+  themeLabel.setBounds(themeRow.removeFromLeft(66));
   themeCombo.setBounds(themeRow);
+  area.removeFromTop(8);
 
-  int rowH = 36;
-  audioSettingsBtn.setBounds(area.removeFromTop(rowH).reduced(2));
-  engineTuningBtn.setBounds(area.removeFromTop(rowH).reduced(2));
-  scanPluginsBtn.setBounds(area.removeFromTop(rowH).reduced(2));
-  busRoutingBtn.setBounds(area.removeFromTop(rowH).reduced(2));
-  resetAudioBtn.setBounds(area.removeFromTop(rowH).reduced(2));
-  stressTestBtn.setBounds(area.removeFromTop(rowH).reduced(2));
-  aboutBtn.setBounds(area.removeFromTop(rowH).reduced(2));
+  const int rowH = 34;
+  audioSettingsBtn.setBounds(area.removeFromTop(rowH).reduced(0, 2));
+  engineTuningBtn.setBounds(area.removeFromTop(rowH).reduced(0, 2));
+  scanPluginsBtn.setBounds(area.removeFromTop(rowH).reduced(0, 2));
+  busRoutingBtn.setBounds(area.removeFromTop(rowH).reduced(0, 2));
+  resetAudioBtn.setBounds(area.removeFromTop(rowH).reduced(0, 2));
+  stressTestBtn.setBounds(area.removeFromTop(rowH).reduced(0, 2));
+  aboutBtn.setBounds(area.removeFromTop(rowH).reduced(0, 2));
 }
 
 void ConfigModalOverlay::addSettingButton(juce::TextButton &b, const juce::String &text) {
   b.setButtonText(text);
-  b.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
-  b.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::accent));
+  Fanfare::setButtonRole(b, Fanfare::ButtonRole::Standard);
   addAndMakeVisible(b);
+}
+
+void ConfigModalOverlay::lookAndFeelChanged() {
+  const auto& t = ThemeManager::getInstance().active();
+  infoLabel.setColour(juce::Label::textColourId, t.dark ? t.textDim : t.text);
+  themeLabel.setColour(juce::Label::textColourId, t.engrave);
 }
 
 void ConfigModalOverlay::clicked(std::function<void()> &cb) {

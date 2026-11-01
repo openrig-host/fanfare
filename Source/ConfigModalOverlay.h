@@ -23,6 +23,7 @@ public:
   void updateStressTestButtonState();
   void paint(juce::Graphics &g) override;
   void resized() override;
+  void lookAndFeelChanged() override;
 
 private:
   void addSettingButton(juce::TextButton &b, const juce::String &text);

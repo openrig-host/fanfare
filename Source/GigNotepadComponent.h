@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "ButtonRoles.h"
 #include "FanfareEngine.h"
 #include "HelpLauncher.h"
 #include "ThemeManager.h"
@@ -33,7 +34,7 @@ public:
         enum Type { NormalText, ColoredText, ChordBadge };
         Type type = NormalText;
         juce::String text;
-        juce::Colour colour = juce::Colours::white;
+        juce::Colour colour;
         bool isBold = false;
     };
 
@@ -47,6 +48,14 @@ public:
     std::vector<ParsedLine> parseLines() const {
         std::vector<ParsedLine> result;
         auto lines = juce::StringArray::fromLines(rawText);
+
+        const auto textCol    = ThemeManager::get(Theme::Role::text);
+        const auto brightCol  = ThemeManager::get(Theme::Role::text);
+        const auto accentCol  = ThemeManager::get(Theme::Role::accent);
+        const auto okCol      = ThemeManager::get(Theme::Role::ok);
+        const auto fohCol     = ThemeManager::get(Theme::Role::foh);
+        const auto dangerCol  = ThemeManager::get(Theme::Role::danger);
+        const auto synthCol   = ThemeManager::get(Theme::Role::catKeyboard);
 
         for (auto line : lines) {
             ParsedLine pl;
@@ -81,14 +90,13 @@ public:
                     Token t;
                     t.type = Token::NormalText;
                     t.text = curPlain;
-                    t.colour = juce::Colour(0xfff0f6fc);
+                    t.colour = textCol;
                     pl.tokens.push_back(t);
                     curPlain.clear();
                 }
             };
 
             while (idx < len) {
-                // Check bold **...**
                 if (idx + 1 < len && line[idx] == '*' && line[idx + 1] == '*') {
                     int endBold = line.indexOf(idx + 2, "**");
                     if (endBold > idx + 1) {
@@ -96,7 +104,7 @@ public:
                         Token t;
                         t.type = Token::ColoredText;
                         t.text = line.substring(idx + 2, endBold);
-                        t.colour = juce::Colours::white;
+                        t.colour = brightCol;
                         t.isBold = true;
                         pl.tokens.push_back(t);
                         idx = endBold + 2;
@@ -104,21 +112,19 @@ public:
                     }
                 }
 
-                // Check [tag]...[/tag] or [chord]
                 if (line[idx] == '[') {
                     int closeBracket = line.indexOf(idx, "]");
                     if (closeBracket > idx) {
                         juce::String tagContent = line.substring(idx + 1, closeBracket).trim();
                         juce::String tagLower = tagContent.toLowerCase();
 
-                        // Check color tag
                         juce::Colour tagCol = juce::Colours::transparentBlack;
-                        if (tagLower == "blue" || tagLower == "cyan") tagCol = juce::Colour(0xff58a6ff);
-                        else if (tagLower == "green") tagCol = juce::Colour(0xff3fb950);
-                        else if (tagLower == "yellow" || tagLower == "amber") tagCol = juce::Colour(0xffe3b341);
-                        else if (tagLower == "white") tagCol = juce::Colours::white;
-                        else if (tagLower == "red") tagCol = juce::Colour(0xfff85149);
-                        else if (tagLower == "purple" || tagLower == "magenta") tagCol = juce::Colour(0xffbc8cff);
+                        if (tagLower == "blue" || tagLower == "cyan") tagCol = accentCol;
+                        else if (tagLower == "green") tagCol = okCol;
+                        else if (tagLower == "yellow" || tagLower == "amber") tagCol = fohCol;
+                        else if (tagLower == "white") tagCol = brightCol;
+                        else if (tagLower == "red") tagCol = dangerCol;
+                        else if (tagLower == "purple" || tagLower == "magenta") tagCol = synthCol;
 
                         if (!tagCol.isTransparent()) {
                             juce::String closeTagStr = "[/" + tagLower + "]";
@@ -136,7 +142,6 @@ public:
                             }
                         }
 
-                        // Check chord tag [chord]...[/chord] or [C#m7]
                         if (tagLower == "chord") {
                             int endTag = line.indexOfIgnoreCase(closeBracket + 1, "[/chord]");
                             if (endTag > closeBracket) {
@@ -144,7 +149,7 @@ public:
                                 Token t;
                                 t.type = Token::ChordBadge;
                                 t.text = line.substring(closeBracket + 1, endTag);
-                                t.colour = juce::Colour(0xff58a6ff);
+                                t.colour = accentCol;
                                 pl.tokens.push_back(t);
                                 idx = endTag + 8;
                                 continue;
@@ -154,7 +159,7 @@ public:
                             Token t;
                             t.type = Token::ChordBadge;
                             t.text = tagContent;
-                            t.colour = juce::Colour(0xff58a6ff);
+                            t.colour = accentCol;
                             pl.tokens.push_back(t);
                             idx = closeBracket + 1;
                             continue;
@@ -194,10 +199,10 @@ public:
     }
 
     void paint(juce::Graphics& g) override {
-        g.fillAll(juce::Colour(0xff0d1117));
+        g.fillAll(ThemeManager::get(Theme::Role::sunken));
 
         if (rawText.trim().isEmpty()) {
-            g.setColour(juce::Colour(0xff8b949e));
+            g.setColour(ThemeManager::get(Theme::Role::textDim));
             g.setFont(juce::FontOptions(fontSize > 0 ? fontSize : 20.0f));
             g.drawText("No notes or chord charts for this song. Switch to EDIT MODE to type or import notes.",
                        getLocalBounds().reduced(20), juce::Justification::centredTop, true);
@@ -208,17 +213,21 @@ public:
         float lineH = sz * 1.45f;
         float curY = 16.0f;
 
-        juce::Font baseFont = isMonospace 
+        juce::Font baseFont = isMonospace
             ? juce::Font(juce::FontOptions().withName(juce::Font::getDefaultMonospacedFontName()).withHeight(sz))
             : juce::Font(juce::FontOptions(sz));
+
+        const auto accentCol = ThemeManager::get(Theme::Role::accent);
+        const auto fohCol    = ThemeManager::get(Theme::Role::foh);
+        const auto okCol     = ThemeManager::get(Theme::Role::ok);
 
         auto parsed = parseLines();
 
         for (const auto& pl : parsed) {
             if (pl.isHeading) {
                 float hSize = pl.headingLevel == 1 ? sz * 1.35f : (pl.headingLevel == 2 ? sz * 1.2f : sz * 1.1f);
-                juce::Colour hCol = pl.headingLevel == 1 ? juce::Colour(0xff58a6ff) : (pl.headingLevel == 2 ? juce::Colour(0xffe3b341) : juce::Colour(0xff3fb950));
-                
+                juce::Colour hCol = pl.headingLevel == 1 ? accentCol : (pl.headingLevel == 2 ? fohCol : okCol);
+
                 juce::Font hFont = baseFont.withHeight(hSize).boldened();
                 g.setFont(hFont);
                 g.setColour(hCol);
@@ -248,12 +257,12 @@ public:
                     float badgeH = sz * 1.2f;
 
                     juce::Rectangle<float> badgeRect(curX, curY + (lineH - badgeH) * 0.5f, badgeW, badgeH);
-                    g.setColour(juce::Colour(0x33388bfd));
-                    g.fillRoundedRectangle(badgeRect, 4.0f);
-                    g.setColour(juce::Colour(0xff388bfd));
-                    g.drawRoundedRectangle(badgeRect, 4.0f, 1.0f);
+                    g.setColour(accentCol.withAlpha(0.16f));
+                    g.fillRoundedRectangle(badgeRect, 3.0f);
+                    g.setColour(accentCol.withAlpha(0.60f));
+                    g.drawRoundedRectangle(badgeRect, 3.0f, 1.0f);
 
-                    g.setColour(juce::Colour(0xff58a6ff));
+                    g.setColour(accentCol);
                     g.drawText(tok.text, badgeRect, juce::Justification::centred, false);
                     curX += badgeW + 4.0f;
                 } else {
@@ -283,9 +292,8 @@ public:
     GigNotepadComponent(FanfareEngine& eng) : engine(eng) {
         setOpaque(true);
 
-        // Setup Header Bar
-        songTitleLabel.setFont(juce::FontOptions(14.0f, juce::Font::bold));
-        songTitleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
+        songTitleLabel.setFont(juce::FontOptions("Barlow Condensed", 15.0f, juce::Font::bold));
+        songTitleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
         songTitleLabel.setText("GIG NOTEPAD", juce::dontSendNotification);
         addAndMakeVisible(songTitleLabel);
 
@@ -293,8 +301,7 @@ public:
         liveModeBtn.setButtonText("LIVE LOCKED");
         liveModeBtn.setClickingTogglesState(true);
         liveModeBtn.setToggleState(true, juce::dontSendNotification);
-        liveModeBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
-        liveModeBtn.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::ok).darker(0.3f));
+        Fanfare::setButtonRole(liveModeBtn, Fanfare::ButtonRole::Primary);
         liveModeBtn.onClick = [this] {
             updateLiveEditModeState();
         };
@@ -302,31 +309,23 @@ public:
         Fanfare::styleHelpButton(helpBtn, "#gig-notepad", "HAAALP! Open the Gig Notepad & Chord Charts section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
-        // Font Zoom Out (-)
         zoomOutBtn.setButtonText("A-");
-        zoomOutBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
-        zoomOutBtn.onClick = [this] {
-            changeFontSize(-2.0f);
-        };
+        Fanfare::setButtonRole(zoomOutBtn, Fanfare::ButtonRole::Standard);
+        zoomOutBtn.onClick = [this] { changeFontSize(-2.0f); };
         addAndMakeVisible(zoomOutBtn);
 
-        // Font Zoom In (+)
         zoomInBtn.setButtonText("A+");
-        zoomInBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
-        zoomInBtn.onClick = [this] {
-            changeFontSize(2.0f);
-        };
+        Fanfare::setButtonRole(zoomInBtn, Fanfare::ButtonRole::Standard);
+        zoomInBtn.onClick = [this] { changeFontSize(2.0f); };
         addAndMakeVisible(zoomInBtn);
 
-        // Font Size Label
-        fontSizeLabel.setFont(juce::FontOptions(12.0f));
+        fontSizeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::bold));
         fontSizeLabel.setJustificationType(juce::Justification::centred);
         fontSizeLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
         addAndMakeVisible(fontSizeLabel);
 
-        // Monospace / Sans Toggle
         fontTypeBtn.setButtonText("MONO");
-        fontTypeBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
+        Fanfare::setButtonRole(fontTypeBtn, Fanfare::ButtonRole::Standard);
         fontTypeBtn.onClick = [this] {
             bool isMono = !engine.getNoteIsMonospace();
             engine.setNoteIsMonospace(isMono);
@@ -336,70 +335,34 @@ public:
         addAndMakeVisible(fontTypeBtn);
 
         // Format Toolbar Buttons
-        btnBold.setButtonText("B");
-        btnBold.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff21262d));
-        btnBold.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
-        btnBold.onClick = [this] { insertFormatTag("bold"); };
-        addAndMakeVisible(btnBold);
-
-        btnBlue.setButtonText("BLUE");
-        btnBlue.setColour(juce::TextButton::buttonColourId, juce::Colour(0x22388bfd));
-        btnBlue.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff58a6ff));
-        btnBlue.onClick = [this] { insertFormatTag("blue"); };
-        addAndMakeVisible(btnBlue);
-
-        btnGreen.setButtonText("GREEN");
-        btnGreen.setColour(juce::TextButton::buttonColourId, juce::Colour(0x223fb950));
-        btnGreen.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff3fb950));
-        btnGreen.onClick = [this] { insertFormatTag("green"); };
-        addAndMakeVisible(btnGreen);
-
-        btnYellow.setButtonText("YELLOW");
-        btnYellow.setColour(juce::TextButton::buttonColourId, juce::Colour(0x22e3b341));
-        btnYellow.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffe3b341));
-        btnYellow.onClick = [this] { insertFormatTag("yellow"); };
-        addAndMakeVisible(btnYellow);
-
-        btnWhite.setButtonText("WHITE");
-        btnWhite.setColour(juce::TextButton::buttonColourId, juce::Colour(0x22ffffff));
-        btnWhite.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
-        btnWhite.onClick = [this] { insertFormatTag("white"); };
-        addAndMakeVisible(btnWhite);
-
-        btnRed.setButtonText("RED");
-        btnRed.setColour(juce::TextButton::buttonColourId, juce::Colour(0x22f85149));
-        btnRed.setColour(juce::TextButton::textColourOffId, juce::Colour(0xfff85149));
-        btnRed.onClick = [this] { insertFormatTag("red"); };
-        addAndMakeVisible(btnRed);
-
-        btnChord.setButtonText("[CHORD]");
-        btnChord.setColour(juce::TextButton::buttonColourId, juce::Colour(0x33388bfd));
-        btnChord.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff58a6ff));
-        btnChord.onClick = [this] { insertFormatTag("chord"); };
-        addAndMakeVisible(btnChord);
-
-        // Import File Button
-        importBtn.setButtonText("IMPORT");
-        importBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
-        importBtn.onClick = [this] {
-            importFilePrompt();
+        auto styleFmtBtn = [this](juce::TextButton& b, const juce::String& label, const juce::String& tag) {
+            b.setButtonText(label);
+            Fanfare::setButtonRole(b, Fanfare::ButtonRole::Standard);
+            b.onClick = [this, tag] { insertFormatTag(tag); };
+            addAndMakeVisible(b);
         };
+        styleFmtBtn(btnBold,   "B",       "bold");
+        styleFmtBtn(btnBlue,   "BLUE",    "blue");
+        styleFmtBtn(btnGreen,  "GREEN",   "green");
+        styleFmtBtn(btnYellow, "AMBER",   "yellow");
+        styleFmtBtn(btnWhite,  "HI-TEXT", "white");
+        styleFmtBtn(btnRed,    "RED",     "red");
+        styleFmtBtn(btnChord,  "[CHORD]", "chord");
+        Fanfare::setButtonRole(btnChord, Fanfare::ButtonRole::Primary);
+
+        importBtn.setButtonText("IMPORT");
+        Fanfare::setButtonRole(importBtn, Fanfare::ButtonRole::Standard);
+        importBtn.onClick = [this] { importFilePrompt(); };
         addAndMakeVisible(importBtn);
 
-        // Add Tab Button
         addTabBtn.setButtonText("+ TAB");
-        addTabBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
-        addTabBtn.onClick = [this] {
-            addNewTabPrompt();
-        };
+        Fanfare::setButtonRole(addTabBtn, Fanfare::ButtonRole::Standard);
+        addTabBtn.onClick = [this] { addNewTabPrompt(); };
         addAndMakeVisible(addTabBtn);
 
-        // Manage Tabs Menu Button
         manageTabsBtn.setButtonText("TABS...");
-        manageTabsBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
-        manageTabsBtn.onClick = [this] {
-            showTabManagementMenu();
-        };
+        Fanfare::setButtonRole(manageTabsBtn, Fanfare::ButtonRole::Standard);
+        manageTabsBtn.onClick = [this] { showTabManagementMenu(); };
         addAndMakeVisible(manageTabsBtn);
 
         // Configure Live Stage Viewer
@@ -414,21 +377,33 @@ public:
         textEditor.setTabKeyUsedAsCharacter(true);
         textEditor.setScrollbarsShown(true);
         textEditor.addListener(this);
-        textEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff161b22));
-        textEditor.setColour(juce::TextEditor::textColourId, juce::Colours::white);
+        textEditor.setColour(juce::TextEditor::backgroundColourId, ThemeManager::get(Theme::Role::sunken));
+        textEditor.setColour(juce::TextEditor::textColourId, ThemeManager::get(Theme::Role::text));
         textEditor.setColour(juce::TextEditor::outlineColourId, ThemeManager::get(Theme::Role::border));
         textEditor.setColour(juce::TextEditor::focusedOutlineColourId, ThemeManager::get(Theme::Role::accent));
-        textEditor.setColour(juce::TextEditor::highlightColourId, ThemeManager::get(Theme::Role::accent).withAlpha(0.35f));
+        textEditor.setColour(juce::TextEditor::highlightColourId, ThemeManager::get(Theme::Role::accent).withAlpha(0.30f));
         addChildComponent(textEditor);
 
-        // Sync from engine
         loadFromEngine();
         updateLiveEditModeState();
 
-        // Listen for engine song changes
         engine.addNotesListener(this, [this] {
             loadFromEngine();
         });
+        lookAndFeelChanged();
+    }
+
+    void lookAndFeelChanged() override {
+        const auto& t = ThemeManager::getInstance().active();
+        songTitleLabel.setColour(juce::Label::textColourId, t.engrave);
+        fontSizeLabel.setColour(juce::Label::textColourId, t.textDim);
+        textEditor.setColour(juce::TextEditor::backgroundColourId, t.dark ? t.sunken : t.raised);
+        textEditor.setColour(juce::TextEditor::textColourId, t.text);
+        textEditor.setColour(juce::TextEditor::outlineColourId, t.dark ? t.border : t.borderStrong);
+        textEditor.setColour(juce::TextEditor::focusedOutlineColourId, t.accent);
+        textEditor.setColour(juce::TextEditor::highlightColourId, t.accent.withAlpha(0.30f));
+        textEditor.applyColourToAllText(t.text, true);
+        if (liveViewer) liveViewer->repaint();
     }
 
     void insertFormatTag(const juce::String& tag) {
@@ -456,7 +431,8 @@ public:
     void updateLiveEditModeState() {
         bool isLive = liveModeBtn.getToggleState();
         liveModeBtn.setButtonText(isLive ? "LIVE LOCKED" : "EDIT MODE");
-        liveModeBtn.setColour(juce::TextButton::buttonColourId, isLive ? ThemeManager::get(Theme::Role::accent) : ThemeManager::get(Theme::Role::raised));
+        Fanfare::setButtonRole(liveModeBtn, isLive ? Fanfare::ButtonRole::Primary : Fanfare::ButtonRole::Foh);
+        liveModeBtn.repaint();
 
         liveViewport.setVisible(isLive);
         textEditor.setVisible(!isLive);
@@ -525,7 +501,7 @@ public:
         if (sz < 12.0f) sz = 20.0f;
         fontSizeLabel.setText(juce::String((int)sz) + " pt", juce::dontSendNotification);
 
-        juce::Font f = engine.getNoteIsMonospace() 
+        juce::Font f = engine.getNoteIsMonospace()
             ? juce::Font(juce::FontOptions().withName(juce::Font::getDefaultMonospacedFontName()).withHeight(sz))
             : juce::Font(juce::FontOptions(sz));
 
@@ -559,14 +535,7 @@ public:
             btn->setClickingTogglesState(true);
             btn->setToggleState(i == activeTab, juce::dontSendNotification);
             btn->setRadioGroupId(1001);
-            
-            if (i == activeTab) {
-                btn->setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
-                btn->setColour(juce::TextButton::textColourOnId, juce::Colours::black);
-            } else {
-                btn->setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel));
-                btn->setColour(juce::TextButton::textColourOffId, ThemeManager::get(Theme::Role::textDim));
-            }
+            Fanfare::setButtonRole(*btn, (i == activeTab) ? Fanfare::ButtonRole::Primary : Fanfare::ButtonRole::Standard);
 
             int tabIdx = i;
             btn->onClick = [this, tabIdx] {
@@ -672,7 +641,6 @@ public:
                     parsedText = parseHtmlToStageFormat(rawText);
                 }
 
-                // If currently empty, replace. If has text, ask to replace or add as tab
                 if (textEditor.getText().trim().isEmpty()) {
                     textEditor.setText(parsedText, false);
                     saveCurrentTabContent();
@@ -708,7 +676,6 @@ public:
     static juce::String parseHtmlToStageFormat(const juce::String& html) {
         juce::String text = html;
 
-        // Strip scripts and styles
         while (true) {
             int s = text.indexOfIgnoreCase(0, "<script");
             if (s < 0) break;
@@ -724,12 +691,11 @@ public:
             text = text.substring(0, s) + text.substring(e + 8);
         }
 
-        // Headings
         for (int h = 1; h <= 6; ++h) {
             juce::String openTag = "<h" + juce::String(h);
             juce::String closeTag = "</h" + juce::String(h) + ">";
             juce::String hash = juce::String::repeatedString("#", h) + " ";
-            
+
             while (true) {
                 int s = text.indexOfIgnoreCase(0, openTag);
                 if (s < 0) break;
@@ -743,7 +709,6 @@ public:
             }
         }
 
-        // Paragraphs and breaks
         text = text.replace("<br>", "\n", true);
         text = text.replace("<br/>", "\n", true);
         text = text.replace("<br />", "\n", true);
@@ -753,7 +718,6 @@ public:
         text = text.replace("<li>", "\n- ", true);
         text = text.replace("</li>", "", true);
 
-        // Bold & Italic
         text = text.replace("<b>", "**", true);
         text = text.replace("</b>", "**", true);
         text = text.replace("<strong>", "**", true);
@@ -765,7 +729,6 @@ public:
         text = text.replace("<code>", "`", true);
         text = text.replace("</code>", "`", true);
 
-        // Strip remaining HTML tags
         while (true) {
             int open = text.indexOf(0, "<");
             if (open < 0) break;
@@ -774,7 +737,6 @@ public:
             text = text.substring(0, open) + text.substring(close + 1);
         }
 
-        // Common HTML entities
         text = text.replace("&nbsp;", " ");
         text = text.replace("&amp;", "&");
         text = text.replace("&lt;", "<");
@@ -783,7 +745,6 @@ public:
         text = text.replace("&#39;", "'");
         text = text.replace("&apos;", "'");
 
-        // Clean up excessive blank lines
         while (text.contains("\n\n\n")) {
             text = text.replace("\n\n\n", "\n\n");
         }
@@ -793,11 +754,13 @@ public:
 
     void paint(juce::Graphics& g) override {
         g.fillAll(ThemeManager::get(Theme::Role::panel));
+        g.setColour(ThemeManager::get(Theme::Role::sunken));
+        g.fillRect(0, 0, getWidth(), 40);
+
         g.setColour(ThemeManager::get(Theme::Role::border));
         g.drawRect(getLocalBounds(), 1);
 
-        // Header separator
-        g.setColour(ThemeManager::get(Theme::Role::border).withAlpha(0.6f));
+        g.setColour(ThemeManager::get(Theme::Role::hairline));
         g.drawLine(0.0f, 40.0f, (float)getWidth(), 40.0f, 1.0f);
         g.drawLine(0.0f, 76.0f, (float)getWidth(), 76.0f, 1.0f);
     }
@@ -805,9 +768,8 @@ public:
     void resized() override {
         auto area = getLocalBounds().reduced(10);
 
-        // Top Toolbar (26px)
         auto topRow = area.removeFromTop(26);
-        songTitleLabel.setBounds(topRow.removeFromLeft(120));
+        songTitleLabel.setBounds(topRow.removeFromLeft(110));
         topRow.removeFromLeft(8);
 
         liveModeBtn.setBounds(topRow.removeFromLeft(110));
@@ -830,18 +792,16 @@ public:
         topRow.removeFromRight(4);
         helpBtn.setBounds(topRow.removeFromRight(74));
 
-        area.removeFromTop(8); // Space between toolbar and tabs/format row
+        area.removeFromTop(8);
 
-        // Second Row: Tab Buttons on left, Format Buttons on right (26px)
         auto tabRow = area.removeFromTop(26);
-        
+
         bool isEditMode = !liveModeBtn.getToggleState();
         if (isEditMode) {
-            // Format Buttons on right
-            auto fmtRow = tabRow.removeFromRight(370);
+            auto fmtRow = tabRow.removeFromRight(378);
             btnChord.setBounds(fmtRow.removeFromRight(70).reduced(2, 0));
             btnRed.setBounds(fmtRow.removeFromRight(46).reduced(2, 0));
-            btnWhite.setBounds(fmtRow.removeFromRight(52).reduced(2, 0));
+            btnWhite.setBounds(fmtRow.removeFromRight(60).reduced(2, 0));
             btnYellow.setBounds(fmtRow.removeFromRight(58).reduced(2, 0));
             btnGreen.setBounds(fmtRow.removeFromRight(56).reduced(2, 0));
             btnBlue.setBounds(fmtRow.removeFromRight(50).reduced(2, 0));
@@ -856,9 +816,8 @@ public:
             }
         }
 
-        area.removeFromTop(6); // Space before editor
+        area.removeFromTop(6);
 
-        // Main Viewer & Editor occupy area
         liveViewport.setBounds(area);
         if (liveViewer) liveViewer->setBounds(0, 0, area.getWidth() - 16, area.getHeight());
         textEditor.setBounds(area);
@@ -880,7 +839,6 @@ private:
     juce::TextButton manageTabsBtn;
     juce::TextButton helpBtn{"HAAALP!"};
 
-    // Format buttons
     juce::TextButton btnBold;
     juce::TextButton btnBlue;
     juce::TextButton btnGreen;
@@ -889,7 +847,6 @@ private:
     juce::TextButton btnRed;
     juce::TextButton btnChord;
 
-    // Live Viewer & Editor
     juce::Viewport liveViewport;
     std::unique_ptr<StageLiveNotesViewer> liveViewer;
     juce::TextEditor textEditor;

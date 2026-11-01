@@ -609,6 +609,14 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
         root->setProperty("type", "mixer");
         root->setProperty("data", buildMixerJson());
         broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
+    } else if (type == "ping") {
+        // Latency echo for the tablet HUD's WS pill: mirror the client's own
+        // timestamp straight back so it can compute round-trip time.
+        juce::DynamicObject::Ptr root = new juce::DynamicObject();
+        root->setProperty("type", "pong");
+        root->setProperty("time", json["time"]);
+        if (json.hasProperty("cid")) root->setProperty("cid", json["cid"]);
+        broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
     }
 }
 
@@ -1093,25 +1101,30 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
         cleanPath = "/index.html";
     }
 
-    // Try multiple possible disk locations for development and installed modes
-    juce::Array<juce::File> candidateDirs;
-    auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
-    candidateDirs.add(exeDir);
-    candidateDirs.add(exeDir.getChildFile("Web/static"));
-    candidateDirs.add(exeDir.getChildFile("docs"));
-    candidateDirs.add(juce::File("C:/davecore/docs"));
-    candidateDirs.add(exeDir.getChildFile("static"));
-    candidateDirs.add(exeDir.getChildFile("Source/Web/static"));
-    candidateDirs.add(exeDir.getParentDirectory().getChildFile("Web/static"));
-    candidateDirs.add(exeDir.getParentDirectory().getParentDirectory().getChildFile("Web/static"));
-    candidateDirs.add(exeDir.getParentDirectory().getParentDirectory().getParentDirectory().getParentDirectory().getChildFile("Source/Web/static"));
-    candidateDirs.add(juce::File::getCurrentWorkingDirectory().getChildFile("Source/Web/static"));
-    candidateDirs.add(juce::File("C:/davecore/Source/Web/static"));
-    candidateDirs.add(juce::File("Z:/davecore/Source/Web/static"));
+    // Prevent path traversal
+    if (cleanPath.contains("..")) {
+        sendHttpResponse(socketHandle, 404, "text/plain", "404 Not Found");
+        return false;
+    }
 
-    for (const auto& dir : candidateDirs) {
+    const juce::String relFile = cleanPath.startsWithChar('/') ? cleanPath.substring(1) : cleanPath;
+    auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+
+    // 1. HUD Static Asset Directories FIRST (dev live-reload + packaged Web/static)
+    juce::Array<juce::File> hudStaticDirs;
+    hudStaticDirs.add(exeDir.getChildFile("Web/static"));
+    hudStaticDirs.add(exeDir.getChildFile("static"));
+    hudStaticDirs.add(exeDir.getChildFile("Source/Web/static"));
+    hudStaticDirs.add(exeDir.getParentDirectory().getChildFile("Web/static"));
+    hudStaticDirs.add(exeDir.getParentDirectory().getParentDirectory().getChildFile("Web/static"));
+    hudStaticDirs.add(exeDir.getParentDirectory().getParentDirectory().getParentDirectory().getParentDirectory().getChildFile("Source/Web/static"));
+    hudStaticDirs.add(juce::File::getCurrentWorkingDirectory().getChildFile("Source/Web/static"));
+    hudStaticDirs.add(juce::File("C:/davecore/Source/Web/static"));
+    hudStaticDirs.add(juce::File("Z:/davecore/Source/Web/static"));
+
+    for (const auto& dir : hudStaticDirs) {
         if (dir.isDirectory()) {
-            juce::File targetFile = dir.getChildFile(cleanPath.startsWithChar('/') ? cleanPath.substring(1) : cleanPath);
+            juce::File targetFile = dir.getChildFile(relFile);
             if (targetFile.existsAsFile()) {
                 juce::MemoryBlock block;
                 if (targetFile.loadFileAsData(block)) {
@@ -1122,7 +1135,7 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
         }
     }
 
-    // Compiled-in Production Fallback (guaranteed to work regardless of disk environment)
+    // 2. Compiled-in HUD Production Fallback (never shadowed by docs/index.html!)
     if (cleanPath == "/index.html" || cleanPath == "/") {
         sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", EmbeddedWebAssets::INDEX_HTML_DATA, EmbeddedWebAssets::INDEX_HTML_DATA_LEN);
         return true;
@@ -1132,6 +1145,28 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
     } else if (cleanPath == "/app.js") {
         sendHttpDataResponse(socketHandle, 200, "application/javascript; charset=utf-8", EmbeddedWebAssets::APP_JS_DATA, EmbeddedWebAssets::APP_JS_DATA_LEN);
         return true;
+    }
+
+    // 3. Offline Stage Manual & Supporting Assets (/manual.html, /assets-readonly/*, screenshots)
+    juce::Array<juce::File> docsDirs;
+    docsDirs.add(exeDir.getChildFile("docs"));
+    docsDirs.add(exeDir);
+    docsDirs.add(exeDir.getParentDirectory().getParentDirectory().getParentDirectory().getParentDirectory().getChildFile("docs"));
+    docsDirs.add(juce::File::getCurrentWorkingDirectory().getChildFile("docs"));
+    docsDirs.add(juce::File("C:/davecore/docs"));
+    docsDirs.add(juce::File("Z:/davecore/docs"));
+
+    for (const auto& dir : docsDirs) {
+        if (dir.isDirectory()) {
+            juce::File targetFile = dir.getChildFile(relFile);
+            if (targetFile.existsAsFile()) {
+                juce::MemoryBlock block;
+                if (targetFile.loadFileAsData(block)) {
+                    sendHttpDataResponse(socketHandle, 200, getMimeType(cleanPath), block.getData(), block.getSize());
+                    return true;
+                }
+            }
+        }
     }
 
     sendHttpResponse(socketHandle, 404, "text/plain", "404 Not Found");
@@ -1164,6 +1199,7 @@ void WebServer::sendHttpDataResponse(void* socketHandle, int statusCode, const j
     ss << "HTTP/1.1 " << statusCode << " " << statusText.toStdString() << "\r\n";
     ss << "Content-Type: " << contentType.toStdString() << "\r\n";
     ss << "Content-Length: " << dataSize << "\r\n";
+    ss << "Cache-Control: no-store, no-cache, must-revalidate\r\n";
     ss << "Access-Control-Allow-Origin: *\r\n";
     ss << "Connection: close\r\n\r\n";
 

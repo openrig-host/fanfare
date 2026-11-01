@@ -1,14 +1,16 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "BoutiqueLookAndFeel.h"
+#include "ButtonRoles.h"
 #include "HelpLauncher.h"
 #include "ThemeManager.h"
 #include "FanfareEngine.h"
 
 /**
  * Engine & CPU Optimization Modal
- * Provides plain-English, musician-friendly tuning controls for core affinity,
- * hardware DPC shielding, Windows 11 EcoQoS, and parallel/sequential multiprocessing.
+ * Plain-English tuning controls for core affinity, hardware DPC shielding,
+ * Windows 11 EcoQoS, and parallel/sequential multiprocessing.
  */
 class EngineTuningModal : public juce::Component {
 public:
@@ -24,23 +26,19 @@ public:
     EngineTuningModal(Settings initialSettings, SaveCallback onSave, std::function<void()> onClose)
         : currentSettings(initialSettings), saveCallback(std::move(onSave)), closeCallback(std::move(onClose))
     {
-        setOpaque(true);
+        setOpaque(false);
+        titleLabel.setVisible(false);
 
-        titleLabel.setText("ENGINE & CPU OPTIMIZATION", juce::dontSendNotification);
-        titleLabel.setFont(juce::FontOptions(17.0f, juce::Font::bold));
-        titleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
-        addAndMakeVisible(titleLabel);
-
-        closeBtn.setButtonText("X");
-        closeBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::danger));
+        closeBtn.setButtonText("CLOSE");
+        Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Subtle);
         closeBtn.onClick = [this] {
             if (closeCallback) closeCallback();
         };
         addAndMakeVisible(closeBtn);
+
         Fanfare::styleHelpButton(helpBtn, "#engine-tuning", "HAAALP! Open the Engine & CPU Optimization section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
-        // Viewport for clean scrolling on smaller laptop displays
         addAndMakeVisible(viewport);
         viewport.setViewedComponent(&contentComp, false);
         viewport.setScrollBarsShown(true, false);
@@ -49,7 +47,7 @@ public:
         refreshUIFromSettings();
 
         applyBtn.setButtonText("APPLY & SAVE SETTINGS");
-        applyBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::ok));
+        Fanfare::setButtonRole(applyBtn, Fanfare::ButtonRole::Primary);
         applyBtn.onClick = [this] {
             readSettingsFromUI();
             if (saveCallback)
@@ -63,22 +61,19 @@ public:
     }
 
     void paint(juce::Graphics& g) override {
-        g.fillAll(ThemeManager::get(Theme::Role::panel).darker(0.35f));
-
-        auto bounds = getLocalBounds().toFloat().reduced(1.0f);
-        g.setColour(ThemeManager::get(Theme::Role::border));
-        g.drawRoundedRectangle(bounds, 8.0f, 1.5f);
+        Fanfare::ModalFrame::paintOverlayScrimAndPanel(
+            g, getLocalBounds(), getLocalBounds(), "ENGINE & CPU OPTIMIZATION", 38);
     }
 
     void resized() override {
-        auto bounds = getLocalBounds().reduced(16, 12);
-        auto topRow = bounds.removeFromTop(32);
-        closeBtn.setBounds(topRow.removeFromRight(30).withHeight(26));
-        topRow.removeFromRight(6);
-        helpBtn.setBounds(topRow.removeFromRight(74).withHeight(26));
-        titleLabel.setBounds(topRow);
+        auto full = getLocalBounds();
+        auto topRow = full.removeFromTop(38).reduced(10, 6);
+        closeBtn.setBounds(topRow.removeFromRight(52));
+        topRow.removeFromRight(4);
+        helpBtn.setBounds(topRow.removeFromRight(68));
 
-        applyBtn.setBounds(bounds.removeFromBottom(36).reduced(40, 0));
+        auto bounds = full.reduced(16, 12);
+        applyBtn.setBounds(bounds.removeFromBottom(34).reduced(40, 0));
         bounds.removeFromBottom(10);
 
         viewport.setBounds(bounds);
@@ -89,12 +84,8 @@ private:
     class ContentComponent : public juce::Component {
     public:
         void paint(juce::Graphics& g) override {
-            // Background cards for each section
             for (const auto& r : cardBounds) {
-                g.setColour(ThemeManager::get(Theme::Role::panel).withAlpha(0.6f));
-                g.fillRoundedRectangle(r.toFloat(), 6.0f);
-                g.setColour(ThemeManager::get(Theme::Role::border).withAlpha(0.4f));
-                g.drawRoundedRectangle(r.toFloat(), 6.0f, 1.0f);
+                Fanfare::ModalFrame::paintRecessedWell(g, r.toFloat(), 3.0f);
             }
         }
         std::vector<juce::Rectangle<int>> cardBounds;
@@ -108,7 +99,7 @@ private:
         };
 
         auto configureHelpLabel = [](juce::Label& lbl) {
-            lbl.setFont(juce::FontOptions(12.0f));
+            lbl.setFont(BoutiqueLookAndFeel::uiFont(12.0f, false));
             lbl.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
             lbl.setJustificationType(juce::Justification::topLeft);
         };
@@ -116,7 +107,7 @@ private:
         // Section 0: AC Power Supply Advisory
         contentComp.addAndMakeVisible(acWarningTitleLabel);
         acWarningTitleLabel.setText("STAGE ADVISORY: ALWAYS RUN ON AC POWER SUPPLY", juce::dontSendNotification);
-        acWarningTitleLabel.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+        acWarningTitleLabel.setFont(BoutiqueLookAndFeel::condensedFont(13.5f, 0.06f));
         acWarningTitleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
 
         contentComp.addAndMakeVisible(acWarningBodyLabel);
@@ -128,7 +119,7 @@ private:
         // Section 1: CPU Core Assignment
         contentComp.addAndMakeVisible(coreSectionLabel);
         coreSectionLabel.setText("1. CPU CORE ASSIGNMENT (HYBRID INTEL / AMD LAPTOPS)", juce::dontSendNotification);
-        coreSectionLabel.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+        coreSectionLabel.setFont(BoutiqueLookAndFeel::condensedFont(14.0f, 0.06f));
         coreSectionLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
 
         setupRadioGroup(pCoresOnlyBtn, 101);
@@ -151,7 +142,7 @@ private:
         // Section 2: Shelter CPU 0
         contentComp.addAndMakeVisible(shelterSectionLabel);
         shelterSectionLabel.setText("2. SHELTER CPU 0 (HARDWARE INTERRUPT SHIELD)", juce::dontSendNotification);
-        shelterSectionLabel.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+        shelterSectionLabel.setFont(BoutiqueLookAndFeel::condensedFont(14.0f, 0.06f));
         shelterSectionLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
 
         shelterToggle.setButtonText("Shelter CPU 0 (Shield audio from Wi-Fi & USB driver spikes - Recommended)");
@@ -160,7 +151,7 @@ private:
         contentComp.addAndMakeVisible(shelterToggle);
 
         shelterHelpLabel.setText(
-            "Why protect CPU Core 0? By architectural default in Windows, nearly all motherboard hardware interrupts (IRQs and DPCs)—including USB host controllers, ACPI battery/thermal sensors, trackpads, and Wi-Fi adapters—are routed directly to Core 0 (the Bootstrap Processor). When a hardware interrupt fires, the CPU immediately pauses running software to service it. If real-time audio runs on Core 0, an interrupt burst delays the audio callback by several milliseconds, causing clicks, glitches, and buffer underruns even when total CPU load is very low. Sheltering reserves Core 0 exclusively for background system interrupts, leaving clean Performance cores for uninterrupted audio DSP.\n"
+            "Why protect CPU Core 0? By architectural default in Windows, nearly all motherboard hardware interrupts (IRQs and DPCs) - including USB host controllers, ACPI battery/thermal sensors, trackpads, and Wi-Fi adapters - are routed directly to Core 0 (the Bootstrap Processor). When a hardware interrupt fires, the CPU immediately pauses running software to service it. If real-time audio runs on Core 0, an interrupt burst delays the audio callback by several milliseconds, causing clicks, glitches, and buffer underruns even when total CPU load is very low. Sheltering reserves Core 0 exclusively for background system interrupts, leaving clean Performance cores for uninterrupted audio DSP.\n"
             "* When to use: Keep ON for all live gigs to shield audio from hardware interrupt spikes.\n"
             "* What it CANNOT fix: Won't fix audio dropouts from a loose USB cable or failing interface hardware.",
             juce::dontSendNotification);
@@ -170,7 +161,7 @@ private:
         // Section 3: Windows Power Throttling
         contentComp.addAndMakeVisible(powerSectionLabel);
         powerSectionLabel.setText("3. WINDOWS 11 POWER THROTTLING (EcoQoS)", juce::dontSendNotification);
-        powerSectionLabel.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+        powerSectionLabel.setFont(BoutiqueLookAndFeel::condensedFont(14.0f, 0.06f));
         powerSectionLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
 
         powerThrottlingToggle.setButtonText("Prevent Windows 11 Power Throttling (HighQoS Unlocked - Recommended)");
@@ -188,10 +179,10 @@ private:
         configureHelpLabel(powerHelpLabel);
         contentComp.addAndMakeVisible(powerHelpLabel);
 
-        // Section 4: Processing Pipeline (Parallel vs Sequential)
+        // Section 4: Processing Pipeline
         contentComp.addAndMakeVisible(pipeSectionLabel);
         pipeSectionLabel.setText("4. DSP PROCESSING PIPELINE (PARALLEL VS SEQUENTIAL)", juce::dontSendNotification);
-        pipeSectionLabel.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+        pipeSectionLabel.setFont(BoutiqueLookAndFeel::condensedFont(14.0f, 0.06f));
         pipeSectionLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
 
         setupRadioGroup(parallelBtn, 102);
@@ -218,7 +209,7 @@ private:
         contentComp.cardBounds.clear();
         int y = 4;
         int w = juce::jmax(540, viewport.getMaximumVisibleWidth() - 24);
-        int cardMargin = 12;
+        int cardMargin = 8;
 
         auto addCard = [&](int height) -> juce::Rectangle<int> {
             juce::Rectangle<int> card(cardMargin, y, w, height);
@@ -227,14 +218,11 @@ private:
             return card.reduced(10, 8);
         };
 
-        // Section 0: AC Power Warning Card
         {
             auto inner = addCard(95);
             acWarningTitleLabel.setBounds(inner.removeFromTop(22));
             acWarningBodyLabel.setBounds(inner);
         }
-
-        // Card 1: CPU Core Assignment
         {
             auto inner = addCard(155);
             coreSectionLabel.setBounds(inner.removeFromTop(22));
@@ -242,24 +230,18 @@ private:
             allCoresBtn.setBounds(inner.removeFromTop(24));
             coreHelpLabel.setBounds(inner);
         }
-
-        // Card 2: Shelter CPU 0 (expanded explanation)
         {
             auto inner = addCard(180);
             shelterSectionLabel.setBounds(inner.removeFromTop(22));
             shelterToggle.setBounds(inner.removeFromTop(24));
             shelterHelpLabel.setBounds(inner);
         }
-
-        // Card 3: Windows Power Throttling
         {
             auto inner = addCard(160);
             powerSectionLabel.setBounds(inner.removeFromTop(22));
             powerThrottlingToggle.setBounds(inner.removeFromTop(24));
             powerHelpLabel.setBounds(inner);
         }
-
-        // Card 4: DSP Processing Pipeline
         {
             auto inner = addCard(155);
             pipeSectionLabel.setBounds(inner.removeFromTop(22));
@@ -294,14 +276,13 @@ private:
     std::function<void()> closeCallback;
 
     juce::Label titleLabel;
-    juce::TextButton closeBtn{"X"};
+    juce::TextButton closeBtn{"CLOSE"};
     juce::TextButton helpBtn{"HAAALP!"};
     juce::TextButton applyBtn;
 
     juce::Viewport viewport;
     ContentComponent contentComp;
 
-    // Controls
     juce::Label acWarningTitleLabel, acWarningBodyLabel;
     juce::Label coreSectionLabel, shelterSectionLabel, powerSectionLabel, pipeSectionLabel;
     juce::ToggleButton pCoresOnlyBtn, allCoresBtn;
@@ -313,4 +294,3 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EngineTuningModal)
 };
-

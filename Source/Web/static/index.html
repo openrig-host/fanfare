@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#07090d">
+  <meta name="theme-color" content="#131619">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Fanfare Stage Companion</title>
@@ -13,7 +13,7 @@
   <!-- Offline / Connection Status Banner -->
   <div id="connectionBanner" class="connection-banner disconnected">
     <span class="status-dot"></span>
-    <span id="connectionText">DISCONNECTED &mdash; RECONNECTING TO FANFARE...</span>
+    <span id="connectionText">DISCONNECTED &middot; RECONNECTING TO FANFARE...</span>
   </div>
 
   <!-- Master Stage Frame: Main Area + Right Vertical Meter Sidebar -->
@@ -37,9 +37,10 @@
         </div>
 
         <div class="header-right">
-          <a href="/manual.html#web-remote" target="_blank" class="btn btn-fullscreen" style="background:#ffb300;color:#111;font-weight:bold;text-decoration:none;padding:6px 10px;border-radius:4px;" title="Open the Fanfare User's Manual">HAAALP!</a>
+          <button id="themeToggleBtn" class="btn btn-theme" title="Toggle Dark / Bright front panel">BRIGHT</button>
+          <a href="/manual.html#web-remote" target="_blank" class="btn btn-haalp" title="Open the Fanfare User's Manual">HAAALP!</a>
           <button id="fullscreenBtn" class="btn btn-fullscreen" title="Toggle Fullscreen">FULLSCREEN</button>
-          <button id="panicBtn" class="btn btn-panic" title="Panic: All Notes Off / Silence Audio">PANIC KILL</button>
+          <button id="panicBtn" class="btn btn-panic" title="Hold ~1 second: All Notes Off / Silence Audio"><span class="panic-fill"></span><span class="panic-label">PANIC &middot; HOLD</span></button>
         </div>
       </header>
 
@@ -70,7 +71,7 @@
                 <span class="song-pos-badge" id="songPosBadge">SONG 1 OF 1</span>
                 <div class="up-next-pill" id="upNextPill">
                   <span class="up-next-label" id="upNextLabel">NEXT:</span>
-                  <span class="up-next-name" id="nextSongName">&mdash; END OF SET &mdash;</span>
+                  <span class="up-next-name" id="nextSongName">- END OF SET -</span>
                   <span class="preload-status-dot" id="preloadDot" title="Preload Status"></span>
                 </div>
               </div>
@@ -86,7 +87,7 @@
           <!-- Interactive Fast Song Queue Strip (Tap to queue / switch) -->
           <div class="stage-section setlist-strip-section">
             <div class="section-title-row">
-              <span class="section-title">SETLIST QUEUE &mdash; TAP ANY SONG TO SWITCH</span>
+              <span class="section-title">SETLIST QUEUE &middot; TAP ANY SONG TO SWITCH</span>
               <span class="section-subtitle" id="queuePreloadStatus">All Set</span>
             </div>
             <div class="setlist-fast-strip" id="setlistFastStrip">
@@ -109,7 +110,7 @@
           <div class="stage-section zone-map-section">
             <div class="section-title-row">
               <span class="section-title">YAMAHA 88-KEY ZONE MAP</span>
-              <span class="section-subtitle">A0 (21) &mdash; C8 (108)</span>
+              <span class="section-subtitle">A0 (21) &ndash; C8 (108)</span>
             </div>
             <div class="keyboard-zones-container" id="keyboardZonesContainer">
               <!-- Dynamically populated with note split bars based on slot note ranges -->
@@ -265,7 +266,7 @@
             <!-- DJ Playlist Table -->
             <div class="dj-playlist-section">
               <div class="section-title-row">
-                <span class="section-title">PLAYLIST QUEUE &mdash; TAP TO CROSSFADE</span>
+                <span class="section-title">PLAYLIST QUEUE &middot; TAP TO CROSSFADE</span>
                 <span class="section-subtitle" id="djTrackCount">0 Tracks</span>
               </div>
               <div class="dj-playlist-list" id="djPlaylistList">
@@ -286,7 +287,7 @@
           <span id="clockDisplay">00:00:00</span>
         </div>
         <div class="footer-right">
-          <span class="host-pill">Fanfare v1.3.1</span>
+          <span class="host-pill">Fanfare v1.4.0</span>
         </div>
       </footer>
 

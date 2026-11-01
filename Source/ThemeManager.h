@@ -3,17 +3,7 @@
 #include <JuceHeader.h>
 #include "Theme.h"
 
-// ThemeManager.h — singleton owning the active theme.
-//
-// Usage in components:
-//   g.setColour(ThemeManager::get(Theme::Role::background));
-//
-// Switching themes:
-//   ThemeManager::getInstance().setCurrentById("daylight");
-//   // -> broadcasts change; listeners repaint.
-//
-// Persistence: the selected theme id is stored in
-//   %APPDATA%/Fanfare/settings/theme.json
+// ThemeManager.h - singleton owning the active Front Panel theme.
 
 class ThemeManager : public juce::ChangeBroadcaster {
 public:
@@ -22,13 +12,10 @@ public:
         return instance;
     }
 
-    // The active palette.
     const Theme& active() const { return Theme::all()[juce::jlimit(0, (int)Theme::all().size() - 1, currentIndex)]; }
 
-    // Convenience facade used by components: returns the active theme's color for a role.
     static juce::Colour get(Theme::Role r) { return getInstance().active().get(r); }
 
-    // Selection.
     int getCurrentIndex() const { return currentIndex; }
     juce::String getCurrentId() const { return active().id; }
     juce::StringArray getThemeNames() const {
@@ -48,8 +35,9 @@ public:
         sendChangeMessage();
     }
 
-    void setCurrentById(const juce::String& id) {
-        if (const Theme* t = Theme::findById(id)) {
+    void setCurrentById(const juce::String& rawId) {
+        juce::String id = Theme::normalizeThemeId(rawId);
+        if (Theme::findById(id) != nullptr) {
             for (size_t i = 0; i < Theme::all().size(); ++i) {
                 if (Theme::all()[i].id == id) {
                     setCurrentByIndex((int)i);
@@ -59,8 +47,6 @@ public:
         }
     }
 
-    // ===== Persistence =====
-    // Loads saved theme id from settings. Call once at startup.
     void loadFromSettings() {
         auto f = settingsFile();
         if (!f.existsAsFile()) {
@@ -72,19 +58,19 @@ public:
         if (f.existsAsFile()) {
             auto parsed = juce::JSON::parse(f);
             if (auto* obj = parsed.getDynamicObject()) {
-                juce::String id = obj->getProperty("themeId").toString();
-                if (const Theme* t = Theme::findById(id)) {
-                    for (size_t i = 0; i < Theme::all().size(); ++i) {
-                        if (Theme::all()[i].id == id) {
-                            currentIndex = (int)i;
-                            return;
-                        }
+                juce::String rawId = obj->getProperty("themeId").toString();
+                juce::String normId = Theme::normalizeThemeId(rawId);
+                for (size_t i = 0; i < Theme::all().size(); ++i) {
+                    if (Theme::all()[i].id == normId) {
+                        currentIndex = (int)i;
+                        if (normId != rawId)
+                            saveToSettings(); // persist one-time migration
+                        return;
                     }
                 }
             }
         }
-        // Default to the first theme (Stage Black).
-        currentIndex = 0;
+        currentIndex = 0; // Front Panel Dark
     }
 
     void saveToSettings() {
@@ -108,7 +94,7 @@ private:
             .getChildFile("Fanfare/settings/theme.json");
     }
 
-    int currentIndex = 0; // Stage Black by default
+    int currentIndex = 0;
 
 public:
     ThemeManager(const ThemeManager&) = delete;

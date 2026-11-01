@@ -84,6 +84,7 @@ public:
   int getAudioUnderruns() const { return audioUnderrunCount.load(); }
   void loadRigFromFile(const juce::File &file, int targetSetlistIndex = -1);
   void updateStripCollapseStates();
+  void refreshThemeDependentStyles();
 
 private:
   //==============================================================================
@@ -108,6 +109,30 @@ private:
   juce::TextButton panicBtn{"PANIC"};
   juce::TextButton resetAudioBtn{"RESET AUDIO"};
   juce::TextButton exitBtn{"EXIT"};
+  struct RackViewport : public juce::Viewport {
+    std::function<void(const juce::Rectangle<int> &)> onVisibleAreaChanged;
+    void visibleAreaChanged(const juce::Rectangle<int> &r) override {
+      juce::Viewport::visibleAreaChanged(r);
+      if (onVisibleAreaChanged)
+        onVisibleAreaChanged(r);
+    }
+  };
+  struct RackScrollListener : public juce::ScrollBar::Listener {
+    MainComponent *owner = nullptr;
+    void scrollBarMoved(juce::ScrollBar *, double newRangeStart) override {
+      if (owner != nullptr)
+        owner->setRackScrollX((int)std::round(newRangeStart));
+    }
+  } rackScrollListener;
+  void setRackScrollX(int newX);
+  void scrollRackBy(int deltaPx);
+  void ensureStripVisibleInRack(RackSlotComponent *target);
+
+  juce::Component rackStripContainer;
+  RackViewport rackViewport;
+  juce::ScrollBar rackHScrollBar{false};
+  juce::TextButton rackScrollLeftBtn{"<"};
+  juce::TextButton rackScrollRightBtn{">"};
   juce::OwnedArray<RackSlotComponent> rackSlotComponents;
   juce::OwnedArray<RackSlotComponent> auxReturnComponents;
 
@@ -269,8 +294,9 @@ private:
   juce::ToggleButton autoCollapseToggle{"STAGE COMPACT"};
   juce::Label stripWidthLabel{"wLabel", "STRIP WIDTH"};
   juce::Slider stripWidthSlider;
-  int preferredExpandedWidth = 140;
-  int dragBaseExpandedWidth = 140;
+  int preferredExpandedWidth = 120;
+  int dragBaseExpandedWidth = 120;
+  void savePreferredStripWidth() const;
   static constexpr int kMinExpandedWidth = 85;
   static constexpr int kMaxExpandedWidth = 260;
   juce::ImageComponent logoComponent;
@@ -281,6 +307,12 @@ private:
   juce::Label clockLabel{"clockLabel", ""};
   juce::Label preloadStatusLabel{"preloadStatusLabel", ""};
   juce::Rectangle<int> headerBounds;
+  juce::Rectangle<int> stageHeaderBounds;
+  juce::Rectangle<int> controlBarBounds;
+  juce::Rectangle<int> queueRowBounds;
+  juce::Rectangle<int> sceneRowBounds;
+  juce::Rectangle<int> telemetryWellBounds;
+  juce::Rectangle<int> midiWellBounds;
   juce::Rectangle<int> masterColumnBounds;
   juce::ComboBox schemeSelector;
 

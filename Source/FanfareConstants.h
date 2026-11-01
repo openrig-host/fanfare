@@ -78,8 +78,8 @@ constexpr int kDefaultFohOutputOffset = 0; // Channels 1+2
 constexpr int kDefaultIemOutputOffset = 2; // Channels 3+4
 
 // --- UI Configuration ---
-constexpr int kDefaultWindowWidth = 1000;
-constexpr int kDefaultWindowHeight = 700;
+constexpr int kDefaultWindowWidth = 1240;
+constexpr int kDefaultWindowHeight = 760;
 constexpr int kTimerIntervalMs = 50;
 constexpr int kMeterSegments = 16;
 

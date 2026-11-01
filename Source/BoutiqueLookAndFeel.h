@@ -1,90 +1,62 @@
 #pragma once
 #include <JuceHeader.h>
 #include "AssetLoader.h"
+#include "ButtonRoles.h"
 #include "ThemeManager.h"
 
 /**
  * BoutiqueLookAndFeel
- * Implements a high-end hardware aesthetic for OpenRig using custom vector
- * graphics and SVG assets. This removes dependency on external image assets
- * that were causing visual artifacts.
+ * Implements the "Front Panel" hardware aesthetic for Fanfare, unified with
+ * the Tablet Stage HUD: charcoal/paper panel faces, hairline borders, top bevel
+ * highlights, engraved Barlow Condensed labels, Source Sans 3 body text,
+ * gold FOH / cyan IEM bus coding, and brushed-metal fader caps.
  */
 class BoutiqueLookAndFeel : public juce::LookAndFeel_V4 {
 public:
-  // Mirrors the active theme's `flat` flag. Components that historically read
-  // `laf->useModernStyle` keep working; it now reflects the theme.
   bool useModernStyle = true;
 
-  BoutiqueLookAndFeel() {
-    // Set default Sans-Serif Typeface for a clean, premium visual design (fixes "vibe codey" default fonts)
-    setDefaultSansSerifTypefaceName("Segoe UI");
-    applyThemeColors();
-  }
+  BoutiqueLookAndFeel();
 
-  // Push the active theme's colors into the JUCE colour-ID system. Call after
-  // switching themes so all LookAndFeel-owned widgets repaint correctly.
-  void applyThemeColors() {
-    useModernStyle = ThemeManager::getInstance().isFlat();
-    const auto& t = ThemeManager::getInstance().active();
+  // Embedded SIL OFL typeface accessors
+  static juce::Typeface::Ptr getCondensedTypeface();
+  static juce::Typeface::Ptr getUiRegularTypeface();
+  static juce::Typeface::Ptr getUiBoldTypeface();
 
-    setColour(juce::ResizableWindow::backgroundColourId, t.background);
-    setColour(juce::DocumentWindow::backgroundColourId, t.background);
-    setColour(juce::Slider::thumbColourId, t.knobThumb);
-    setColour(juce::Slider::trackColourId, t.trackGroove);
-    setColour(juce::Slider::textBoxTextColourId, t.text);
-    setColour(juce::Slider::textBoxBackgroundColourId, t.panel);
-    setColour(juce::Slider::textBoxOutlineColourId, t.border);
-    setColour(juce::Slider::textBoxHighlightColourId, t.accent);
+  static juce::Font condensedFont(float height, float kerning = 0.05f);
+  static juce::Font uiFont(float height, bool bold = false);
+  static juce::Font monoFont(float height, bool bold = false);
 
-    setColour(juce::TextButton::buttonColourId, t.raised);
-    setColour(juce::TextButton::buttonOnColourId, t.accent);
-    setColour(juce::TextButton::textColourOffId, t.text);
-    setColour(juce::TextButton::textColourOnId, t.textOnAccent);
-    setColour(juce::ToggleButton::textColourId, t.text);
-    setColour(juce::ToggleButton::tickColourId, t.accent);
-    setColour(juce::ToggleButton::tickDisabledColourId, t.textFaint);
+  // Reusable segmented LED meter renderer (red zone anchored to top of scale)
+  static void drawSegmentedMeterBar(juce::Graphics& g,
+                                    juce::Rectangle<float> barArea,
+                                    float levelNormalized,
+                                    int numSegments,
+                                    juce::Colour lowCol,
+                                    juce::Colour midCol,
+                                    juce::Colour highCol);
 
-    setColour(juce::Label::textColourId, t.text);
-    setColour(juce::Label::backgroundColourId, t.panel);
-    setColour(juce::Label::outlineColourId, t.border);
+  static void drawStereoSegmentedMeter(juce::Graphics& g,
+                                       juce::Rectangle<float> area,
+                                       float leftNorm,
+                                       float rightNorm,
+                                       int numSegments,
+                                       juce::Colour lowCol,
+                                       juce::Colour midCol,
+                                       juce::Colour highCol);
 
-    setColour(juce::ComboBox::backgroundColourId, t.panel);
-    setColour(juce::ComboBox::outlineColourId, t.border);
-    setColour(juce::ComboBox::textColourId, t.text);
-    setColour(juce::ComboBox::arrowColourId, t.textDim);
-    setColour(juce::PopupMenu::backgroundColourId, t.panel);
-    setColour(juce::PopupMenu::textColourId, t.text);
-    setColour(juce::PopupMenu::highlightedBackgroundColourId, t.active);
+  void applyThemeColors();
 
-    setColour(juce::ListBox::backgroundColourId, t.panel);
-    setColour(juce::ListBox::outlineColourId, t.border);
-    setColour(juce::ListBox::textColourId, t.text);
+  juce::Typeface::Ptr getTypefaceForFont(const juce::Font& font) override;
+  juce::Font getTextButtonFont(juce::TextButton&, int buttonHeight) override;
+  juce::Font getComboBoxFont(juce::ComboBox&) override;
+  juce::Font getPopupMenuFont() override;
+  juce::Font getAlertWindowTitleFont() override;
+  juce::Font getAlertWindowMessageFont() override;
+  juce::Font getAlertWindowFont() override;
 
-    setColour(juce::ScrollBar::backgroundColourId, t.background);
-    setColour(juce::ScrollBar::thumbColourId, t.borderStrong);
-    setColour(juce::ScrollBar::trackColourId, t.trackGroove);
-
-    setColour(juce::TextEditor::backgroundColourId, t.panelAlt);
-    setColour(juce::TextEditor::textColourId, t.text);
-    setColour(juce::TextEditor::outlineColourId, t.border);
-    setColour(juce::TextEditor::highlightColourId, t.active);
-    setColour(juce::TextEditor::focusedOutlineColourId, t.accent);
-  }
-
-  /**
-   * Draw a skeuomorphic toggle switch using SVG asset
-   *
-   * @param g Graphics context
-   * @param button Toggle button to draw
-   * @param svgAsset Name of SVG asset to use
-   * @param isOrange Whether to use orange accent color
-   */
   void drawToggleSwitch(juce::Graphics &g, juce::ToggleButton &button,
                         const juce::String &svgAsset, bool isOrange = false);
 
-  /**
-   * Draw a skeuomorphic button background with 3D effect
-   */
   void drawSkeuomorphicButtonBackground(juce::Graphics &g, juce::Button &button,
                                         const juce::Colour &baseColour);
 
@@ -106,216 +78,51 @@ public:
                         bool shouldDrawButtonAsHighlighted,
                         bool shouldDrawButtonAsDown) override;
 
+  void drawComboBox(juce::Graphics &g, int width, int height, bool isButtonDown,
+                    int buttonX, int buttonY, int buttonW, int buttonH,
+                    juce::ComboBox &box) override;
+
+  void positionComboBoxText(juce::ComboBox &box, juce::Label &label) override;
+
+  void drawPopupMenuBackground(juce::Graphics &g, int width, int height) override;
+
+  void drawScrollbar(juce::Graphics &g, juce::ScrollBar &scrollbar, int x, int y,
+                     int width, int height, bool isScrollbarVertical,
+                     int thumbStartPosition, int thumbSize, bool isMouseOver,
+                     bool isMouseDown) override;
+
+  void drawTabButton(juce::TabBarButton &button, juce::Graphics &g,
+                     bool isMouseOver, bool isMouseDown) override;
+
+  void drawAlertBox(juce::Graphics &g, juce::AlertWindow &alert,
+                    const juce::Rectangle<int> &textArea,
+                    juce::TextLayout &textLayout) override;
+
   void drawLinearSlider(juce::Graphics &g, int x, int y, int width, int height,
                         float sliderPos, float minSliderPos, float maxSliderPos,
                         const juce::Slider::SliderStyle style,
                         juce::Slider &slider) override {
-    // Call custom background drawing
     drawLinearSliderBackground(g, x, y, width, height, sliderPos, minSliderPos,
                                maxSliderPos, style, slider);
-
-    // Call custom thumb drawing
     drawLinearSliderThumb(g, x, y, width, height, sliderPos, minSliderPos,
                           maxSliderPos, style, slider);
   }
 
   void drawLinearSliderThumb(juce::Graphics &g, int x, int y, int width,
                              int height, float sliderPos,
-                             float /*minSliderPos*/, float /*maxSliderPos*/,
-                             const juce::Slider::SliderStyle /*style*/,
-                             juce::Slider &slider) override {
-
-    if (slider.isHorizontal()) {
-      float thumbHeight = (float)height * (useModernStyle ? 0.75f : 0.85f);
-      float thumbWidth = juce::jmax(8.0f, thumbHeight * 0.5f);
-
-      float thumbX = sliderPos - (thumbWidth * 0.5f);
-      float thumbY = (float)y + ((float)height - thumbHeight) * 0.5f;
-
-      juce::Rectangle<float> thumbRect(thumbX, thumbY, thumbWidth, thumbHeight);
-      float cornerSize = useModernStyle ? 2.0f : 3.0f;
-
-      // 1. Drop Shadow
-      g.setColour(ThemeManager::get(Theme::Role::background).withAlpha(0.5f));
-      g.fillRoundedRectangle(thumbRect.translated(0.0f, 1.0f), cornerSize);
-
-      // 2. Thumb Body
-      g.setColour(ThemeManager::get(Theme::Role::knobFace));
-      g.fillRoundedRectangle(thumbRect, cornerSize);
-
-      // 3. Central Accent Line
-      juce::Colour accentCol = ThemeManager::get(Theme::Role::accent);
-      g.setColour(accentCol);
-      g.drawVerticalLine((int)thumbRect.getCentreX(), thumbRect.getY() + 2.0f, thumbRect.getBottom() - 2.0f);
-
-      // 4. Border
-      g.setColour(ThemeManager::get(Theme::Role::background).darker(0.3f));
-      g.drawRoundedRectangle(thumbRect, cornerSize, 1.0f);
-      return;
-    }
-
-    // Modern Vector Fader Cap (Vertical)
-    float thumbWidth = (float)width * (useModernStyle ? 0.65f : 0.75f); // Good width relative to track
-    float thumbHeight = thumbWidth * (useModernStyle ? 1.4f : 1.6f);   // Aspect ratio
-
-    // Center it horizontally
-    float thumbX = (float)x + ((float)width - thumbWidth) * 0.5f;
-    float thumbY = sliderPos - (thumbHeight * 0.5f);
-
-    juce::Rectangle<float> thumbRect(thumbX, thumbY, thumbWidth, thumbHeight);
-    float cornerSize = useModernStyle ? 3.0f : 4.0f;
-
-    // 1. Drop Shadow
-    g.setColour(ThemeManager::get(Theme::Role::background).withAlpha(0.5f));
-    g.fillRoundedRectangle(thumbRect.translated(0.0f, useModernStyle ? 2.0f : 3.0f), cornerSize);
-
-    if (useModernStyle) {
-      // Modern flat cap body
-      g.setColour(ThemeManager::get(Theme::Role::knobFace));
-      g.fillRoundedRectangle(thumbRect, cornerSize);
-
-      // Central accent bar — routed by slider component ID to its semantic bus
-      juce::Colour accentCol = ThemeManager::get(Theme::Role::accent);
-      auto id = slider.getComponentID();
-      if (id == "foh" || id == "master_foh")
-        accentCol = ThemeManager::get(Theme::Role::foh);
-      else if (id == "iem" || id == "master_iem")
-        accentCol = ThemeManager::get(Theme::Role::iem);
-
-      float ridgeY = thumbRect.getCentreY();
-      float ridgeH = 3.0f;
-      juce::Rectangle<float> ridgeRect(thumbRect.getX() + 3, ridgeY - ridgeH * 0.5f,
-                                       thumbRect.getWidth() - 6, ridgeH);
-
-      g.setColour(accentCol);
-      g.fillRoundedRectangle(ridgeRect, 1.0f);
-
-      // Border
-      g.setColour(ThemeManager::get(Theme::Role::background).darker(0.2f));
-      g.drawRoundedRectangle(thumbRect, cornerSize, 1.0f);
-    } else {
-      // 2. Main Body Gradient (Top-down lighting)
-      juce::ColourGradient bodyGrad(
-          juce::Colours::grey.brighter(0.2f), thumbRect.getX(), thumbRect.getY(),
-          juce::Colours::grey.darker(0.3f), thumbRect.getX(),
-          thumbRect.getBottom(), false);
-      g.setGradientFill(bodyGrad);
-      g.fillRoundedRectangle(thumbRect, cornerSize);
-
-      // 3. Central Ridge / Grip Line (Concave effect)
-      float ridgeY = thumbRect.getCentreY();
-      float ridgeH = 2.0f;
-      juce::Rectangle<float> ridgeRect(thumbRect.getX() + 4,
-                                       ridgeY - ridgeH * 0.5f,
-                                       thumbRect.getWidth() - 8, ridgeH);
-
-      g.setColour(juce::Colours::black.withAlpha(0.6f));
-      g.fillRect(ridgeRect.translated(0, -1)); // Bevel top shade
-
-      g.setColour(juce::Colours::white.withAlpha(0.3f));
-      g.fillRect(ridgeRect.translated(0, 1)); // Bevel bottom highlight
-
-      g.setColour(juce::Colours::black.withAlpha(0.8f));
-      g.fillRect(ridgeRect); // The groove itself
-
-      // 4. Subtle Border
-      g.setColour(juce::Colours::black.withAlpha(0.4f));
-      g.drawRoundedRectangle(thumbRect, cornerSize, 1.0f);
-    }
-  }
+                             float minSliderPos, float maxSliderPos,
+                             const juce::Slider::SliderStyle style,
+                             juce::Slider &slider) override;
 
   void drawLinearSliderBackground(juce::Graphics &g, int x, int y, int width,
                                   int height, float sliderPos,
-                                  float /*minSliderPos*/,
-                                  float /*maxSliderPos*/,
-                                  const juce::Slider::SliderStyle /*style*/,
-                                  juce::Slider &slider) override {
-    auto trackWidth = useModernStyle ? 4.0f : 6.0f;
-    auto cornerSize = useModernStyle ? 2.0f : 3.0f;
-
-    if (slider.isVertical()) {
-      juce::Rectangle<float> trackArea((float)x + (width - trackWidth) * 0.5f,
-                                       (float)y, (float)trackWidth,
-                                       (float)height);
-
-      if (useModernStyle) {
-        g.setColour(ThemeManager::get(Theme::Role::trackGroove)); // Sleek deep track
-      } else {
-        // Track background: themed for masters, darker for channels
-        if (slider.getComponentID() == "master")
-          g.setColour(ThemeManager::get(Theme::Role::iem).withAlpha(0.5f));
-        else
-          g.setColour(ThemeManager::get(Theme::Role::background).withAlpha(0.6f));
-      }
-
-      g.fillRoundedRectangle(trackArea, cornerSize);
-
-      if (!useModernStyle) {
-        // Inner track shadow
-        g.setColour(juce::Colours::black.withAlpha(0.3f));
-        g.drawRoundedRectangle(trackArea.reduced(1.0f), cornerSize, 1.0f);
-      }
-
-      // --- TRICKY LEVEL MARKINGS (Tick Marks) ---
-      float tickWidth = useModernStyle ? 6.0f : 8.0f;
-      float endY = (float)(y + height);
-
-      for (int i = 0; i <= 10; ++i) {
-        float normPos = (float)i / 10.0f;
-        float yPos = endY - (normPos * (float)height);
-
-        // Major ticks (every 20%)
-        if (i % 2 == 0) {
-          g.setColour(useModernStyle ? ThemeManager::get(Theme::Role::borderStrong) : juce::Colours::white.withAlpha(0.4f));
-          // Wider ticks
-          g.drawLine((float)x + (width - tickWidth - 10) * 0.5f, yPos,
-                     (float)x + (width + tickWidth + 10) * 0.5f, yPos, 1.0f);
-        } else {
-          // Minor ticks
-          g.setColour(useModernStyle ? ThemeManager::get(Theme::Role::border) : juce::Colours::white.withAlpha(0.15f));
-          g.drawLine((float)x + (width - tickWidth) * 0.5f, yPos,
-                     (float)x + (width + tickWidth) * 0.5f, yPos, 0.5f);
-        }
-      }
-
-    } else {
-      float trackHeight = useModernStyle ? 6.0f : 8.0f;
-      float trackCorner = useModernStyle ? 3.0f : 4.0f;
-      juce::Rectangle<float> trackArea((float)x,
-                                       (float)y + ((float)height - trackHeight) * 0.5f,
-                                       (float)width, (float)trackHeight);
-
-      // Track groove background
-      g.setColour(ThemeManager::get(Theme::Role::trackGroove));
-      g.fillRoundedRectangle(trackArea, trackCorner);
-
-      // Active progress fill (from x to sliderPos)
-      float fillWidth = juce::jlimit(0.0f, (float)width, sliderPos - (float)x);
-      if (fillWidth > 0.0f) {
-        juce::Rectangle<float> activeArea(trackArea.getX(), trackArea.getY(), fillWidth, trackArea.getHeight());
-        juce::Colour accentCol = ThemeManager::get(Theme::Role::accent);
-        auto id = slider.getComponentID();
-        if (id == "foh" || id == "master_foh")
-          accentCol = ThemeManager::get(Theme::Role::foh);
-        else if (id == "iem" || id == "master_iem")
-          accentCol = ThemeManager::get(Theme::Role::iem);
-
-        g.setColour(accentCol.withAlpha(0.85f));
-        g.fillRoundedRectangle(activeArea, trackCorner);
-      }
-
-      // Border
-      g.setColour(ThemeManager::get(Theme::Role::background).darker(0.3f));
-      g.drawRoundedRectangle(trackArea, trackCorner, 1.0f);
-    }
-  }
+                                  float minSliderPos, float maxSliderPos,
+                                  const juce::Slider::SliderStyle style,
+                                  juce::Slider &slider) override;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BoutiqueLookAndFeel)
 
 protected:
-  // Cached SVG drawables — loaded once, reused every repaint (no per-frame
-  // allocation). Safe because JUCE painting is single-threaded; each paint
-  // call sets the transform immediately before draw().
   std::unique_ptr<juce::Drawable> knobSvg;
   std::unique_ptr<juce::Drawable> toggleSwitchSvg;
   std::unique_ptr<juce::Drawable> toggleOrangeSvg;

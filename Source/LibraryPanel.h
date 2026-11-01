@@ -66,7 +66,8 @@ private:
 #include "SetlistPanel.h"
 
 class LibraryPanel : public juce::Component,
-                     public juce::DragAndDropContainer {
+                     public juce::DragAndDropContainer,
+                     private juce::ChangeListener {
 public:
   LibraryPanel();
   ~LibraryPanel() override;
@@ -87,6 +88,8 @@ public:
   Fanfare::SetlistPanel* getSetlistPanel() { return setlistPanel.get(); }
 
 private:
+  void changeListenerCallback(juce::ChangeBroadcaster*) override;
+  void applyTheme();
   juce::TextEditor searchEditor;
   juce::TextButton newFolderBtn;
   std::unique_ptr<juce::TabbedComponent> tabs;

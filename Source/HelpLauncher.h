@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "ButtonRoles.h"
 #include "ThemeManager.h"
 
 namespace Fanfare {
@@ -10,8 +11,6 @@ inline void openHelpManual(const juce::String& anchor = {}) {
     if (frag.startsWithChar('#'))
         frag = frag.substring(1);
 
-    // Check if manual.html exists locally on disk so the embedded HTTP server
-    // (port 8080) can serve it, otherwise fall back to the online GitHub Pages manual.
     auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
     bool hasLocalManual =
         exeDir.getChildFile("manual.html").existsAsFile() ||
@@ -32,8 +31,9 @@ inline void openHelpManual(const juce::String& anchor = {}) {
 
 inline void styleHelpButton(juce::TextButton& btn, const juce::String& anchor, const juce::String& tooltipText = {}) {
     btn.setButtonText("HAAALP!");
-    btn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFFB71C1C).darker(0.15f));
-    btn.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    setButtonRole(btn, ButtonRole::Help);
+    btn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::helpFaceTop));
+    btn.setColour(juce::TextButton::textColourOffId, ThemeManager::get(Theme::Role::helpText));
     btn.setTooltip(tooltipText.isNotEmpty()
                        ? tooltipText
                        : "Open the Fanfare Stage Manual to this exact section");
@@ -43,4 +43,3 @@ inline void styleHelpButton(juce::TextButton& btn, const juce::String& anchor, c
 }
 
 } // namespace Fanfare
-

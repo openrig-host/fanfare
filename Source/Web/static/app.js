@@ -1,5 +1,6 @@
 /**
- * OpenRig Stage Companion - Tablet HUD Logic (1024x600 Landscape Tuned & Song Bubbles Grid)
+ * Fanfare Stage Companion - Tablet HUD Logic (1024x600 Landscape Tuned)
+ * "Front Panel" skin: dark/bright themes, hold-to-fire panic, WS latency echo.
  * Real-time bidirectional WebSocket client and stage UI controller.
  */
 
@@ -15,16 +16,16 @@
     return `${note}${octave}`;
   }
 
-  // Pre-selected distinct high-contrast stage zone colors
+  // Stage-tape zone colors: distinct, muted, legible on dark and bright panels
   const ZONE_COLORS = [
-    { bg: "#1f6feb", border: "#58a6ff" }, // Electric Blue
-    { bg: "#238636", border: "#3fb950" }, // Stage Green
-    { bg: "#d29922", border: "#e3b341" }, // Warm Amber
-    { bg: "#8957e5", border: "#a371f7" }, // Purple
-    { bg: "#da3633", border: "#f85149" }, // Crimson Red
-    { bg: "#1b7c83", border: "#39c5cf" }, // Cyan Teal
-    { bg: "#b08800", border: "#d4a72c" }, // Gold
-    { bg: "#6e7681", border: "#8b949e" }  // Slate
+    { bg: "#3d6fa8", border: "#6d9bd1" }, // Slate Blue
+    { bg: "#3d8f5a", border: "#6dbd87" }, // Stage Green
+    { bg: "#b0862e", border: "#d9ac52" }, // Brass Amber
+    { bg: "#7a5aa8", border: "#a385d1" }, // Purple
+    { bg: "#a84840", border: "#d17a70" }, // Brick Red
+    { bg: "#2e8a8f", border: "#5cb8bd" }, // Teal
+    { bg: "#8f7426", border: "#bd9c4a" }, // Gold
+    { bg: "#5f6a74", border: "#8b96a0" }  // Steel
   ];
 
   // --- State ---
@@ -32,6 +33,7 @@
   let wsConnected = false;
   let reconnectInterval = 2000;
   let pingIntervalId = null;
+  const clientId = Math.random().toString(36).slice(2, 10);
 
   let currentStatus = {
     activePreset: "DEFAULT SONG",
@@ -160,7 +162,7 @@
 
       if (pingIntervalId) clearInterval(pingIntervalId);
       pingIntervalId = setInterval(() => {
-        if (wsConnected) sendWsMessage({ type: 'ping', time: Date.now() });
+        if (wsConnected) sendWsMessage({ type: 'ping', time: Date.now(), cid: clientId });
       }, 5000);
     };
 
@@ -186,7 +188,7 @@
   function handleDisconnect() {
     wsConnected = false;
     if (banner) banner.className = 'connection-banner disconnected';
-    if (connectionText) connectionText.innerText = 'DISCONNECTED — RECONNECTING TO FANFARE...';
+    if (connectionText) connectionText.innerText = 'DISCONNECTED \u00b7 RECONNECTING TO FANFARE...';
     if (latencyIndicator) latencyIndicator.innerText = 'WS: OFFLINE';
     if (pingIntervalId) {
       clearInterval(pingIntervalId);
@@ -238,9 +240,12 @@
         break;
 
       case 'pong':
-        if (msg.time && latencyIndicator) {
+        if (msg.time && latencyIndicator && (!msg.cid || msg.cid === clientId)) {
           const latency = Date.now() - msg.time;
-          latencyIndicator.innerText = `WS: ${latency}ms`;
+          // Ignore echoes belonging to another tablet's clock (broadcast pong)
+          if (latency >= 0 && latency < 10000) {
+            latencyIndicator.innerText = `WS: ${latency}ms`;
+          }
         }
         break;
     }
@@ -291,12 +296,12 @@
             upNextLabel.innerText = "NEXT:";
           }
         } else {
-          nextSongName.innerText = "— END OF SET —";
+          nextSongName.innerText = "- END OF SET -";
           upNextPill.className = "up-next-pill";
           upNextLabel.innerText = "STATUS:";
         }
       } else {
-        nextSongName.innerText = "— NO SETLIST LOADED —";
+        nextSongName.innerText = "- NO SETLIST LOADED -";
         upNextPill.className = "up-next-pill";
       }
     }
@@ -328,13 +333,13 @@
 
     if (queuePreloadStatus) {
       if (isPreloaded) {
-        queuePreloadStatus.innerText = `● Next Song Preloaded & Ready`;
+        queuePreloadStatus.innerText = `NEXT READY`;
         queuePreloadStatus.style.color = 'var(--accent-green-bright)';
       } else if (isPreloading) {
-        queuePreloadStatus.innerText = `⏳ Preloading DSP in Background...`;
+        queuePreloadStatus.innerText = `PRELOADING DSP...`;
         queuePreloadStatus.style.color = 'var(--accent-amber)';
       } else {
-        queuePreloadStatus.innerText = `${setlist.length} Songs Loaded`;
+        queuePreloadStatus.innerText = `${setlist.length} SONGS LOADED`;
         queuePreloadStatus.style.color = 'var(--accent-cyan)';
       }
     }
@@ -396,9 +401,9 @@
       }
 
       let badgeText = `SONG ${idx + 1}`;
-      if (isActive) badgeText = '▶ LIVE';
-      else if (isNextPreloaded) badgeText = '● READY';
-      else if (isNextPreloading) badgeText = '⏳ LOADING';
+      if (isActive) badgeText = 'LIVE';
+      else if (isNextPreloaded) badgeText = 'READY';
+      else if (isNextPreloading) badgeText = 'LOADING';
 
       chip.innerHTML = `
         <div class="queue-chip-top">
@@ -418,31 +423,32 @@
 
   // --- Sound Tag Detection & Color Mapping ---
   const SOUND_TAG_COLORS = {
-    'PIANO': { bg: 'rgba(0, 176, 255, 0.15)', border: '#00B0FF', text: '#00B0FF' },
-    'B3 ORGAN': { bg: 'rgba(255, 179, 0, 0.15)', border: '#FFB300', text: '#FFB300' },
-    'SYNTH / PAD': { bg: 'rgba(233, 30, 99, 0.15)', border: '#E91E63', text: '#E91E63' },
-    'BRASS / HORNS': { bg: 'rgba(255, 109, 0, 0.15)', border: '#FF6D00', text: '#FF6D00' },
-    'SOLO': { bg: 'rgba(0, 230, 118, 0.15)', border: '#00E676', text: '#00E676' },
-    'STRINGS': { bg: 'rgba(163, 113, 247, 0.15)', border: '#a371f7', text: '#a371f7' },
-    'PERCUSSION': { bg: 'rgba(210, 153, 34, 0.15)', border: '#d29922', text: '#d29922' },
-    'CORE SETUPS': { bg: 'rgba(0, 229, 255, 0.15)', border: '#00e5ff', text: '#00e5ff' }
+    'PIANO': { bg: 'var(--bg-sunken)', border: 'var(--tag-piano)', text: 'var(--tag-piano)' },
+    'B3 ORGAN': { bg: 'var(--bg-sunken)', border: 'var(--tag-organ)', text: 'var(--tag-organ)' },
+    'SYNTH / PAD': { bg: 'var(--bg-sunken)', border: 'var(--tag-synth)', text: 'var(--tag-synth)' },
+    'BRASS / HORNS': { bg: 'var(--bg-sunken)', border: 'var(--tag-brass)', text: 'var(--tag-brass)' },
+    'SOLO': { bg: 'var(--bg-sunken)', border: 'var(--tag-solo)', text: 'var(--tag-solo)' },
+    'STRINGS': { bg: 'var(--bg-sunken)', border: 'var(--tag-strings)', text: 'var(--tag-strings)' },
+    'PERCUSSION': { bg: 'var(--bg-sunken)', border: 'var(--tag-perc)', text: 'var(--tag-perc)' },
+    'CORE SONGS': { bg: 'var(--bg-sunken)', border: 'var(--tag-core)', text: 'var(--tag-core)' },
+    'CORE SETUPS': { bg: 'var(--bg-sunken)', border: 'var(--tag-core)', text: 'var(--tag-core)' }
   };
 
   function detectInstrumentColor(name) {
     const n = (name || '').toLowerCase();
     if (n.includes('piano') || n.includes('wurl') || n.includes('rhodes') || n.includes('grand') || n.includes('steinway') || n.includes('keys') || n.includes('gentleman') || n.includes('maverick') || n.includes('noire') || n.includes('pianoverse'))
-      return '#00B0FF'; // Blue (Piano / Keys)
+      return 'var(--tag-piano)';
     if (n.includes('organ') || n.includes('b3') || n.includes('leslie') || n.includes('blue3'))
-      return '#FFB300'; // Amber (Organ / B3)
+      return 'var(--tag-organ)';
     if (n.includes('brass') || n.includes('horn') || n.includes('sax') || n.includes('trumpet') || n.includes('centerfold'))
-      return '#FF6D00'; // Orange (Brass / Horns)
+      return 'var(--tag-brass)';
     if (n.includes('synth') || n.includes('lead') || n.includes('pad') || n.includes('juno') || n.includes('arp') || n.includes('zenology') || n.includes('5080') || n.includes('wolf') || n.includes('beds') || n.includes('rebell'))
-      return '#E91E63'; // Magenta (Synth / Pad)
+      return 'var(--tag-synth)';
     if (n.includes('sample') || n.includes('perc') || n.includes('marimba') || n.includes('drum') || n.includes('clap') || n.includes('snap'))
-      return '#00E676'; // Green (Percussion / Samples)
+      return 'var(--tag-perc)';
     if (n.includes('solo'))
-      return '#00E676'; // Green (Solo)
-    return '#00E5FF';   // Cyan (Default Setup)
+      return 'var(--tag-solo)';
+    return 'var(--tag-core)';
   }
 
   // --- Render Tag Filter Bar ---
@@ -480,7 +486,7 @@
     if (favCount > 0 || songs.some(s => s.isFavorite)) {
       const favBtn = document.createElement('button');
       favBtn.className = `cat-pill-btn ${selectedTag === 'FAVORITES' ? 'active' : ''}`;
-      favBtn.innerHTML = `&#9733; FAVORITES (${favCount})`;
+      favBtn.innerText = `FAVORITES (${favCount})`;
       favBtn.onclick = () => {
         selectedTag = 'FAVORITES';
         renderSongsCategoriesBar(songs);
@@ -597,14 +603,14 @@
       }
 
       let badgeText = 'SELECT';
-      if (isActive) badgeText = '▶ LIVE';
-      else if (song.isFavorite) badgeText = '★ FAV';
+      if (isActive) badgeText = 'LIVE';
+      else if (song.isFavorite) badgeText = 'FAV';
 
       // Sound tag chips
       const soundTags = (song.tags || []).filter(t => t !== 'FAVORITES' && t !== 'GENERAL');
       let tagsHtml = '';
       soundTags.forEach(t => {
-        const tStyle = SOUND_TAG_COLORS[t] || { bg: 'rgba(255,255,255,0.08)', border: '#6e7681', text: '#8b949e' };
+        const tStyle = SOUND_TAG_COLORS[t] || { bg: 'var(--bg-sunken)', border: 'var(--hairline-strong)', text: 'var(--text-dim)' };
         tagsHtml += `<span class="sound-tag-chip" style="background-color: ${tStyle.bg}; border-color: ${tStyle.border}; color: ${tStyle.text}">${t}</span>`;
       });
 
@@ -614,7 +620,7 @@
         <div class="bubble-info-col">
           <div class="bubble-meta-row">
             <span class="bubble-cat-tag">${song.category || 'SONG'}</span>
-            <button class="bubble-fav-btn ${song.isFavorite ? 'is-fav' : ''}" title="Toggle Star">&#9733;</button>
+            <button class="bubble-fav-btn ${song.isFavorite ? 'is-fav' : ''}" title="Toggle Favorite">FAV</button>
           </div>
 
           <div class="bubble-title" title="${songName}">${songName}</div>
@@ -626,7 +632,7 @@
 
         <div class="bubble-action-pillar">
           <button class="btn-bubble-action btn-bubble-queue" title="Add to Setlist Queue as Up Next">+ QUEUE</button>
-          <button class="btn-bubble-action btn-bubble-play ${isActive ? 'is-live' : ''}" title="Activate Immediately">${isActive ? '▶ LIVE' : 'SELECT'}</button>
+          <button class="btn-bubble-action btn-bubble-play ${isActive ? 'is-live' : ''}" title="Activate Immediately">${isActive ? 'LIVE' : 'SELECT'}</button>
         </div>
       `;
 
@@ -648,7 +654,7 @@
         queueBtn.onclick = (e) => {
           e.stopPropagation();
           sendWsMessage({ type: 'queue_song', path: song.path || song.fullPath || songName });
-          queueBtn.innerText = '✓ QUEUED';
+          queueBtn.innerText = 'QUEUED';
           queueBtn.classList.add('queued');
           setTimeout(() => {
             if (queueBtn) {
@@ -689,7 +695,7 @@
     if (songSlotsGrid) {
       songSlotsGrid.innerHTML = '';
       if (validSlots.length === 0) {
-        songSlotsGrid.innerHTML = '<div style="color: var(--text-dim); font-size: 11px; padding: 4px;">No instruments in setup.</div>';
+        songSlotsGrid.innerHTML = '<div style="color: var(--text-dim); font-size: 11px; padding: 4px;">No instruments in song.</div>';
       } else {
         validSlots.forEach((slot, i) => {
           const colorTheme = ZONE_COLORS[i % ZONE_COLORS.length];
@@ -865,7 +871,7 @@
       // Live View Mode (Default / Locked for gigging)
       if (notepadLiveViewer) {
         notepadLiveViewer.style.display = 'block';
-        notepadLiveViewer.innerHTML = parseStageNotes(content) || '<div style="color: var(--text-dim); font-size: 15px; padding: 10px;">No notes for this setup. Tap EDIT to type chords, lyrics, or notes.</div>';
+        notepadLiveViewer.innerHTML = parseStageNotes(content) || '<div style="color: var(--text-dim); font-size: 15px; padding: 10px;">No notes for this song. Tap EDIT to type chords, lyrics, or notes.</div>';
         notepadLiveViewer.style.fontSize = `${fontSize}px`;
         notepadLiveViewer.classList.toggle('monospace', Boolean(notepadData.isMonospace));
       }
@@ -1048,7 +1054,7 @@
     songSortBtn.onclick = () => {
       if (sortMode === 'ALPHA') {
         sortMode = 'FAVORITES';
-        songSortBtn.innerHTML = 'SORT: &#9733; FAV FIRST';
+        songSortBtn.innerText = 'SORT: FAV FIRST';
       } else if (sortMode === 'FAVORITES') {
         sortMode = 'CATEGORY';
         songSortBtn.innerText = 'SORT: CATEGORY';
@@ -1073,9 +1079,60 @@
   if (hudPrevBtn) hudPrevBtn.onclick = () => sendWsMessage({ type: 'prev_setlist' });
   if (hudNextBtn) hudNextBtn.onclick = () => sendWsMessage({ type: 'next_setlist' });
 
-  // Panic Kill Button
+  // Panic Kill Button — guarded momentary: hold ~0.7s to fire (CSS fills the cap)
   const panicBtn = document.getElementById('panicBtn');
-  if (panicBtn) panicBtn.onclick = () => sendWsMessage({ type: 'panic' });
+  if (panicBtn) {
+    let panicHoldTimer = null;
+    const PANIC_HOLD_MS = 700;
+    const panicLabel = panicBtn.querySelector('.panic-label');
+
+    const cancelPanicHold = () => {
+      if (panicHoldTimer) { clearTimeout(panicHoldTimer); panicHoldTimer = null; }
+      panicBtn.classList.remove('holding');
+    };
+
+    panicBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      cancelPanicHold();
+      panicBtn.classList.add('holding');
+      panicHoldTimer = setTimeout(() => {
+        panicHoldTimer = null;
+        panicBtn.classList.remove('holding');
+        sendWsMessage({ type: 'panic' });
+        panicBtn.classList.add('fired');
+        if (panicLabel) panicLabel.innerText = 'KILLED';
+        if (navigator.vibrate) navigator.vibrate(90);
+        setTimeout(() => {
+          panicBtn.classList.remove('fired');
+          if (panicLabel) panicLabel.innerText = 'PANIC \u00B7 HOLD';
+        }, 1200);
+      }, PANIC_HOLD_MS);
+    });
+    panicBtn.addEventListener('pointerup', cancelPanicHold);
+    panicBtn.addEventListener('pointerleave', cancelPanicHold);
+    panicBtn.addEventListener('pointercancel', cancelPanicHold);
+  }
+
+  // Dark / Bright front-panel theme toggle (persisted per tablet)
+  const themeToggleBtn = document.getElementById('themeToggleBtn');
+  function applyHudTheme(mode) {
+    document.documentElement.setAttribute('data-theme', mode);
+    if (themeToggleBtn) themeToggleBtn.innerText = (mode === 'bright') ? 'DARK' : 'BRIGHT';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', (mode === 'bright') ? '#dddad2' : '#131619');
+  }
+  (function initHudTheme() {
+    let saved = 'dark';
+    try { saved = localStorage.getItem('fanfareHudTheme') || 'dark'; } catch (e) {}
+    applyHudTheme(saved);
+  })();
+  if (themeToggleBtn) {
+    themeToggleBtn.onclick = () => {
+      const next = (document.documentElement.getAttribute('data-theme') === 'bright') ? 'dark' : 'bright';
+      applyHudTheme(next);
+      try { localStorage.setItem('fanfareHudTheme', next); } catch (e) {}
+    };
+  }
 
   // Notepad Controls
   if (fontDecBtn) fontDecBtn.onclick = () => {
@@ -1171,7 +1228,7 @@
     if (!url) return;
     if (djYtStatusMsg) {
       djYtStatusMsg.style.display = 'block';
-      djYtStatusMsg.innerText = 'Sending download request (MP3 192k) to OpenRig...';
+      djYtStatusMsg.innerText = 'Sending download request (MP3 192k) to Fanfare...';
     }
     fetch('/api/mp3/download', {
       method: 'POST',

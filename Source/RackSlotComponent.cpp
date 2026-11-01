@@ -1,4 +1,5 @@
 #include "RackSlotComponent.h"
+#include "ButtonRoles.h"
 #include "ThemeManager.h"
 #include "Logger.h"
 #include "IMidiNoteLearner.h"
@@ -17,15 +18,37 @@ bool isBlackKey(int note) {
   return (n == 1 || n == 3 || n == 6 || n == 8 || n == 10);
 }
 
+juce::Colour resolveStripCategoryColor(const RackSlot &slot, int slotIndex,
+                                       bool isMonitorIn, bool isAccordion,
+                                       bool isReturn) {
+  juce::Colour c = slot.getChannelColor();
+  if (c == juce::Colour(0xff2a2a2a)) {
+    if (isMonitorIn)
+      return ThemeManager::get(Theme::Role::catMonitor);
+    if (isAccordion)
+      return ThemeManager::get(Theme::Role::catAccordion);
+    if (isReturn)
+      return ThemeManager::get(Theme::Role::catReturn);
+    if (slotIndex == 1 || slot.getName().containsIgnoreCase("CK88") ||
+        slot.getName().containsIgnoreCase("RD88") ||
+        slot.getName().containsIgnoreCase("Keyboard"))
+      return ThemeManager::get(Theme::Role::catKeyboard);
+    return ThemeManager::get(Theme::Role::catDefault);
+  }
+  return c;
+}
+
 // Per-instrument layer config: enable, level, and key range. Bound live to the
 // slot's ChainSlotSettings. Implements IMidiNoteLearner so MainComponent can
 // route incoming MIDI notes to it for range learning.
-class PluginStackConfigComp : public juce::Component, public juce::Timer, public IMidiNoteLearner {
+class PluginStackConfigComp : public juce::Component,
+                              public juce::Timer,
+                              public IMidiNoteLearner {
 public:
   PluginStackConfigComp(RackSlot &s, int chainIdx) : slot(s), idx(chainIdx) {
     auto &cs = slot.getChainSlotSettings(idx);
 
-    enableBtn.setButtonText("Enabled");
+    enableBtn.setButtonText("ENABLED");
     enableBtn.setClickingTogglesState(true);
     enableBtn.setToggleState(cs.enabled.load(), juce::dontSendNotification);
     enableBtn.onClick = [this] {
@@ -34,7 +57,7 @@ public:
     addAndMakeVisible(enableBtn);
 
     levelSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    levelSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 50, 16);
+    levelSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 52, 16);
     levelSlider.setRange(0.0, 1.5, 0.01);
     levelSlider.setValue(cs.level.load(), juce::dontSendNotification);
     levelSlider.textFromValueFunction = [](double v) { return juce::String(v, 2); };
@@ -43,7 +66,9 @@ public:
     };
     addAndMakeVisible(levelSlider);
 
-    levelLabel.setText("Level", juce::dontSendNotification);
+    levelLabel.setText("LAYER LEVEL", juce::dontSendNotification);
+    levelLabel.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.06f));
+    levelLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
     levelLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(levelLabel);
 
@@ -56,18 +81,16 @@ public:
     learnedHigh = -1;
     startTimerHz(20);
 
-    // Done button
     doneBtn.setButtonText("DONE");
-    doneBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::ok));
+    Fanfare::setButtonRole(doneBtn, Fanfare::ButtonRole::Primary);
     doneBtn.onClick = [this] {
-      if (auto* co = findParentComponentOfClass<juce::CallOutBox>())
+      if (auto *co = findParentComponentOfClass<juce::CallOutBox>())
         co->dismiss();
     };
     addAndMakeVisible(doneBtn);
 
-    // Reset button
     resetBtn.setButtonText("RESET");
-    resetBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::danger));
+    Fanfare::setButtonRole(resetBtn, Fanfare::ButtonRole::Danger);
     resetBtn.onClick = [this] {
       learnedLow = -1;
       learnedHigh = -1;
@@ -86,11 +109,11 @@ public:
   ~PluginStackConfigComp() override { stopTimer(); }
 
   void resized() override {
-    auto b = getLocalBounds().reduced(8);
+    auto b = getLocalBounds().reduced(10);
     enableBtn.setBounds(b.removeFromTop(24));
     b.removeFromTop(4);
-    levelLabel.setBounds(b.removeFromTop(16));
-    levelSlider.setBounds(b.removeFromTop(56));
+    levelLabel.setBounds(b.removeFromTop(14));
+    levelSlider.setBounds(b.removeFromTop(58));
     b.removeFromTop(4);
 
     auto btnRow = b.removeFromBottom(28);
@@ -99,26 +122,24 @@ public:
     resetBtn.setBounds(btnRow.reduced(2));
 
     b.removeFromBottom(4);
-    // Remaining area is the keyboard + range overlay
     keyboardArea = b;
   }
 
   void paint(juce::Graphics &g) override {
-    // Title: learn mode indicator
-    auto titleArea = keyboardArea.withHeight(18).translated(0, -2);
+    g.fillAll(ThemeManager::get(Theme::Role::panel));
+
+    auto titleArea = keyboardArea.withHeight(16).translated(0, -2);
     g.setColour(ThemeManager::get(Theme::Role::foh));
-    g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+    g.setFont(BoutiqueLookAndFeel::condensedFont(12.0f, 0.06f));
     g.drawText("PLAY NOTES TO SET RANGE", titleArea, juce::Justification::centred);
 
-    // Range text
-    g.setColour(ThemeManager::get(Theme::Role::text));
-    g.setFont(12.0f);
-    g.drawText("Low: " + midiNoteName(lowNote), keyboardArea.getX(), keyboardArea.getY() - 2,
-               80, 16, juce::Justification::left);
-    g.drawText("High: " + midiNoteName(highNote), keyboardArea.getRight() - 80, keyboardArea.getY() - 2,
-               80, 16, juce::Justification::right);
+    g.setColour(ThemeManager::get(Theme::Role::textDim));
+    g.setFont(BoutiqueLookAndFeel::monoFont(11.0f, true));
+    g.drawText("LOW: " + midiNoteName(lowNote), keyboardArea.getX(), keyboardArea.getY() - 2,
+               88, 16, juce::Justification::left);
+    g.drawText("HIGH: " + midiNoteName(highNote), keyboardArea.getRight() - 88, keyboardArea.getY() - 2,
+               88, 16, juce::Justification::right);
 
-    // Draw keyboard
     auto kbArea = keyboardArea.toFloat().withTrimmedTop(16.0f);
     drawKeyboard(g, kbArea);
     drawRangeOverlay(g, kbArea);
@@ -140,7 +161,6 @@ public:
     }
   }
 
-  // --- IMidiNoteLearner implementation ---
   void handleMidiNote(int noteNumber) override {
     if (!learning)
       return;
@@ -186,10 +206,10 @@ private:
       if (!isBlackKey(i)) {
         juce::Rectangle<float> noteRect(area.getX() + i * noteWidth, area.getY(),
                                         noteWidth, area.getHeight());
-        g.setColour(juce::Colours::white);
+        g.setColour(juce::Colour(0xFFE8E6DE));
         g.fillRect(noteRect.reduced(0.3f));
         if (i % 12 == 0) {
-          g.setColour(juce::Colours::black.withAlpha(0.5f));
+          g.setColour(juce::Colour(0xFF454A4F));
           g.setFont(8.0f);
           g.drawText("C" + juce::String(i / 12 - 1), noteRect,
                      juce::Justification::centredBottom);
@@ -201,7 +221,7 @@ private:
         juce::Rectangle<float> noteRect(area.getX() + i * noteWidth,
                                         area.getY(), noteWidth,
                                         area.getHeight() * 0.6f);
-        g.setColour(juce::Colours::black);
+        g.setColour(juce::Colour(0xFF1A1E21));
         g.fillRect(noteRect);
       }
     }
@@ -212,16 +232,16 @@ private:
     float x1 = area.getX() + lowNote * noteWidth;
     float x2 = area.getX() + (highNote + 1) * noteWidth;
 
-    g.setColour(ThemeManager::get(Theme::Role::background).withAlpha(0.6f));
+    g.setColour(ThemeManager::get(Theme::Role::sunken).withAlpha(0.72f));
     g.fillRect(area.withWidth(x1 - area.getX()));
     g.fillRect(area.withX(x2).withWidth(area.getRight() - x2));
 
-    g.setColour(ThemeManager::get(Theme::Role::foh).withAlpha(0.4f));
+    g.setColour(ThemeManager::get(Theme::Role::foh).withAlpha(0.34f));
     g.fillRect(juce::Rectangle<float>(x1, area.getY(), x2 - x1, area.getHeight()));
 
     g.setColour(ThemeManager::get(Theme::Role::foh));
-    g.drawVerticalLine((int)x1, area.getY() - 3, area.getBottom() + 3);
-    g.drawVerticalLine((int)x2, area.getY() - 3, area.getBottom() + 3);
+    g.drawVerticalLine((int)x1, area.getY() - 2, area.getBottom() + 2);
+    g.drawVerticalLine((int)x2, area.getY() - 2, area.getBottom() + 2);
   }
 
   void updateNoteFromMouse(juce::Point<float> p, juce::Rectangle<float> area) {
@@ -251,6 +271,7 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
     : slot(s), slotIndex(index) {
   slotBtnMouseListener.owner = this;
   longPressListener.owner = this;
+
   addAndMakeVisible(channelSlider);
   channelSlider.setLookAndFeel(&laf);
   channelSlider.setComponentID("foh");
@@ -283,16 +304,15 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(linkButton);
   linkButton.setVisible(false);
-  linkButton.setButtonText(juce::CharPointer_UTF8("\xf0\x9f\x94\x97"));
+  linkButton.setButtonText("LINK");
+  Fanfare::setButtonRole(linkButton, Fanfare::ButtonRole::Subtle);
   linkButton.setClickingTogglesState(true);
   linkButton.setToggleState(true, juce::dontSendNotification);
   linkButton.setTooltip("Link FOH/IEM faders");
   linkButton.onClick = [this]() {
     bool linked = linkButton.getToggleState();
     slot.setFadersLinked(linked);
-    linkButton.setButtonText(
-        linked ? juce::CharPointer_UTF8("\xf0\x9f\x94\x97")
-               : juce::CharPointer_UTF8("\xf0\x9f\x94\x93"));
+    linkButton.setButtonText(linked ? "LINK" : "UNLK");
   };
 
   addAndMakeVisible(iemOffsetKnob);
@@ -327,18 +347,13 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   addAndMakeVisible(fohRoutingBtn);
   fohRoutingBtn.setClickingTogglesState(true);
   fohRoutingBtn.setButtonText("FOH");
+  Fanfare::setButtonRole(fohRoutingBtn, Fanfare::ButtonRole::Foh);
   fohRoutingBtn.setTooltip("FOH Send: Routes this channel's signal to the Front of House mix. Hold to learn a FOH fader CC.");
-  fohRoutingBtn.setColour(juce::TextButton::buttonOnColourId,
-                          ThemeManager::get(Theme::Role::foh));
-  fohRoutingBtn.getProperties().set("useToggleSwitch", true);
-  fohRoutingBtn.getProperties().set("isOrangeToggle", true);
-  fohRoutingBtn.setToggleState(slot.isFohEnabled(),
-                               juce::dontSendNotification);
+  fohRoutingBtn.setToggleState(slot.isFohEnabled(), juce::dontSendNotification);
   fohRoutingBtn.onClick = [this]() {
     if (suppressLongPressClick) {
       suppressLongPressClick = false;
-      fohRoutingBtn.setToggleState(slot.isFohEnabled(),
-                                   juce::dontSendNotification);
+      fohRoutingBtn.setToggleState(slot.isFohEnabled(), juce::dontSendNotification);
       return;
     }
     slot.setFohEnabled(fohRoutingBtn.getToggleState());
@@ -352,18 +367,13 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   addAndMakeVisible(iemRoutingBtn);
   iemRoutingBtn.setClickingTogglesState(true);
   iemRoutingBtn.setButtonText("IEM");
+  Fanfare::setButtonRole(iemRoutingBtn, Fanfare::ButtonRole::Iem);
   iemRoutingBtn.setTooltip("IEM Send: Routes this channel's signal to your In-Ear Monitors mix. Hold to learn an IEM fader CC.");
-  iemRoutingBtn.setColour(juce::TextButton::buttonOnColourId,
-                          ThemeManager::get(Theme::Role::iem));
-  iemRoutingBtn.getProperties().set("useToggleSwitch", true);
-  iemRoutingBtn.getProperties().set("isOrangeToggle", true);
-  iemRoutingBtn.setToggleState(slot.isIemEnabled(),
-                               juce::dontSendNotification);
+  iemRoutingBtn.setToggleState(slot.isIemEnabled(), juce::dontSendNotification);
   iemRoutingBtn.onClick = [this]() {
     if (suppressLongPressClick) {
       suppressLongPressClick = false;
-      iemRoutingBtn.setToggleState(slot.isIemEnabled(),
-                                   juce::dontSendNotification);
+      iemRoutingBtn.setToggleState(slot.isIemEnabled(), juce::dontSendNotification);
       return;
     }
     slot.setIemEnabled(iemRoutingBtn.getToggleState());
@@ -377,12 +387,9 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(bypassButton);
   bypassButton.setButtonText("MUTE");
+  Fanfare::setButtonRole(bypassButton, Fanfare::ButtonRole::Mute);
   bypassButton.setTooltip("Mute Strip: Instantly cuts all audio output for this strip. Hold to learn a mute CC.");
   bypassButton.setClickingTogglesState(true);
-  bypassButton.setColour(juce::TextButton::buttonOnColourId,
-                         ThemeManager::get(Theme::Role::danger));
-  bypassButton.getProperties().set("useToggleSwitch", true);
-  bypassButton.getProperties().set("isOrangeToggle", false);
   bypassButton.onClick = [this] {
     if (suppressLongPressClick) {
       suppressLongPressClick = false;
@@ -398,16 +405,15 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addChildComponent(expandBtn);
   expandBtn.setButtonText("+");
+  Fanfare::setButtonRole(expandBtn, Fanfare::ButtonRole::Subtle);
   expandBtn.setTooltip("Click to Expand Channel Strip");
-  expandBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
-  expandBtn.setColour(juce::TextButton::textColourOffId, ThemeManager::get(Theme::Role::textOnAccent));
   expandBtn.onClick = [this] { setCollapsed(false); };
 
   addChildComponent(collapsedMuteBtn);
   collapsedMuteBtn.setButtonText("M");
+  Fanfare::setButtonRole(collapsedMuteBtn, Fanfare::ButtonRole::Mute);
   collapsedMuteBtn.setTooltip("Muted: Click to Unmute and Expand. Hold to learn a mute CC.");
   collapsedMuteBtn.setClickingTogglesState(true);
-  collapsedMuteBtn.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::danger));
   collapsedMuteBtn.onClick = [this] {
     if (suppressLongPressClick) {
       suppressLongPressClick = false;
@@ -424,16 +430,17 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(collapseBtn);
   collapseBtn.setButtonText("-");
+  Fanfare::setButtonRole(collapseBtn, Fanfare::ButtonRole::Subtle);
   collapseBtn.setTooltip("Collapse Channel Strip");
-  collapseBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel).darker(0.35f));
-  collapseBtn.setColour(juce::TextButton::textColourOffId, ThemeManager::get(Theme::Role::accent));
   collapseBtn.onClick = [this] { setCollapsed(true); };
 
   for (int i = 0; i < 3; ++i) {
     addAndMakeVisible(slotBtns[i]);
+    Fanfare::setButtonRole(slotBtns[i], Fanfare::ButtonRole::PluginSlot);
+    slotBtns[i].getProperties().set("isPluginSlot", true);
     slotBtns[i].addMouseListener(&slotBtnMouseListener, false);
-    slotBtns[i].setButtonText(
-        slot.getPluginName(i).isEmpty() ? "[EMPTY]" : slot.getPluginName(i));
+    const auto initName = slot.getPluginName(i);
+    slotBtns[i].setButtonText(initName.isEmpty() ? ("SLOT " + juce::String(i + 1)) : initName);
     slotBtns[i].onClick = [this, i] {
       if (onShowPluginMenu)
         onShowPluginMenu(i);
@@ -441,10 +448,8 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
     addAndMakeVisible(editGuiBtns[i]);
     editGuiBtns[i].setButtonText("E");
-    editGuiBtns[i].setColour(juce::TextButton::buttonColourId,
-                             ThemeManager::get(Theme::Role::danger).darker(0.3f));
-    editGuiBtns[i].setColour(juce::TextButton::textColourOffId,
-                             ThemeManager::get(Theme::Role::text));
+    Fanfare::setButtonRole(editGuiBtns[i], Fanfare::ButtonRole::Subtle);
+    editGuiBtns[i].setTooltip("Open Plugin Editor Window");
     editGuiBtns[i].onClick = [this, i] {
       if (slot.isChainSlotMidiOut(i)) {
         if (onEditMidiOut)
@@ -457,9 +462,8 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(ccButton);
   ccButton.setButtonText("CC");
+  Fanfare::setButtonRole(ccButton, Fanfare::ButtonRole::Standard);
   ccButton.setTooltip("CC Mapping: Opens the assignment manager for mapping MIDI continuous controllers.");
-  ccButton.setColour(juce::TextButton::buttonColourId,
-                     ThemeManager::get(Theme::Role::warn));
   ccButton.onClick = [this] {
     if (onShowCCDialog)
       onShowCCDialog(0);
@@ -467,9 +471,8 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(noteRangeButton);
   noteRangeButton.setButtonText("NR");
+  Fanfare::setButtonRole(noteRangeButton, Fanfare::ButtonRole::Standard);
   noteRangeButton.setTooltip("Note Range: Restricts this channel strip to a specific key range on your controller.");
-  noteRangeButton.setColour(juce::TextButton::buttonColourId,
-                            ThemeManager::get(Theme::Role::midiPC));
   noteRangeButton.onClick = [this] {
     if (onShowNoteRangeDialog)
       onShowNoteRangeDialog();
@@ -477,9 +480,8 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(customizeButton);
   customizeButton.setButtonText("DYN");
+  Fanfare::setButtonRole(customizeButton, Fanfare::ButtonRole::Standard);
   customizeButton.setTooltip("Dynamics (DYN): Opens the channel strip processor (Gate, EQ, Compressor).");
-  customizeButton.setColour(juce::TextButton::buttonColourId,
-                            ThemeManager::get(Theme::Role::raised));
   customizeButton.onClick = [this] {
     if (onShowChannelStrip)
       onShowChannelStrip();
@@ -487,8 +489,8 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(arpButton);
   arpButton.setButtonText("MIDI");
-  arpButton.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::midiPC).brighter(0.2f));
-  arpButton.setTooltip("MIDI FX: Opens the built-in arpeggiator controls.");
+  Fanfare::setButtonRole(arpButton, Fanfare::ButtonRole::Standard);
+  arpButton.setTooltip("MIDI FX: Opens the built-in arpeggiator and harmonizer controls.");
   arpButton.onClick = [this] {
     if (onShowArpeggiator)
       onShowArpeggiator();
@@ -496,7 +498,7 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(samplerButton);
   samplerButton.setButtonText("SMP");
-  samplerButton.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::iem).darker(0.3f));
+  Fanfare::setButtonRole(samplerButton, Fanfare::ButtonRole::Standard);
   samplerButton.setTooltip("Open Sampler");
   samplerButton.onClick = [this] {
     if (onShowSampler)
@@ -505,7 +507,7 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(mp3Button);
   mp3Button.setButtonText("MP3");
-  mp3Button.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent).darker(0.3f));
+  Fanfare::setButtonRole(mp3Button, Fanfare::ButtonRole::Standard);
   mp3Button.setTooltip("Open MP3 Playlist Player");
   mp3Button.onClick = [this] {
     if (onShowMp3Player)
@@ -514,9 +516,8 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(saveStripBtn);
   saveStripBtn.setButtonText("SAVE");
+  Fanfare::setButtonRole(saveStripBtn, Fanfare::ButtonRole::Standard);
   saveStripBtn.setTooltip("Save this strip to file");
-  saveStripBtn.setColour(juce::TextButton::buttonColourId,
-                         ThemeManager::get(Theme::Role::ok));
   saveStripBtn.onClick = [this] {
     if (onSaveStrip)
       onSaveStrip();
@@ -524,9 +525,8 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(loadStripBtn);
   loadStripBtn.setButtonText("LOAD");
+  Fanfare::setButtonRole(loadStripBtn, Fanfare::ButtonRole::Standard);
   loadStripBtn.setTooltip("Load a strip from file");
-  loadStripBtn.setColour(juce::TextButton::buttonColourId,
-                         ThemeManager::get(Theme::Role::iem));
   loadStripBtn.onClick = [this] {
     if (onLoadStripFile || onLoadStrip)
       showLoadStripMenu();
@@ -536,17 +536,17 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(noteRangeLabel);
   noteRangeLabel.setJustificationType(juce::Justification::centred);
-  noteRangeLabel.setFont(juce::FontOptions(10.0f, juce::Font::bold));
-  noteRangeLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
+  noteRangeLabel.setFont(BoutiqueLookAndFeel::monoFont(9.5f, true));
+  noteRangeLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
   noteRangeLabelListener.owner = this;
   noteRangeLabel.addMouseListener(&noteRangeLabelListener, false);
 
-  // Register right-click help listeners on control buttons
   for (auto *b : {&ccButton, &noteRangeButton, &customizeButton, &arpButton,
                   &samplerButton, &mp3Button, &bypassButton, &fohRoutingBtn, &iemRoutingBtn,
                   &saveStripBtn, &loadStripBtn})
     b->addMouseListener(this, false);
 
+  prevUnusedEmpty = isUnusedEmptyStrip();
   startTimer(50);
 }
 
@@ -554,6 +554,29 @@ RackSlotComponent::~RackSlotComponent() {
   channelSlider.setLookAndFeel(nullptr);
   iemSlider.setLookAndFeel(nullptr);
   stopTimer();
+}
+
+void RackSlotComponent::lookAndFeelChanged() {
+  const auto rangeStr = getActiveNoteRangeString();
+  const bool isCustomSplit = !rangeStr.containsIgnoreCase("(Full)");
+  noteRangeLabel.setColour(juce::Label::textColourId,
+                           isCustomSplit ? ThemeManager::get(Theme::Role::foh)
+                                         : ThemeManager::get(Theme::Role::engrave));
+}
+
+bool RackSlotComponent::isUnusedEmptyStrip() const {
+  if (isMonitorIn || isReturn || slotIndex == 0 || slotIndex >= 100)
+    return false;
+  if (slot.getInputChannelIndex() >= 0)
+    return false;
+  for (int i = 0; i < 3; ++i) {
+    if (slot.getPluginInstance(i) != nullptr || slot.isChainSlotMidiOut(i))
+      return false;
+  }
+  const auto n = slot.getName().trim();
+  if (n.isNotEmpty() && !n.startsWithIgnoreCase("Slot "))
+    return false;
+  return true;
 }
 
 void RackSlotComponent::timerCallback() {
@@ -570,7 +593,12 @@ void RackSlotComponent::timerCallback() {
   if (slot.getAndClearMidiActivity())
     midiLed.flash();
 
-  noteRangeLabel.setText(getActiveNoteRangeString(), juce::dontSendNotification);
+  const auto rangeStr = getActiveNoteRangeString();
+  noteRangeLabel.setText(rangeStr, juce::dontSendNotification);
+  const bool isCustomSplit = !rangeStr.containsIgnoreCase("(Full)");
+  noteRangeLabel.setColour(juce::Label::textColourId,
+                           isCustomSplit ? ThemeManager::get(Theme::Role::foh)
+                                         : ThemeManager::get(Theme::Role::engrave));
 
   bool metersChanged = (std::abs(curLeft - prevLeft) > 0.001f ||
                         std::abs(curRight - prevRight) > 0.001f);
@@ -584,6 +612,14 @@ void RackSlotComponent::timerCallback() {
   bool stateChanged = false;
   int numBtns = isReturn ? 2 : 3;
   bool anyPlugin = false;
+  const juce::Colour categoryCol =
+      resolveStripCategoryColor(slot, slotIndex, isMonitorIn, isAccordion, isReturn);
+  const bool hasDistinctCat =
+      (categoryCol != ThemeManager::get(Theme::Role::catDefault) &&
+       categoryCol != juce::Colour(0xff2a2a2a));
+  const juce::Colour slotAccentCol =
+      hasDistinctCat ? categoryCol : ThemeManager::get(Theme::Role::accent);
+
   for (int i = 0; i < 3; ++i) {
     if (i >= numBtns) {
       slotBtns[i].setVisible(false);
@@ -594,15 +630,15 @@ void RackSlotComponent::timerCallback() {
     auto name = slot.getPluginName(i);
     bool isMidiOut = slot.isChainSlotMidiOut(i);
     if (isMidiOut)
-      name = "\xe2\x86\x92 " + slot.getChainSlotMidiOutName(i) +
+      name = "MIDI > " + slot.getChainSlotMidiOutName(i) +
              " ch" + juce::String(slot.getChainSlotMidiOutChannel(i));
     if (i >= prevSlotNames.size()) {
       prevSlotNames.add("");
     }
     if (prevSlotNames[i] != name) {
       prevSlotNames.set(i, name);
-      slotBtns[i].setButtonText(name.isEmpty() ? "Slot " + juce::String(i + 1)
-                                               : name);
+      slotBtns[i].setButtonText(name.isEmpty() ? ("SLOT " + juce::String(i + 1)) : name);
+      stateChanged = true;
     }
     bool hasPlugin = slot.getPluginInstance(i) != nullptr || isMidiOut;
     if (hasPlugin)
@@ -610,18 +646,24 @@ void RackSlotComponent::timerCallback() {
     editGuiBtns[i].setButtonText(isMidiOut ? "M" : "E");
     slotBtns[i].getProperties().set("isPluginSlot", true);
     slotBtns[i].getProperties().set("hasPlugin", hasPlugin);
-    slotBtns[i].setColour(juce::TextButton::buttonColourId,
-                          isMidiOut ? ThemeManager::get(Theme::Role::midiPC).darker(0.3f)
-                                    : (hasPlugin ? ThemeManager::get(Theme::Role::ok).darker(0.35f)
-                                                 : ThemeManager::get(Theme::Role::panel)));
-    slotBtns[i].setColour(juce::TextButton::textColourOffId,
-                          hasPlugin ? ThemeManager::get(Theme::Role::text)
-                                    : ThemeManager::get(Theme::Role::textDim));
+    slotBtns[i].getProperties().set("isMidiOut", isMidiOut);
+    slotBtns[i].getProperties().set("slotAccent", (int)slotAccentCol.getARGB());
   }
+
   if (anyPlugin != cachedHasAnyPlugin) {
     cachedHasAnyPlugin = anyPlugin;
     stateChanged = true;
   }
+
+  bool unusedNow = isUnusedEmptyStrip();
+  if (unusedNow != prevUnusedEmpty) {
+    prevUnusedEmpty = unusedNow;
+    resized();
+    stateChanged = true;
+    if (onCollapseChanged)
+      onCollapseChanged(isCollapsed);
+  }
+
   if (slot.isBypassed() != prevBypassed) {
     prevBypassed = slot.isBypassed();
     bypassButton.setToggleState(prevBypassed, juce::dontSendNotification);
@@ -636,6 +678,28 @@ void RackSlotComponent::timerCallback() {
   if (slot.isIemEnabled() != prevIemEnabled) {
     prevIemEnabled = slot.isIemEnabled();
     iemRoutingBtn.setToggleState(prevIemEnabled, juce::dontSendNotification);
+    stateChanged = true;
+  }
+  const float curIemOffset = slot.getIemOffset();
+  if (!isMonitorIn && !isReturn && std::abs(curIemOffset - prevIemOffset) > 0.005f) {
+    prevIemOffset = curIemOffset;
+    if (std::abs(curIemOffset - 1.0f) <= 0.015f) {
+      iemRoutingBtn.setButtonText("IEM");
+      iemRoutingBtn.setTooltip(
+          "IEM Send: Routes this channel's signal to your In-Ear Monitors mix (0.0 dB trim; adjust IEM Trim in DYN). Hold to learn an IEM fader CC.");
+    } else if (curIemOffset <= 0.005f) {
+      iemRoutingBtn.setButtonText("IEM OFF");
+      iemRoutingBtn.setTooltip(
+          "IEM Send: Strip IEM Trim is set to OFF (-inf dB) in DYN. Open DYN to raise IEM Trim.");
+    } else {
+      const float db = juce::Decibels::gainToDecibels(curIemOffset, -60.0f);
+      const juce::String dbStr =
+          (db >= 0.0f ? "+" : "") + juce::String(db, 1) + "dB";
+      iemRoutingBtn.setButtonText("IEM " + dbStr);
+      iemRoutingBtn.setTooltip(
+          "IEM Send: Strip IEM Trim is " + dbStr +
+          " relative to FOH (adjust in DYN). Hold to learn an IEM fader CC.");
+    }
     stateChanged = true;
   }
   if (slot.getLowNote() != prevLowNote || slot.getHighNote() != prevHighNote) {
@@ -669,44 +733,61 @@ void RackSlotComponent::setCollapsed(bool shouldCollapse) {
 }
 
 void RackSlotComponent::paint(juce::Graphics &g) {
-  juce::Colour categoryCol = slot.getChannelColor();
-  if (categoryCol == juce::Colour(0xff2a2a2a)) {
-    if (isMonitorIn) categoryCol = ThemeManager::get(Theme::Role::catMonitor);
-    else if (isAccordion) categoryCol = ThemeManager::get(Theme::Role::catAccordion);
-    else if (isReturn) categoryCol = ThemeManager::get(Theme::Role::catReturn);
-    else if (slotIndex == 1 || slot.getName().containsIgnoreCase("CK88") || slot.getName().containsIgnoreCase("RD88") || slot.getName().containsIgnoreCase("Keyboard"))
-      categoryCol = ThemeManager::get(Theme::Role::catKeyboard);
-    else categoryCol = ThemeManager::get(Theme::Role::catDefault);
-  }
-  bool hasDistinctColor = (categoryCol != juce::Colour(0xff2a2a2a) &&
-                           categoryCol != ThemeManager::get(Theme::Role::catDefault));
+  const auto &t = ThemeManager::getInstance().active();
+  const juce::Colour categoryCol =
+      resolveStripCategoryColor(slot, slotIndex, isMonitorIn, isAccordion, isReturn);
+  const bool hasDistinctColor =
+      (categoryCol != juce::Colour(0xff2a2a2a) && categoryCol != t.catDefault);
 
   if (isCollapsed) {
-    auto bounds = getLocalBounds().toFloat();
+    auto bounds = getLocalBounds().toFloat().reduced(0.5f);
 
-    juce::Colour bg = (slotIndex % 2 == 0) ? ThemeManager::get(Theme::Role::panel)
-                                           : ThemeManager::get(Theme::Role::panelAlt);
-    if (slot.isBypassed()) {
-      bg = bg.darker(0.45f);
-      if (hasDistinctColor)
-        bg = bg.interpolatedWith(categoryCol, 0.12f);
-    } else if (hasDistinctColor) {
-      bg = bg.interpolatedWith(categoryCol, 0.28f);
+    if (isUnusedEmptyStrip()) {
+      const bool hovered = isMouseOver(true);
+      g.setColour(hovered ? t.panelAlt : t.sunken);
+      g.fillRoundedRectangle(bounds, 3.0f);
+
+      g.setColour(hovered ? t.accent.withAlpha(0.75f) : t.hairline);
+      g.drawRoundedRectangle(bounds, 3.0f, 1.0f);
+
+      // Top engraved strip number
+      g.setFont(BoutiqueLookAndFeel::condensedFont(10.5f, 0.04f));
+      g.setColour(hovered ? t.text : t.textDim);
+      g.drawText(juce::String(slotIndex + 1),
+                 juce::Rectangle<float>(bounds.getX(), bounds.getY() + 4.0f, bounds.getWidth(), 14.0f),
+                 juce::Justification::centred, false);
+
+      // Center "+" badge + engraved ADD label
+      g.setFont(BoutiqueLookAndFeel::condensedFont(18.0f, 0.0f));
+      g.setColour(hovered ? t.accent : t.textDim);
+      g.drawText("+",
+                 juce::Rectangle<float>(bounds.getX(), bounds.getCentreY() - 18.0f,
+                                        bounds.getWidth(), 20.0f),
+                 juce::Justification::centred, false);
+      g.setFont(BoutiqueLookAndFeel::condensedFont(9.5f, 0.05f));
+      g.setColour(hovered ? t.accent : t.engrave);
+      g.drawText("ADD",
+                 juce::Rectangle<float>(bounds.getX(), bounds.getCentreY() + 2.0f,
+                                        bounds.getWidth(), 13.0f),
+                 juce::Justification::centred, false);
+      return;
     }
 
+    // Collapsed populated / muted strip
+    juce::Colour bg = slot.isBypassed() ? t.sunken
+                    : ((slotIndex % 2 == 0) ? t.panel : t.panelAlt);
     g.setColour(bg);
-    g.fillRoundedRectangle(bounds, 4.0f);
+    g.fillRoundedRectangle(bounds, 3.0f);
 
-    // Category indicator on left edge
-    g.setColour(categoryCol);
-    g.fillRect(bounds.getX(), bounds.getY() + 4.0f, 4.0f, bounds.getHeight() - 8.0f);
+    // 3px top stage-tape stripe
+    g.setColour(slot.isBypassed() ? categoryCol.withAlpha(0.45f) : categoryCol);
+    g.fillRect(bounds.getX() + 1.0f, bounds.getY() + 1.0f, bounds.getWidth() - 2.0f, 3.0f);
 
-    g.setColour(hasDistinctColor ? categoryCol.withAlpha(slot.isBypassed() ? 0.35f : 0.70f)
-                                 : ThemeManager::get(Theme::Role::border));
-    g.drawRoundedRectangle(bounds, 4.0f, 1.0f);
+    g.setColour(t.border);
+    g.drawRoundedRectangle(bounds, 3.0f, 1.0f);
 
-    // Vertical text in center
-    auto textArea = juce::Rectangle<float>(4.0f, 32.0f, bounds.getWidth() - 8.0f, bounds.getHeight() - 64.0f);
+    // Vertical strip title
+    auto textArea = juce::Rectangle<float>(3.0f, 36.0f, bounds.getWidth() - 10.0f, bounds.getHeight() - 68.0f);
     if (textArea.getHeight() > 30.0f) {
       juce::Graphics::ScopedSaveState sss(g);
       float cx = textArea.getCentreX();
@@ -715,227 +796,104 @@ void RackSlotComponent::paint(juce::Graphics &g) {
 
       juce::String nameText = slot.getName();
       if (nameText.isEmpty()) nameText = "Slot " + juce::String(slotIndex + 1);
-      juce::String label = juce::String(slotIndex + 1) + ". " + nameText;
+      juce::String label = (isReturn || isMonitorIn)
+                               ? nameText
+                               : (juce::String(slotIndex + 1) + ". " + nameText);
       if (slot.isBypassed()) label += " [MUTED]";
 
-      g.setColour(slot.isBypassed() ? ThemeManager::get(Theme::Role::textDim) : ThemeManager::get(Theme::Role::text));
-      g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
-      juce::Rectangle<float> rotRect(cx - textArea.getHeight() / 2.0f, cy - textArea.getWidth() / 2.0f, textArea.getHeight(), textArea.getWidth());
-      g.drawText(label, rotRect, juce::Justification::centred, true);
+      g.setColour(slot.isBypassed() ? t.textDim : t.text);
+      g.setFont(BoutiqueLookAndFeel::condensedFont(12.0f, 0.05f));
+      juce::Rectangle<float> rotRect(cx - textArea.getHeight() / 2.0f,
+                                     cy - textArea.getWidth() / 2.0f,
+                                     textArea.getHeight(), textArea.getWidth());
+      g.drawText(label.toUpperCase(), rotRect, juce::Justification::centred, true);
     }
 
-    // Mini vertical meter on the right edge
-    drawVerticalMeter(g, cachedMeterArea, curLeft, curRight,
-                      ThemeManager::get(Theme::Role::meterLow),
-                      ThemeManager::get(Theme::Role::meterMid),
-                      ThemeManager::get(Theme::Role::meterPeak));
+    if (!cachedMeterArea.isEmpty()) {
+      drawVerticalMeter(g, cachedMeterArea, curLeft, curRight,
+                        t.meterLow, t.meterMid, t.meterPeak);
+    }
     return;
   }
-  auto bounds = getLocalBounds().toFloat();
 
-  auto* laf = dynamic_cast<BoutiqueLookAndFeel*>(&getLookAndFeel());
-  bool useModern = (laf != nullptr && laf->useModernStyle);
+  // Expanded Front Panel channel strip
+  auto bounds = getLocalBounds().toFloat().reduced(0.5f);
+  juce::Colour panelFace = slot.isBypassed() ? t.sunken
+                         : ((slotIndex % 2 == 0) ? t.panel : t.panelAlt);
 
-  juce::Colour customColor = slot.getChannelColor();
-  juce::Colour bgCol;
+  g.setColour(panelFace);
+  g.fillRoundedRectangle(bounds, 3.0f);
 
-  bool hasCustomColor = (customColor != juce::Colour(0xff2a2a2a));
+  // 3px top stage-tape category stripe (replaces full-strip color flood)
+  juce::Colour tapeCol = hasDistinctColor ? categoryCol : t.borderStrong;
+  if (slot.isBypassed())
+    tapeCol = tapeCol.withAlpha(0.45f);
+  g.setColour(tapeCol);
+  g.fillRect(bounds.getX() + 1.0f, bounds.getY() + 1.0f, bounds.getWidth() - 2.0f, 3.0f);
 
-  if (hasCustomColor) {
-    bgCol = customColor;
-  } else if (isMonitorIn) {
-    bgCol = ThemeManager::get(Theme::Role::catMonitor).darker(0.4f);
-  } else if (isAccordion) {
-    bgCol = ThemeManager::get(Theme::Role::catAccordion).darker(0.3f);
-  } else if (isReturn) {
-    bgCol = ThemeManager::get(Theme::Role::catReturn).darker(0.5f);
-  } else {
-    bgCol = (slotIndex % 2 == 0) ? ThemeManager::get(Theme::Role::panel)
-                                 : ThemeManager::get(Theme::Role::panelAlt);
-  }
+  // Subtle top bevel line directly below tape
+  g.setColour(t.bevelHi);
+  g.drawHorizontalLine((int)bounds.getY() + 4, bounds.getX() + 2.0f, bounds.getRight() - 2.0f);
 
-  if (useModern) {
-    juce::Colour modernBg = (slotIndex % 2 == 0) ? ThemeManager::get(Theme::Role::panel)
-                                                 : ThemeManager::get(Theme::Role::panelAlt);
+  // Hairline strip border
+  g.setColour(t.border);
+  g.drawRoundedRectangle(bounds, 3.0f, 1.0f);
 
-    if (slot.isBypassed()) {
-      modernBg = modernBg.darker(0.5f);
-      if (hasDistinctColor)
-        modernBg = modernBg.interpolatedWith(categoryCol, 0.08f);
-    } else if (hasDistinctColor) {
-      modernBg = modernBg.interpolatedWith(categoryCol, 0.16f);
-    }
+  // Recessed engraved Strip Nameplate well (y = 107..139)
+  auto nameplateRect = juce::Rectangle<float>(3.0f, 107.0f, bounds.getWidth() - 5.0f, 32.0f);
+  Fanfare::ModalFrame::paintRecessedWell(g, nameplateRect, 2.5f);
 
-    g.setColour(modernBg);
-    g.fillRoundedRectangle(bounds, 6.0f);
-
-    // Subtle atmospheric vertical gradient wash of the channel color
-    if (hasDistinctColor && !slot.isBypassed()) {
-      juce::ColourGradient stripWash(categoryCol.withAlpha(0.20f), bounds.getCentreX(), bounds.getY(),
-                                     categoryCol.withAlpha(0.02f), bounds.getCentreX(), bounds.getBottom(), false);
-      g.setGradientFill(stripWash);
-      g.fillRoundedRectangle(bounds, 6.0f);
-    }
-
-    g.setColour(hasDistinctColor && !slot.isBypassed() ? categoryCol.withAlpha(0.55f) : ThemeManager::get(Theme::Role::border));
-    g.drawRoundedRectangle(bounds, 6.0f, 1.0f);
-
-    // Category accent bar at the top
-    g.setColour(categoryCol);
-    g.fillRect(bounds.getX(), bounds.getY(), bounds.getWidth(), 10.0f);
-
-  } else {
-    if (hasDistinctColor && !slot.isBypassed()) {
-      bgCol = bgCol.interpolatedWith(categoryCol, 0.22f);
-    }
-    juce::ColourGradient grad(bgCol, 0, 0, bgCol.darker(0.3f),
-                              bounds.getWidth(), 0, false);
-    g.setGradientFill(grad);
-    g.fillRoundedRectangle(bounds, 4.0f);
-
-    g.setColour(juce::Colours::white.withAlpha(0.15f));
-    g.drawLine(bounds.getX() + 2, bounds.getY() + 1.5f, bounds.getRight() - 2,
-               bounds.getY() + 1.5f, 1.0f);
-    g.drawLine(bounds.getX() + 1.5f, bounds.getY() + 2, bounds.getX() + 1.5f,
-               bounds.getBottom() - 2, 1.0f);
-    g.setColour(juce::Colours::black.withAlpha(0.3f));
-    g.drawLine(bounds.getX() + 2, bounds.getBottom() - 1.5f,
-               bounds.getRight() - 2, bounds.getBottom() - 1.5f, 1.0f);
-    g.drawLine(bounds.getRight() - 1.5f, bounds.getY() + 2,
-               bounds.getRight() - 1.5f, bounds.getBottom() - 2, 1.0f);
-
-    auto drawScrew = [&](float cx, float cy) {
-      g.setColour(ThemeManager::get(Theme::Role::knobThumb));
-      g.fillEllipse(cx - 3, cy - 3, 6, 6);
-      g.setColour(ThemeManager::get(Theme::Role::border));
-      g.drawEllipse(cx - 3, cy - 3, 6, 6, 1.0f);
-      g.drawLine(cx - 2, cy, cx + 2, cy, 1.0f);
-    };
-    drawScrew(bounds.getX() + 8, bounds.getY() + 8);
-    drawScrew(bounds.getRight() - 8, bounds.getY() + 8);
-    drawScrew(bounds.getX() + 8, bounds.getBottom() - 8);
-    drawScrew(bounds.getRight() - 8, bounds.getBottom() - 8);
-  }
-
-  // Draw Stage-Readable Strip Nameplate (where the writing is, tinted with channel color)
-  auto nameplateRect = juce::Rectangle<float>(3.0f, 98.0f, bounds.getWidth() - 6.0f, 32.0f);
   if (hasDistinctColor) {
-    juce::Colour badgeCol = slot.isBypassed() ? categoryCol.darker(0.6f).withAlpha(0.35f)
-                                              : categoryCol.darker(0.25f);
-    juce::ColourGradient badgeGrad(badgeCol.brighter(0.12f), nameplateRect.getX(), nameplateRect.getY(),
-                                   badgeCol.darker(0.18f), nameplateRect.getX(), nameplateRect.getBottom(), false);
-    g.setGradientFill(badgeGrad);
-    g.fillRoundedRectangle(nameplateRect, 4.0f);
-
-    g.setColour(slot.isBypassed() ? categoryCol.withAlpha(0.25f) : categoryCol.withAlpha(0.85f));
-    g.drawRoundedRectangle(nameplateRect, 4.0f, 1.0f);
-  } else {
-    g.setColour(ThemeManager::get(Theme::Role::panel).darker(0.3f));
-    g.fillRoundedRectangle(nameplateRect, 4.0f);
-    g.setColour(ThemeManager::get(Theme::Role::border));
-    g.drawRoundedRectangle(nameplateRect, 4.0f, 1.0f);
+    g.setColour(slot.isBypassed() ? categoryCol.withAlpha(0.35f) : categoryCol);
+    g.fillRect(nameplateRect.getX() + 1.0f, nameplateRect.getY() + 2.0f,
+               2.5f, nameplateRect.getHeight() - 4.0f);
   }
 
-  // Draw Channel Name
-  juce::Colour nameTextCol = slot.isBypassed() ? ThemeManager::get(Theme::Role::textDim)
-                                              : (hasDistinctColor ? juce::Colours::white : ThemeManager::get(Theme::Role::text));
-  g.setColour(nameTextCol);
-  g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
-  g.drawText(slot.getName(), (int)nameplateRect.getX() + 2, (int)nameplateRect.getY() + 1,
-             (int)nameplateRect.getWidth() - 4, 16, juce::Justification::centred, true);
+  g.setColour(slot.isBypassed() ? t.textDim : t.text);
+  g.setFont(BoutiqueLookAndFeel::condensedFont(12.5f, 0.03f));
+  juce::String plateTitle = slot.getName();
+  if (!isReturn && !isMonitorIn)
+    plateTitle = juce::String(slotIndex + 1) + " " + plateTitle;
+  g.drawFittedText(plateTitle.toUpperCase(),
+                   (int)nameplateRect.getX() + 4, (int)nameplateRect.getY() + 2,
+                   (int)nameplateRect.getWidth() - 8, 16,
+                   juce::Justification::centred, 1, 0.78f);
 
-  // Active VST slot highlight: tint populated slot boxes with track color
-  if (cachedHasAnyPlugin && !slot.isBypassed()) {
-    juce::Colour trackColor =
-        hasCustomColor ? customColor : ThemeManager::get(Theme::Role::accent);
-    for (int i = 0; i < 3; ++i) {
-      if (slot.getPluginInstance(i) != nullptr || slot.isChainSlotMidiOut(i)) {
-        auto sb = slotBtns[i].getBounds().toFloat().expanded(1.0f);
-        g.setColour(trackColor.withAlpha(0.12f));
-        g.fillRoundedRectangle(sb, 3.0f);
-        g.setColour(trackColor.withAlpha(0.6f));
-        g.drawRoundedRectangle(sb, 3.0f, 1.0f);
-      }
-    }
-  }
-
-  // Return strip: fill vacant slot button area with a static label
+  // Return strip static label in slot 3 area
   if (isReturn) {
-    g.setColour(juce::Colours::white.withAlpha(0.25f));
-    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    g.setColour(t.engrave);
+    g.setFont(BoutiqueLookAndFeel::condensedFont(10.5f, 0.06f));
     auto vacantArea = slotBtns[2].getBounds();
     if (!vacantArea.isEmpty())
-      g.drawText("RETURN", vacantArea, juce::Justification::centred, true);
+      g.drawFittedText("AUX RETURN", vacantArea, juce::Justification::centred, 1, 0.80f);
   }
 
-  int meterWidth = 12;
-  int centerX = getWidth() / 2 - meterWidth / 2;
-  auto faderBounds = channelSlider.getBounds();
-  auto meterArea = juce::Rectangle<int>(centerX, faderBounds.getY(), meterWidth, faderBounds.getHeight());
-  drawVerticalMeter(g, meterArea, curLeft, curRight, ThemeManager::get(Theme::Role::meterLow),
-                    ThemeManager::get(Theme::Role::meterMid), ThemeManager::get(Theme::Role::meterPeak));
+  // Dedicated stereo segmented LED meter beside the fader
+  if (!cachedMeterArea.isEmpty()) {
+    drawVerticalMeter(g, cachedMeterArea, curLeft, curRight,
+                      t.meterLow, t.meterMid, t.meterPeak);
+  }
 
+  // Subtle 2px per-strip DSP load bar at bottom edge
   {
     float load = juce::jlimit(0.0f, 1.0f, slot.getCpuUsage());
-    const int barH = 3;
-    juce::Colour loadCol =
-        (load < 0.6f) ? ThemeManager::get(Theme::Role::meterLow)
-                      : (load < 0.85f ? ThemeManager::get(Theme::Role::meterMid)
-                                      : ThemeManager::get(Theme::Role::meterPeak));
-    g.setColour(loadCol.withMultipliedAlpha(0.30f));
-    g.fillRect(bounds.getX(), bounds.getBottom() - (float)barH,
-               bounds.getWidth(), (float)barH);
-    g.setColour(loadCol);
-    g.fillRect(bounds.getX(), bounds.getBottom() - (float)barH,
-               bounds.getWidth() * load, (float)barH);
+    if (load > 0.005f) {
+      juce::Colour loadCol = (load < 0.6f) ? t.meterLow
+                           : (load < 0.85f ? t.meterMid : t.meterPeak);
+      g.setColour(loadCol.withAlpha(0.85f));
+      g.fillRect(bounds.getX() + 2.0f, bounds.getBottom() - 2.5f,
+                 (bounds.getWidth() - 4.0f) * load, 2.0f);
+    }
   }
 }
 
-void RackSlotComponent::drawVerticalMeter(juce::Graphics &g, juce::Rectangle<int> area, float L,
-                                          float R, juce::Colour low, juce::Colour mid,
-                                          juce::Colour high) {
-  g.setColour(ThemeManager::get(Theme::Role::trackGroove));
-  g.fillRect(area);
-
-  auto lRect = area.removeFromLeft(area.getWidth() / 2).reduced(1);
-  auto rRect = area.reduced(1);
-
-  auto drawSegmentedBar = [&](juce::Rectangle<int> barArea, float val) {
-    const int numSegments = 12;
-    const int gap = 1;
-    float segmentHeight =
-        (barArea.getHeight() - (numSegments - 1) * gap) / (float)numSegments;
-    int activeSegments =
-        (int)(numSegments * juce::jlimit(0.0f, 1.0f, val) + 0.5f);
-
-    for (int i = 0; i < numSegments; ++i) {
-      float segY =
-          (float)barArea.getBottom() - (i + 1) * segmentHeight - i * gap;
-      auto segRect =
-          juce::Rectangle<float>((float)barArea.getX(), segY,
-                                 (float)barArea.getWidth(), segmentHeight);
-
-      juce::Colour col;
-      float pos = i / (float)(numSegments - 1);
-      if (pos < 0.6f)
-        col = low;
-      else if (pos < 0.85f)
-        col = mid;
-      else
-        col = high;
-
-      if (i < activeSegments) {
-        g.setColour(col);
-        g.fillRect(segRect);
-      } else {
-        g.setColour(col.withAlpha(0.15f));
-        g.fillRect(segRect);
-      }
-    }
-  };
-
-  drawSegmentedBar(lRect, L);
-  drawSegmentedBar(rRect, R);
+void RackSlotComponent::drawVerticalMeter(juce::Graphics &g, juce::Rectangle<int> area,
+                                          float L, float R, juce::Colour low,
+                                          juce::Colour mid, juce::Colour high) {
+  if (area.isEmpty())
+    return;
+  int segs = juce::jlimit(10, 22, area.getHeight() / 9);
+  BoutiqueLookAndFeel::drawStereoSegmentedMeter(g, area.toFloat(), L, R, segs, low, mid, high);
 }
 
 void RackSlotComponent::resized() {
@@ -964,20 +922,32 @@ void RackSlotComponent::resized() {
     noteRangeLabel.setVisible(false);
     collapseBtn.setVisible(false);
 
+    if (isUnusedEmptyStrip()) {
+      expandBtn.setVisible(false);
+      collapsedMuteBtn.setVisible(false);
+      midiLed.setVisible(false);
+      cachedMeterArea = {};
+      setTooltip("Empty Strip " + juce::String(slotIndex + 1) +
+                 " - Click to expand next strip (Right-click to choose any empty strip)");
+      return;
+    }
+
+    setTooltip(juce::String());
     expandBtn.setVisible(true);
-    expandBtn.setBounds(2, 2, getWidth() - 4, 22);
+    expandBtn.setBounds(2, 5, getWidth() - 4, 20);
 
     collapsedMuteBtn.setVisible(true);
-    collapsedMuteBtn.setBounds(2, getHeight() - 26, getWidth() - 4, 22);
+    collapsedMuteBtn.setBounds(2, getHeight() - 25, getWidth() - 4, 20);
     collapsedMuteBtn.setToggleState(slot.isBypassed(), juce::dontSendNotification);
 
     midiLed.setVisible(true);
-    midiLed.setBounds(getWidth() / 2 - 4, 26, 8, 8);
-    cachedMeterArea = juce::Rectangle<int>(getWidth() - 6, 36, 4, getHeight() - 66);
+    midiLed.setBounds(getWidth() / 2 - 4, 27, 8, 8);
+    cachedMeterArea = juce::Rectangle<int>(getWidth() - 7, 38, 5, juce::jmax(0, getHeight() - 68));
     return;
   }
 
-  // Expanded mode:
+  // Expanded mode
+  setTooltip(juce::String());
   expandBtn.setVisible(false);
   collapsedMuteBtn.setVisible(false);
 
@@ -1005,99 +975,93 @@ void RackSlotComponent::resized() {
   midiLed.setVisible(true);
 
   auto bounds = getLocalBounds();
+  bounds.removeFromTop(5); // clear 3px top tape + bevel
 
-  const int rowHeight = 18;
-
-  // Top area: 3 slot buttons + input selector + output selector
-  auto topArea = bounds.removeFromTop(125);
+  // Top area: 3 plugin rows + input selector + output selector (y = 5..105)
+  auto topArea = bounds.removeFromTop(100);
   for (int i = 0; i < 3; ++i) {
-    auto row = topArea.removeFromTop(20).reduced(2, 1);
+    auto row = topArea.removeFromTop(20).reduced(3, 1);
     if (i == 0) {
-      auto collapseBounds = row.removeFromRight(22);
+      auto collapseBounds = row.removeFromRight(19);
+      row.removeFromRight(1);
       collapseBtn.setBounds(collapseBounds);
       collapseBtn.setVisible(true);
       collapseBtn.toFront(true);
     }
-    int editBtnWidth = juce::jlimit(20, 24, (int)(row.getWidth() * 0.22f));
+    int editBtnWidth = juce::jlimit(18, 22, (int)(row.getWidth() * 0.21f));
     editGuiBtns[i].setBounds(row.removeFromRight(editBtnWidth));
+    row.removeFromRight(1);
     slotBtns[i].setBounds(row);
   }
-  auto inputRow = topArea.removeFromTop(20).reduced(2, 1);
-  inputSelector.setBounds(inputRow);
-  // MIDI LED next to input selector (right edge, 8x8 chassis bezel)
-  midiLed.setBounds(inputRow.getRight() - 10, inputRow.getY() + 6, 8, 8);
 
-  auto outputRow = topArea.removeFromTop(20).reduced(2, 1);
+  auto inputRow = topArea.removeFromTop(20).reduced(3, 1);
+  auto ledBox = inputRow.removeFromRight(12);
+  midiLed.setBounds(ledBox.withSizeKeepingCentre(8, 8));
+  inputRow.removeFromRight(1);
+  inputSelector.setBounds(inputRow);
+
+  auto outputRow = topArea.removeFromTop(20).reduced(3, 1);
   outputSelector.setBounds(outputRow);
 
-  // Bottom area: routing buttons (MUTE, FOH, IEM) + Learn Buttons
-  auto buttonArea = bounds.removeFromBottom(60);
-  int btnHeight = 20;
-  bypassButton.setBounds(buttonArea.removeFromTop(btnHeight).reduced(2, 1));
+  // Reserve Strip Nameplate well (y = 107..139)
+  bounds.removeFromTop(36);
+  noteRangeLabel.setBounds(4, 123, getWidth() - 8, 14);
 
-  auto fohRow = buttonArea.removeFromTop(btnHeight).reduced(2, 1);
-  fohRoutingBtn.setBounds(fohRow);
+  // Bottom area: MUTE / FOH / IEM caps
+  auto buttonArea = bounds.removeFromBottom(64);
+  const int btnHeight = 21;
+  bypassButton.setBounds(buttonArea.removeFromTop(btnHeight).reduced(3, 1));
+  fohRoutingBtn.setBounds(buttonArea.removeFromTop(btnHeight).reduced(3, 1));
+  iemRoutingBtn.setBounds(buttonArea.removeFromTop(btnHeight).reduced(3, 1));
 
-  auto iemRow = buttonArea.removeFromTop(btnHeight).reduced(2, 1);
-  iemRoutingBtn.setBounds(iemRow);
-
-  // CC / NR / DYN control row - side by side in 3 equal columns (width / 3)
-  auto ctrlRow = bounds.removeFromBottom(rowHeight);
+  // CC / NR / DYN row above MUTE
+  auto ctrlRow = bounds.removeFromBottom(20);
   int colWidth = ctrlRow.getWidth() / 3;
-  ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
+  ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(2, 1));
   noteRangeButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
-  customizeButton.setBounds(ctrlRow.reduced(1, 1));
+  customizeButton.setBounds(ctrlRow.reduced(2, 1));
 
-  // Fader area (remaining space, identical Y for instrument and return strips)
-  auto faderArea = bounds.reduced(2, 0);
+  bounds.removeFromBottom(2);
+  auto faderArea = bounds.reduced(2, 2);
 
-  // Position the note range label explicitly below the strip name (y = 100)
-  noteRangeLabel.setBounds(2, 116, getWidth() - 4, 14);
+  // Side utility buttons + dedicated non-overlapping fader & stereo LED meter
+  const int w = getWidth();
+  const bool hasSideBtns = (!isReturn && !isMonitorIn);
+  const int sideWidth = hasSideBtns ? juce::jlimit(23, 38, (w - 40) / 2) : 4;
+  const int leftX = 3;
+  const int centerY = faderArea.getCentreY();
 
-  // Shift the start of the faderArea down to y = 132 to clear the label
-  if (faderArea.getY() < 132) {
-    int delta = 132 - faderArea.getY();
-    faderArea.removeFromTop(delta);
+  arpButton.setBounds(leftX, centerY - 26, sideWidth, 22);
+  samplerButton.setBounds(leftX, centerY, sideWidth, 22);
+  mp3Button.setVisible(kMp3DecksEnabled && !isReturn && !isMonitorIn);
+  mp3Button.setBounds(leftX, centerY + 26, sideWidth, 22);
+
+  if (!isReturn) {
+    int utilW = hasSideBtns ? sideWidth : juce::jlimit(24, 36, (w - 40) / 2);
+    saveStripBtn.setBounds(w - utilW - 3, centerY - 26, utilW, 22);
+    loadStripBtn.setBounds(w - utilW - 3, centerY, utilW, 22);
   }
 
-  // Side buttons + center fader
-  int centerX = getWidth() / 2;
-  int sideWidth = centerX - 14;
-  int rightX = getWidth() - sideWidth - 2;
-  int centerY = faderArea.getY() + faderArea.getHeight() / 2;
+  int centerSpanLeft = hasSideBtns ? (leftX + sideWidth + 2) : 6;
+  int centerSpanRight = (!isReturn) ? (saveStripBtn.getX() - 2) : (w - 6);
+  int centerSpanW = juce::jmax(28, centerSpanRight - centerSpanLeft);
 
-  arpButton.setBounds(2, centerY - 24, sideWidth, 24);
-  samplerButton.setBounds(2, centerY + 4, sideWidth, 24);
-  
-  // MP3 deck button on every full strip: each strip has its own deck
-  // processor (idle decks cost nothing), so any strip can volunteer as the
-  // break-music strip — fader, dynamics, aux sends and chain all apply.
-  // (Bisect switch: hidden entirely while kMp3DecksEnabled is false.)
-  mp3Button.setVisible(kMp3DecksEnabled && !isReturn && !isMonitorIn);
-  mp3Button.setBounds(2, centerY + 32, sideWidth, 24);
-
-  saveStripBtn.setBounds(rightX, centerY - 24, sideWidth, 24);
-  loadStripBtn.setBounds(rightX, centerY + 4, sideWidth, 24);
+  int meterW = juce::jlimit(9, 13, centerSpanW / 4);
+  int faderW = juce::jlimit(20, 28, centerSpanW - meterW - 3);
+  int pairW = faderW + 3 + meterW;
+  int pairX = centerSpanLeft + (centerSpanW - pairW) / 2;
 
   if (isAccordion) {
-    int knobSize = 40;
-    iemOffsetKnob.setBounds(centerX - knobSize / 2, faderArea.getY(),
+    int knobSize = 38;
+    iemOffsetKnob.setBounds(pairX + (pairW - knobSize) / 2, faderArea.getY(),
                             knobSize, knobSize);
-    faderArea.removeFromTop(knobSize + 5);
-
-    channelSlider.setBounds(centerX - 12, faderArea.getY(), 24,
-                            faderArea.getHeight());
-  } else {
-    channelSlider.setBounds(centerX - 12, faderArea.getY(), 24,
-                            faderArea.getHeight());
-    iemSlider.setVisible(false);
+    faderArea.removeFromTop(knobSize + 4);
   }
 
-  int meterWidth = 12;
-  int meterCenterX = getWidth() / 2 - meterWidth / 2;
-  auto fdrBounds = channelSlider.getBounds();
-  cachedMeterArea = juce::Rectangle<int>(meterCenterX, fdrBounds.getY(),
-                                          meterWidth, fdrBounds.getHeight());
+  channelSlider.setBounds(pairX, faderArea.getY(), faderW, faderArea.getHeight());
+  iemSlider.setVisible(false);
+  cachedMeterArea = juce::Rectangle<int>(pairX + faderW + 3, faderArea.getY() + 4,
+                                         meterW, juce::jmax(16, faderArea.getHeight() - 8));
 }
 
 void RackSlotComponent::setSpecialModes(bool monitorIn, bool accordion, bool returns) {
@@ -1133,7 +1097,7 @@ juce::Rectangle<int> RackSlotComponent::getNoteRangeButtonBounds() {
 }
 
 void RackSlotComponent::mouseDoubleClick(const juce::MouseEvent &e) {
-  if (e.y >= 100 && e.y <= 120) {
+  if (!isCollapsed && e.y >= 105 && e.y <= 140) {
     showRenameDialog();
     return;
   }
@@ -1141,20 +1105,55 @@ void RackSlotComponent::mouseDoubleClick(const juce::MouseEvent &e) {
     onOpenEditor(0);
 }
 
+void RackSlotComponent::mouseEnter(const juce::MouseEvent &) {
+  if (isCollapsed && isUnusedEmptyStrip())
+    repaint();
+}
+
+void RackSlotComponent::mouseExit(const juce::MouseEvent &) {
+  if (isCollapsed && isUnusedEmptyStrip())
+    repaint();
+}
+
 void RackSlotComponent::mouseMove(const juce::MouseEvent &e) {
-  if (!isCollapsed && e.x >= getWidth() - 6) {
+  if (isCollapsed && isUnusedEmptyStrip()) {
+    setMouseCursor(juce::MouseCursor::PointingHandCursor);
+  } else if (!isCollapsed && e.x >= getWidth() - 6) {
     setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
   } else {
     setMouseCursor(juce::MouseCursor::NormalCursor);
   }
 }
 
-void RackSlotComponent::mouseDown(const juce::MouseEvent &e) {
-  if (isCollapsed) {
-    if (!e.mods.isRightButtonDown()) {
-      setCollapsed(false);
+void RackSlotComponent::mouseWheelMove(const juce::MouseEvent &e,
+                                       const juce::MouseWheelDetails &wheel) {
+  if (onHorizontalScroll) {
+    if (std::abs(wheel.deltaX) > 0.001f) {
+      onHorizontalScroll(juce::roundToInt(-wheel.deltaX * 260.0f));
       return;
     }
+    const auto rel = e.getEventRelativeTo(this);
+    if (isCollapsed || e.mods.isShiftDown() || rel.y < 145) {
+      if (std::abs(wheel.deltaY) > 0.001f) {
+        onHorizontalScroll(juce::roundToInt(-wheel.deltaY * 220.0f));
+        return;
+      }
+    }
+  }
+  juce::Component::mouseWheelMove(e, wheel);
+}
+
+void RackSlotComponent::mouseDown(const juce::MouseEvent &e) {
+  if (isCollapsed) {
+    if (isUnusedEmptyStrip() && e.mods.isRightButtonDown() &&
+        onRightClickUnusedEmpty) {
+      onRightClickUnusedEmpty();
+      return;
+    }
+    if (!e.mods.isRightButtonDown() || isUnusedEmptyStrip()) {
+      setCollapsed(false);
+    }
+    return;
   }
 
   // Right-edge grab handle to resize expanded channel strip width
@@ -1170,7 +1169,7 @@ void RackSlotComponent::mouseDown(const juce::MouseEvent &e) {
       showButtonHelpPopup(e.eventComponent);
       return;
     }
-    if (e.y < 120) {
+    if (e.y < 140) {
       if (onShowChannelStrip)
         onShowChannelStrip();
     }
@@ -1254,25 +1253,32 @@ void RackSlotComponent::showButtonHelpPopup(juce::Component *src) {
 }
 
 const juce::Array<juce::Colour> &RackSlotComponent::getPalette() {
+  // Stage-tape tones matched to the Tablet HUD ZONE_COLORS
   static const juce::Array<juce::Colour> p = {
-      juce::Colour(0xff2a2a2a), juce::Colours::cyan, juce::Colours::limegreen,
-      juce::Colours::orange,    juce::Colours::magenta,
-      juce::Colours::yellow,    juce::Colours::red,
-      juce::Colours::deepskyblue, juce::Colours::purple,
-      juce::Colours::turquoise};
+      juce::Colour(0xff2a2a2a), // Default
+      juce::Colour(0xff3d8fb8), // Stage Blue
+      juce::Colour(0xff4a9a68), // Sage Green
+      juce::Colour(0xffc98a2e), // Warm Amber
+      juce::Colour(0xffb8564f), // Coral Red
+      juce::Colour(0xff8668b0), // Muted Violet
+      juce::Colour(0xff3a9a8c), // Deep Teal
+      juce::Colour(0xffb59b3b), // Brass Gold
+      juce::Colour(0xff6e7f8d), // Slate Steel
+      juce::Colour(0xffa86488)  // Rose Tape
+  };
   return p;
 }
 
 void RackSlotComponent::showColorPalette() {
+  static const char *names[] = {
+      "Default",     "Stage Blue",   "Sage Green", "Warm Amber", "Coral Red",
+      "Muted Violet","Deep Teal",    "Brass Gold", "Slate Steel","Rose Tape"};
   juce::PopupMenu menu;
-  menu.addSectionHeader("Strip Color");
+  menu.addSectionHeader("Strip Stage-Tape Color");
   const auto &pal = getPalette();
-  int id = 1;
-  for (auto &c : pal) {
-    juce::String name = (c == juce::Colour(0xff2a2a2a))
-                            ? "Default"
-                            : c.toDisplayString(true);
-    menu.addItem(id++, name, true, slot.getChannelColor() == c);
+  for (int i = 0; i < pal.size(); ++i) {
+    juce::String label = (i < 10) ? juce::String(names[i]) : pal[i].toDisplayString(true);
+    menu.addItem(i + 1, label, true, slot.getChannelColor() == pal[i]);
   }
 
   juce::Component::SafePointer<RackSlotComponent> safe(this);
@@ -1367,14 +1373,12 @@ void RackSlotComponent::itemDropped(
 void RackSlotComponent::showPluginConfigMenu(int chainIndex) {
   if (chainIndex < 0 || chainIndex >= slot.getChainSize())
     return;
-  // Allow the per-layer config (note range/level/enable) for both plugin and
-  // MIDI OUT chain slots.
   if (!slot.getPluginInstance(chainIndex) && !slot.isChainSlotMidiOut(chainIndex))
     return;
 
   auto *comp = new PluginStackConfigComp(slot, chainIndex);
-  
-  if (auto* mainComp = findParentComponentOfClass<MainComponent>()) {
+
+  if (auto *mainComp = findParentComponentOfClass<MainComponent>()) {
     mainComp->setActiveMidiNoteLearner(comp);
   }
 
@@ -1422,7 +1426,7 @@ void RackSlotComponent::LongPressMouseListener::mouseDown(const juce::MouseEvent
 
 void RackSlotComponent::LongPressMouseListener::mouseDrag(const juce::MouseEvent &e) {
   (void)e;
-  stopTimer(); // moved — not a hold, cancel the long press
+  stopTimer();
 }
 
 void RackSlotComponent::LongPressMouseListener::mouseUp(const juce::MouseEvent &e) {
@@ -1440,7 +1444,7 @@ void RackSlotComponent::LongPressMouseListener::timerCallback() {
 }
 
 void RackSlotComponent::longPressLearnArmed(int armTarget) {
-  suppressLongPressClick = true; // the release must not toggle the button
+  suppressLongPressClick = true;
   if (onShowCCDialog)
     onShowCCDialog(armTarget);
 }
@@ -1455,7 +1459,7 @@ juce::String RackSlotComponent::getActiveNoteRangeString() const {
 
   for (int i = 0; i < 3; ++i) {
     bool isInst = slot.isChainSlotMidiOut(i);
-    if (auto* p = slot.getPluginInstance(i))
+    if (auto *p = slot.getPluginInstance(i))
       isInst = isInst || p->getPluginDescription().isInstrument;
     if (isInst && slot.getChainSlotSettings(i).enabled.load()) {
       stackLow = juce::jmin(stackLow, slot.getChainSlotSettings(i).lowNote.load());
@@ -1464,7 +1468,6 @@ juce::String RackSlotComponent::getActiveNoteRangeString() const {
     }
   }
 
-  // Intersect strip's global range with combined stack range
   int activeLow = stripLow;
   int activeHigh = stripHigh;
 
@@ -1483,7 +1486,6 @@ void RackSlotComponent::updateOutputSelector() {
   outputSelector.clear(juce::dontSendNotification);
   outputSelector.addItem("Main FOH/IEM", 1);
 
-  // Direct Hardware Outputs
   outputSelector.addSeparator();
   if (auto *rootMenu = outputSelector.getRootMenu())
     rootMenu->addSectionHeader("Direct Hardware Outs");

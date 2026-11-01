@@ -1,4 +1,6 @@
 #include "LibraryPanel.h"
+#include "BoutiqueLookAndFeel.h"
+#include "ButtonRoles.h"
 #include "SetupMidiTriggers.h"
 #include "SetlistManager.h"
 #include "ThemeManager.h"
@@ -7,6 +9,7 @@ LibraryList::LibraryList(Kind k) : kind(k) {
   setModel(this);
   setRowHeight(24);
   setMultipleSelectionEnabled(false);
+  setColour(juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
   loadFavorites();
 }
 
@@ -45,20 +48,21 @@ void LibraryList::toggleFavorite(const juce::File &f) {
 }
 
 juce::Colour LibraryList::detectBadgeColour(const juce::String &name, Kind k) {
+  // Muted stage-tape colors matching HUD sound-tag palette
   juce::String n = name.toLowerCase();
   if (n.contains("piano") || n.contains("wurl") || n.contains("rhodes") || n.contains("grand") || n.contains("steinway") || n.contains("keys"))
-    return juce::Colour(0xFF00B0FF); // EP / Piano (Blue)
+    return juce::Colour(0xFF3D8FB8); // Stage Blue
   if (n.contains("organ") || n.contains("b3") || n.contains("leslie"))
-    return juce::Colour(0xFFFFB300); // Organ (Amber)
+    return juce::Colour(0xFFC98A2E); // Warm Amber
   if (n.contains("brass") || n.contains("horn") || n.contains("sax"))
-    return juce::Colour(0xFFFF6D00); // Brass / Horns (Orange)
+    return juce::Colour(0xFFB8564F); // Coral Red
   if (n.contains("synth") || n.contains("lead") || n.contains("pad") || n.contains("juno") || n.contains("arp") || n.contains("square"))
-    return juce::Colour(0xFFE91E63); // Synth / Lead (Magenta)
+    return juce::Colour(0xFF8668B0); // Muted Violet
   if (n.contains("sample") || n.contains("perc") || n.contains("marimba") || n.contains("drum") || n.contains("handclap"))
-    return juce::Colour(0xFF00E676); // Percussion / Sample (Green)
+    return juce::Colour(0xFF4A9A68); // Sage Green
   if (k == Kind::Setups)
-    return juce::Colour(0xFF00E5FF); // Songs / Setups (Cyan)
-  return juce::Colour(0xFF8E8E93);   // Default Grey
+    return ThemeManager::get(Theme::Role::accent);
+  return ThemeManager::get(Theme::Role::engrave);
 }
 
 void LibraryList::setDirectory(const juce::File &dir, const juce::String &wildcard) {
@@ -125,7 +129,6 @@ void LibraryList::refresh() {
 
   if (directory.isDirectory()) {
     juce::Array<juce::File> found;
-    // Recursive search to support subfolders (categories / song folders)
     directory.findChildFiles(found, juce::File::findFiles, true, wc);
     if (kind == Kind::Setups) {
       juce::Array<juce::File> more;
@@ -144,7 +147,6 @@ void LibraryList::refresh() {
     std::vector<Item> favItems;
     std::map<juce::String, std::vector<Item>> categoryMap;
 
-    // Scan subdirectories so empty subfolders also show up as categories
     juce::Array<juce::File> subDirs;
     directory.findChildFiles(subDirs, juce::File::findDirectories, false);
     for (const auto &sd : subDirs) {
@@ -157,7 +159,6 @@ void LibraryList::refresh() {
       juce::String fullPath = f.getFullPathName();
       juce::String relPath = f.getRelativePathFrom(directory);
 
-      // Search filter check
       if (filterQuery.isNotEmpty()) {
         if (!fileName.toLowerCase().contains(filterQuery) && !relPath.toLowerCase().contains(filterQuery))
           continue;
@@ -186,10 +187,11 @@ void LibraryList::refresh() {
       }
     }
 
-    // 1. Favorites at the top
+    // 1. Favorites at the top (zero emoji)
     if (!favItems.empty()) {
       Item header;
-      header.displayName = "⭐ FAVORITES";
+      header.displayName = "FAVORITES";
+      header.category = "FAVORITES";
       header.isFolderHeader = true;
       items.push_back(header);
       for (const auto &it : favItems)
@@ -201,14 +203,14 @@ void LibraryList::refresh() {
       if (kv.first != "GENERAL") {
         Item header;
         bool isCollapsed = (collapsedFolders.count(kv.first) > 0);
-        header.displayName = (isCollapsed ? "\xe2\x96\xb6  " : "\xe2\x96\xbc  ") + kv.first; // ▶ / ▼
+        header.displayName = kv.first;
         header.category = kv.first;
         header.isFolderHeader = true;
         header.isCollapsed = isCollapsed;
         header.folderDir = directory.getChildFile(kv.first);
         items.push_back(header);
         if (isCollapsed && filterQuery.isEmpty()) {
-          continue; // Hide items in collapsed folder unless searching
+          continue;
         }
       }
       for (const auto &it : kv.second)
@@ -223,64 +225,82 @@ void LibraryList::refresh() {
 int LibraryList::getNumRows() { return (int)items.size(); }
 
 void LibraryList::paintListBoxItem(int row, juce::Graphics &g, int width,
-                                  int height, bool isSelected) {
+                                   int height, bool isSelected) {
   if (row < 0 || row >= (int)items.size())
     return;
 
+  const auto &t = ThemeManager::getInstance().active();
   const auto &item = items[row];
 
   // Folder Category Header Row
   if (item.isFolderHeader) {
-    g.fillAll(juce::Colour(0xFF1E2228));
-    g.setColour(juce::Colour(0xFF00E5FF));
-    g.setFont(juce::FontOptions(11.5f, juce::Font::bold));
-    g.drawText(item.displayName, 8, 0, width - 16, height, juce::Justification::centredLeft, true);
-    g.setColour(juce::Colour(0xFF2A2E35));
+    g.fillAll(t.sunken);
+    const bool isFavHeader = (item.category == "FAVORITES");
+
+    if (!isFavHeader) {
+      juce::Path tri;
+      float cx = 10.0f;
+      float cy = height * 0.5f;
+      if (item.isCollapsed) {
+        tri.addTriangle(cx - 2.5f, cy - 3.5f, cx - 2.5f, cy + 3.5f, cx + 3.0f, cy);
+      } else {
+        tri.addTriangle(cx - 3.5f, cy - 2.0f, cx + 3.5f, cy - 2.0f, cx, cy + 3.0f);
+      }
+      g.setColour(t.engrave);
+      g.fillPath(tri);
+    } else {
+      g.setColour(t.foh);
+      g.fillRect(6.0f, 5.0f, 2.5f, (float)height - 10.0f);
+    }
+
+    g.setColour(isFavHeader ? t.foh : t.textDim);
+    g.setFont(BoutiqueLookAndFeel::condensedFont(11.5f, 0.08f));
+    g.drawText(item.displayName, isFavHeader ? 14 : 20, 0, width - 26, height,
+               juce::Justification::centredLeft, true);
+
+    g.setColour(t.hairline);
     g.drawHorizontalLine(height - 1, 0.0f, (float)width);
     return;
   }
 
-  if (isSelected)
-    g.fillAll(juce::Colour(0xFF00E5FF).withAlpha(0.25f));
-  else if (row % 2 == 1)
-    g.fillAll(juce::Colours::white.withAlpha(0.02f));
+  if (isSelected) {
+    g.fillAll(t.accent.withAlpha(t.dark ? 0.22f : 0.16f));
+    g.setColour(t.accent);
+    g.fillRect(0.0f, 0.0f, 2.5f, (float)height);
+  } else if (row % 2 == 1) {
+    g.fillAll(t.text.withAlpha(0.02f));
+  }
 
-  // Color Category Badge Pill
-  int badgeX = 6;
-  int badgeY = 5;
-  g.setColour(item.badgeColour.withAlpha(0.85f));
-  g.fillRoundedRectangle((float)badgeX, (float)badgeY, 5.0f, (float)(height - 10), 2.0f);
+  // Stage-tape vertical stripe
+  g.setColour(item.badgeColour.withAlpha(0.88f));
+  g.fillRoundedRectangle(6.0f, 5.0f, 3.0f, (float)(height - 10), 1.0f);
 
-  // Star Icon if Favorite
-  int textX = 16;
+  int textX = 15;
   if (item.isFavorite) {
-    g.setColour(juce::Colours::yellow);
-    g.setFont(juce::FontOptions(12.0f));
-    g.drawText("*", textX, 0, 10, height, juce::Justification::centred, true);
-    textX += 12;
+    g.setColour(t.foh);
+    g.fillEllipse((float)textX, height * 0.5f - 2.5f, 5.0f, 5.0f);
+    textX += 10;
   }
 
   juce::File f = item.file;
   juce::String name = item.displayName;
+  juce::Colour textCol = t.text;
 
   if (kind == Kind::Setups) {
     if (learningFile == f) {
-      name += " [LEARNING...]";
-      g.setColour(juce::Colours::orange);
+      name += "  [LEARN]";
+      textCol = t.warn;
     } else {
       auto trigger = SetupMidiTriggers::getInstance().getTrigger(f.getFileName());
       if (trigger.number != -1) {
-        name += " [" + trigger.toString() + "]";
-        g.setColour(juce::Colours::cyan);
-      } else {
-        g.setColour(juce::Colours::white);
+        name += "  [" + trigger.toString() + "]";
+        textCol = t.iem;
       }
     }
-  } else {
-    g.setColour(juce::Colours::white);
   }
 
-  g.setFont(juce::FontOptions(13.0f));
+  g.setColour(textCol);
+  g.setFont(BoutiqueLookAndFeel::uiFont(13.0f, isSelected));
   g.drawText(name, textX, 0, width - textX - 8, height, juce::Justification::centredLeft, true);
 }
 
@@ -294,7 +314,7 @@ void LibraryList::listBoxItemClicked(int row, const juce::MouseEvent &e) {
   const auto &item = items[row];
 
   if (item.isFolderHeader) {
-    if (item.displayName.contains("FAVORITES"))
+    if (item.category == "FAVORITES")
       return;
 
     if (e.mods.isPopupMenu()) {
@@ -335,7 +355,6 @@ void LibraryList::listBoxItemClicked(int row, const juce::MouseEvent &e) {
     menu.addItem(10, isFav ? "Unpin Favorite" : "Pin to Favorites");
     menu.addSeparator();
 
-    // "Move to Folder..." Submenu
     juce::PopupMenu moveSubmenu;
     juce::Array<juce::File> subDirs;
     directory.findChildFiles(subDirs, juce::File::findDirectories, false);
@@ -417,7 +436,7 @@ void LibraryList::listBoxItemDoubleClicked(int row, const juce::MouseEvent &) {
     return;
   const auto &item = items[row];
   if (item.isFolderHeader) {
-    if (!item.displayName.contains("FAVORITES"))
+    if (item.category != "FAVORITES")
       toggleFolderCollapsed(item.category);
     return;
   }
@@ -443,11 +462,7 @@ juce::File LibraryList::getSelectedFile() const {
 
 LibraryPanel::LibraryPanel() {
   addAndMakeVisible(searchEditor);
-  searchEditor.setTextToShowWhenEmpty("Filter library...", juce::Colours::grey);
-  searchEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xFF1B1E22));
-  searchEditor.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xFF33383F));
-  searchEditor.setColour(juce::TextEditor::textColourId, juce::Colours::white);
-  searchEditor.setFont(juce::FontOptions(13.0f));
+  searchEditor.setFont(BoutiqueLookAndFeel::uiFont(13.0f, false));
   searchEditor.onTextChange = [this] {
     juce::String q = searchEditor.getText();
     if (setsList) setsList->setFilterQuery(q);
@@ -456,28 +471,21 @@ LibraryPanel::LibraryPanel() {
   };
 
   addAndMakeVisible(newFolderBtn);
-  newFolderBtn.setButtonText("+ Folder");
+  newFolderBtn.setButtonText("+ FOLDER");
+  Fanfare::setButtonRole(newFolderBtn, Fanfare::ButtonRole::Standard);
   newFolderBtn.setTooltip("Create a new category folder for songs/strips");
-  newFolderBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF26292E));
-  newFolderBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xFF00E5FF));
   newFolderBtn.onClick = [this] {
     int activeTab = tabs->getCurrentTabIndex();
-    if (activeTab == 0 && setsList) setsList->createNewFolder();
-    else if (activeTab == 1 && setupsList) setupsList->createNewFolder();
-    else if (activeTab == 2 && stripsList) stripsList->createNewFolder();
+    if (activeTab == 0 && setupsList) setupsList->createNewFolder();
+    else if (activeTab == 1 && stripsList) stripsList->createNewFolder();
+    else if (activeTab == 3 && setsList) setsList->createNewFolder();
   };
 
+  // Horizontal Front Panel top tabs (no sideways text)
   tabs = std::make_unique<juce::TabbedComponent>(
-      juce::TabbedButtonBar::TabsAtLeft);
-  tabs->setTabBarDepth(28);
-
-  setsList = std::make_unique<LibraryList>(LibraryList::Kind::Sets);
-  setsList->setDirectory(Fanfare::RigLibrary::getSetsDirectory(), "*.orset");
-  setsList->onDoubleClicked = [this](const juce::File &f) {
-    if (onSetDoubleClicked)
-      onSetDoubleClicked(f);
-  };
-  tabs->addTab("Btn Maps", juce::Colour(0xFF1D2023), setsList.get(), false);
+      juce::TabbedButtonBar::TabsAtTop);
+  tabs->setTabBarDepth(26);
+  tabs->setOutline(0);
 
   setupsList = std::make_unique<LibraryList>(LibraryList::Kind::Setups);
   setupsList->setDirectory(Fanfare::RigLibrary::getSongsDirectory(), "*.json");
@@ -485,20 +493,53 @@ LibraryPanel::LibraryPanel() {
     if (onSetupDoubleClicked)
       onSetupDoubleClicked(f);
   };
-  tabs->addTab("Songs", juce::Colour(0xFF1D2023), setupsList.get(), false);
+  tabs->addTab("SONGS", ThemeManager::get(Theme::Role::panel), setupsList.get(), false);
 
   stripsList = std::make_unique<LibraryList>(LibraryList::Kind::Strips);
   stripsList->setDirectory(Fanfare::RigLibrary::getPresetsDirectory(), "*.orstrip");
-  tabs->addTab("Strips", juce::Colour(0xFF1D2023), stripsList.get(), false);
+  tabs->addTab("STRIPS", ThemeManager::get(Theme::Role::panel), stripsList.get(), false);
 
   setlistPanel = std::make_unique<Fanfare::SetlistPanel>();
-  tabs->addTab("Setlist", juce::Colour(0xFF1D2023), setlistPanel.get(), false);
+  tabs->addTab("SETLIST", ThemeManager::get(Theme::Role::panel), setlistPanel.get(), false);
+
+  setsList = std::make_unique<LibraryList>(LibraryList::Kind::Sets);
+  setsList->setDirectory(Fanfare::RigLibrary::getSetsDirectory(), "*.orset");
+  setsList->onDoubleClicked = [this](const juce::File &f) {
+    if (onSetDoubleClicked)
+      onSetDoubleClicked(f);
+  };
+  tabs->addTab("MAPS", ThemeManager::get(Theme::Role::panel), setsList.get(), false);
 
   addAndMakeVisible(tabs.get());
+  ThemeManager::getInstance().addChangeListener(this);
+  applyTheme();
   setSize(240, 400);
 }
 
-LibraryPanel::~LibraryPanel() {}
+LibraryPanel::~LibraryPanel() {
+  ThemeManager::getInstance().removeChangeListener(this);
+}
+
+void LibraryPanel::changeListenerCallback(juce::ChangeBroadcaster*) {
+  applyTheme();
+  refreshAll();
+  repaint();
+}
+
+void LibraryPanel::applyTheme() {
+  const auto &t = ThemeManager::getInstance().active();
+  searchEditor.setTextToShowWhenEmpty("Filter library...", t.textFaint);
+  searchEditor.setColour(juce::TextEditor::backgroundColourId, t.dark ? t.sunken : t.raised);
+  searchEditor.setColour(juce::TextEditor::outlineColourId, t.dark ? t.border : t.borderStrong);
+  searchEditor.setColour(juce::TextEditor::focusedOutlineColourId, t.accent);
+  searchEditor.setColour(juce::TextEditor::textColourId, t.text);
+  searchEditor.applyColourToAllText(t.text, true);
+
+  if (tabs) {
+    for (int i = 0; i < tabs->getNumTabs(); ++i)
+      tabs->setTabBackgroundColour(i, t.panel);
+  }
+}
 
 void LibraryPanel::refreshAll() {
   if (setsList)
@@ -515,7 +556,7 @@ void LibraryPanel::visibilityChanged() {
 }
 
 juce::File LibraryPanel::getSelectedPresetFile() const {
-  if (tabs->getCurrentTabIndex() == 2 && stripsList != nullptr)
+  if (tabs->getCurrentTabIndex() == 1 && stripsList != nullptr)
     return stripsList->getSelectedFile();
   return {};
 }
@@ -534,15 +575,17 @@ void LibraryPanel::assignLearnedTrigger(SetupMidiTrigger t) {
 }
 
 void LibraryPanel::resized() {
-  int btnW = 65;
-  searchEditor.setBounds(4, 4, getWidth() - 8 - btnW - 4, 24);
-  newFolderBtn.setBounds(getWidth() - 4 - btnW, 4, btnW, 24);
-  tabs->setBounds(0, 32, getWidth(), getHeight() - 32);
+  const int btnW = 62;
+  searchEditor.setBounds(5, 5, getWidth() - 10 - btnW - 4, 24);
+  newFolderBtn.setBounds(getWidth() - 5 - btnW, 5, btnW, 24);
+  tabs->setBounds(1, 33, getWidth() - 2, getHeight() - 34);
 }
 
 void LibraryPanel::paint(juce::Graphics &g) {
-  g.fillAll(juce::Colour(0xFF16181B));
-  g.setColour(juce::Colour(0xFF2A2D32));
-  g.drawLine((float)getWidth() - 0.5f, 0.0f,
-             (float)getWidth() - 0.5f, (float)getHeight(), 0.5f);
+  const auto &t = ThemeManager::getInstance().active();
+  auto bounds = getLocalBounds().toFloat();
+  g.setColour(t.panel);
+  g.fillRoundedRectangle(bounds, 3.0f);
+  g.setColour(t.border);
+  g.drawRoundedRectangle(bounds.reduced(0.5f), 3.0f, 1.0f);
 }

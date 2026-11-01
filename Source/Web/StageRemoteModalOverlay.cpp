@@ -1,51 +1,58 @@
 #include "StageRemoteModalOverlay.h"
+#include "../BoutiqueLookAndFeel.h"
+#include "../ButtonRoles.h"
 #include "../HelpLauncher.h"
-#include "../Theme.h"
+#include "../ThemeManager.h"
 
 namespace OpenRig {
 
 StageRemoteModalOverlay::StageRemoteModalOverlay(StageHotspotController& hotspotCtrl, int webServerPort)
     : hotspotController(hotspotCtrl), port(webServerPort) {
     setOpaque(false);
+    const auto& t = ThemeManager::getInstance().active();
 
+    closeBtn.setButtonText("CLOSE");
+    Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Subtle);
     addAndMakeVisible(closeBtn);
+
     Fanfare::styleHelpButton(helpBtn, "#web-remote", "HAAALP! Open the Tablet Stage HUD & Wi-Fi Hotspot section of the User's Manual");
     addAndMakeVisible(helpBtn);
     closeBtn.onClick = [this]() {
         if (onClose) onClose();
     };
 
-    // --- Wi-Fi Section ---
+    // Wi-Fi Section
     wifiTitleLabel.setText("STAGE WI-FI SOFTAP (DIRECT LINK)", juce::dontSendNotification);
-    wifiTitleLabel.setFont(juce::Font(juce::FontOptions(15.0f, juce::Font::bold)));
-    wifiTitleLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF58A6FF));
+    wifiTitleLabel.setFont(BoutiqueLookAndFeel::condensedFont(14.5f, 0.06f));
+    wifiTitleLabel.setColour(juce::Label::textColourId, t.iem);
     addAndMakeVisible(wifiTitleLabel);
 
     addAndMakeVisible(ssidLabel);
-    ssidLabel.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
-    ssidLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF8B949E));
+    ssidLabel.setFont(BoutiqueLookAndFeel::condensedFont(11.5f, 0.06f));
+    ssidLabel.setColour(juce::Label::textColourId, t.engrave);
 
     addAndMakeVisible(ssidEditor);
     ssidEditor.setText(hotspotController.getSsid());
-    ssidEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xFF0D1117));
-    ssidEditor.setColour(juce::TextEditor::textColourId, juce::Colours::white);
-    ssidEditor.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xFF30363D));
+    ssidEditor.setFont(BoutiqueLookAndFeel::monoFont(12.5f, false));
+    ssidEditor.setColour(juce::TextEditor::backgroundColourId, t.sunken);
+    ssidEditor.setColour(juce::TextEditor::textColourId, t.text);
+    ssidEditor.setColour(juce::TextEditor::outlineColourId, t.border);
     ssidEditor.onTextChange = [this]() { updateQrCodes(); };
 
     addAndMakeVisible(passLabel);
-    passLabel.setFont(juce::Font(juce::FontOptions(12.0f, juce::Font::bold)));
-    passLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF8B949E));
+    passLabel.setFont(BoutiqueLookAndFeel::condensedFont(11.5f, 0.06f));
+    passLabel.setColour(juce::Label::textColourId, t.engrave);
 
     addAndMakeVisible(passEditor);
     passEditor.setText(hotspotController.getPassword());
-    passEditor.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xFF0D1117));
-    passEditor.setColour(juce::TextEditor::textColourId, juce::Colours::white);
-    passEditor.setColour(juce::TextEditor::outlineColourId, juce::Colour(0xFF30363D));
+    passEditor.setFont(BoutiqueLookAndFeel::monoFont(12.5f, false));
+    passEditor.setColour(juce::TextEditor::backgroundColourId, t.sunken);
+    passEditor.setColour(juce::TextEditor::textColourId, t.text);
+    passEditor.setColour(juce::TextEditor::outlineColourId, t.border);
     passEditor.onTextChange = [this]() { updateQrCodes(); };
 
     addAndMakeVisible(hotspotToggleBtn);
-    hotspotToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF238636));
-    hotspotToggleBtn.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+    Fanfare::setButtonRole(hotspotToggleBtn, Fanfare::ButtonRole::Primary);
     hotspotToggleBtn.onClick = [this]() {
         if (hotspotController.isActive()) {
             hotspotToggleBtn.setEnabled(false);
@@ -61,52 +68,54 @@ StageRemoteModalOverlay::StageRemoteModalOverlay(StageHotspotController& hotspot
     };
 
     addAndMakeVisible(hotspotStatusLabel);
-    hotspotStatusLabel.setFont(juce::Font(juce::FontOptions(12.0f)));
-    hotspotStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF8B949E));
+    hotspotStatusLabel.setFont(BoutiqueLookAndFeel::uiFont(12.0f, false));
+    hotspotStatusLabel.setColour(juce::Label::textColourId, t.textDim);
 
     addAndMakeVisible(wifiQrComponent);
     wifiQrCaption.setText("Scan with camera to Join Wi-Fi", juce::dontSendNotification);
-    wifiQrCaption.setFont(juce::Font(juce::FontOptions(11.0f)));
+    wifiQrCaption.setFont(BoutiqueLookAndFeel::uiFont(11.5f, false));
     wifiQrCaption.setJustificationType(juce::Justification::centred);
-    wifiQrCaption.setColour(juce::Label::textColourId, juce::Colour(0xFF8B949E));
+    wifiQrCaption.setColour(juce::Label::textColourId, t.textDim);
     addAndMakeVisible(wifiQrCaption);
 
-    // --- Web Remote Section ---
+    // Web Remote Section
     webTitleLabel.setText("TABLET STAGE COMPANION (WEB HUD)", juce::dontSendNotification);
-    webTitleLabel.setFont(juce::Font(juce::FontOptions(15.0f, juce::Font::bold)));
-    webTitleLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF3FB950));
+    webTitleLabel.setFont(BoutiqueLookAndFeel::condensedFont(14.5f, 0.06f));
+    webTitleLabel.setColour(juce::Label::textColourId, t.accent);
     addAndMakeVisible(webTitleLabel);
 
-    primaryUrlLabel.setFont(juce::Font(juce::FontOptions(14.0f, juce::Font::bold)));
-    primaryUrlLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    primaryUrlLabel.setFont(BoutiqueLookAndFeel::monoFont(14.0f, true));
+    primaryUrlLabel.setColour(juce::Label::textColourId, t.text);
     addAndMakeVisible(primaryUrlLabel);
 
+    Fanfare::setButtonRole(copyUrlBtn, Fanfare::ButtonRole::Standard);
     addAndMakeVisible(copyUrlBtn);
     copyUrlBtn.onClick = [this]() {
         juce::SystemClipboard::copyTextToClipboard(primaryUrlLabel.getText());
-        copyUrlBtn.setButtonText("COPIED!");
+        copyUrlBtn.setButtonText("COPIED");
         startTimer(1500);
     };
 
+    Fanfare::setButtonRole(openBrowserBtn, Fanfare::ButtonRole::Primary);
     addAndMakeVisible(openBrowserBtn);
     openBrowserBtn.onClick = [this]() {
         juce::URL(primaryUrlLabel.getText()).launchInDefaultBrowser();
     };
 
-    otherIpsLabel.setFont(juce::Font(juce::FontOptions(11.0f)));
-    otherIpsLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF8B949E));
+    otherIpsLabel.setFont(BoutiqueLookAndFeel::monoFont(11.0f, false));
+    otherIpsLabel.setColour(juce::Label::textColourId, t.textDim);
     addAndMakeVisible(otherIpsLabel);
 
     addAndMakeVisible(webQrComponent);
     webQrCaption.setText("Scan to Open Stage HUD in Browser", juce::dontSendNotification);
-    webQrCaption.setFont(juce::Font(juce::FontOptions(11.0f)));
+    webQrCaption.setFont(BoutiqueLookAndFeel::uiFont(11.5f, false));
     webQrCaption.setJustificationType(juce::Justification::centred);
-    webQrCaption.setColour(juce::Label::textColourId, juce::Colour(0xFF8B949E));
+    webQrCaption.setColour(juce::Label::textColourId, t.textDim);
     addAndMakeVisible(webQrCaption);
 
     usbInfoLabel.setText("USB Stage Link: Plug USB cable from laptop to tablet & enable USB Tethering for 0ms latency.", juce::dontSendNotification);
-    usbInfoLabel.setFont(juce::Font(juce::FontOptions(11.0f, juce::Font::italic)));
-    usbInfoLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF7EE787));
+    usbInfoLabel.setFont(BoutiqueLookAndFeel::uiFont(12.0f, false));
+    usbInfoLabel.setColour(juce::Label::textColourId, t.ok);
     addAndMakeVisible(usbInfoLabel);
 
     updateQrCodes();
@@ -128,9 +137,9 @@ void StageRemoteModalOverlay::timerCallback() {
 
 void StageRemoteModalOverlay::updateQrCodes() {
     juce::String ssid = ssidEditor.getText().trim();
-    if (ssid.isEmpty()) ssid = "OpenRig-Stage";
+    if (ssid.isEmpty()) ssid = "Fanfare-Stage";
     juce::String pass = passEditor.getText().trim();
-    if (pass.isEmpty()) pass = "openrig2026";
+    if (pass.isEmpty()) pass = "fanfare2026";
 
     wifiQrComponent.setPayload(QrCodeGenerator::makeWifiPayload(ssid, pass));
 
@@ -151,61 +160,52 @@ void StageRemoteModalOverlay::updateQrCodes() {
 }
 
 void StageRemoteModalOverlay::updateStatusDisplay(StageHotspotController::State state, const juce::String& msg) {
+    const auto& t = ThemeManager::getInstance().active();
     if (state == StageHotspotController::State::Active) {
         hotspotToggleBtn.setButtonText("STOP STAGE HOTSPOT");
-        hotspotToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFFDA3633));
+        hotspotToggleBtn.setToggleState(true, juce::dontSendNotification);
+        Fanfare::setButtonRole(hotspotToggleBtn, Fanfare::ButtonRole::Mute);
         hotspotStatusLabel.setText("Status: ACTIVE (Broadcasting " + ssidEditor.getText() + ")", juce::dontSendNotification);
-        hotspotStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF3FB950));
+        hotspotStatusLabel.setColour(juce::Label::textColourId, t.ok);
     } else if (state == StageHotspotController::State::Starting) {
         hotspotToggleBtn.setButtonText("STARTING...");
         hotspotStatusLabel.setText("Status: Starting Windows Hotspot...", juce::dontSendNotification);
-        hotspotStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xFFD29922));
+        hotspotStatusLabel.setColour(juce::Label::textColourId, t.warn);
     } else if (state == StageHotspotController::State::Stopping) {
         hotspotToggleBtn.setButtonText("STOPPING...");
         hotspotStatusLabel.setText("Status: Stopping...", juce::dontSendNotification);
-        hotspotStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xFFD29922));
+        hotspotStatusLabel.setColour(juce::Label::textColourId, t.warn);
     } else if (state == StageHotspotController::State::Error) {
         hotspotToggleBtn.setButtonText("START STAGE HOTSPOT");
-        hotspotToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF238636));
+        hotspotToggleBtn.setToggleState(false, juce::dontSendNotification);
+        Fanfare::setButtonRole(hotspotToggleBtn, Fanfare::ButtonRole::Primary);
         hotspotStatusLabel.setText("Error: " + msg, juce::dontSendNotification);
-        hotspotStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xFFF85149));
+        hotspotStatusLabel.setColour(juce::Label::textColourId, t.danger);
     } else {
         hotspotToggleBtn.setButtonText("START STAGE HOTSPOT");
-        hotspotToggleBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF238636));
+        hotspotToggleBtn.setToggleState(false, juce::dontSendNotification);
+        Fanfare::setButtonRole(hotspotToggleBtn, Fanfare::ButtonRole::Primary);
         hotspotStatusLabel.setText("Status: Stopped (Offline)", juce::dontSendNotification);
-        hotspotStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF8B949E));
+        hotspotStatusLabel.setColour(juce::Label::textColourId, t.textDim);
     }
     updateQrCodes();
 }
 
 void StageRemoteModalOverlay::paint(juce::Graphics& g) {
-    g.fillAll(juce::Colour(0xB0000000)); // Dim background
-
+    const auto& t = ThemeManager::getInstance().active();
     auto bounds = getLocalBounds();
     auto dialogArea = bounds.withSizeKeepingCentre(std::min(780, bounds.getWidth() - 30),
                                                    std::min(530, bounds.getHeight() - 30));
 
-    // Main Card
-    g.setColour(juce::Colour(0xFF161B22));
-    g.fillRoundedRectangle(dialogArea.toFloat(), 8.0f);
+    Fanfare::ModalFrame::paintOverlayScrimAndPanel(
+        g, bounds, dialogArea, "STAGE REMOTE & WI-FI HOTSPOT", 40);
 
-    g.setColour(juce::Colour(0xFF30363D));
-    g.drawRoundedRectangle(dialogArea.toFloat(), 8.0f, 1.5f);
-
-    // Title Bar
-    auto titleArea = dialogArea.removeFromTop(44);
-    g.setColour(juce::Colour(0xFF0D1117));
-    g.fillRoundedRectangle(titleArea.toFloat(), 8.0f);
-    g.fillRect(titleArea.getX(), titleArea.getBottom() - 8, titleArea.getWidth(), 8);
-
-    g.setColour(juce::Colours::white);
-    g.setFont(juce::Font(juce::FontOptions(15.0f, juce::Font::bold)));
-    g.drawText("STAGE REMOTE & WI-FI HOTSPOT CONTROLLER", titleArea.reduced(16, 0), juce::Justification::centredLeft);
-
-    // Divider between left (Wi-Fi) and right (Web HUD) columns
     int midX = dialogArea.getX() + dialogArea.getWidth() / 2;
-    g.setColour(juce::Colour(0xFF21262D));
-    g.drawLine((float)midX, (float)dialogArea.getY() + 10, (float)midX, (float)dialogArea.getBottom() - 40, 1.0f);
+    g.setColour(t.hairlineStrong);
+    g.drawVerticalLine(midX, (float)dialogArea.getY() + 48.0f, (float)dialogArea.getBottom() - 42.0f);
+
+    g.setColour(t.hairline);
+    g.drawHorizontalLine(dialogArea.getBottom() - 40, (float)dialogArea.getX() + 12.0f, (float)dialogArea.getRight() - 12.0f);
 }
 
 void StageRemoteModalOverlay::resized() {
@@ -213,18 +213,19 @@ void StageRemoteModalOverlay::resized() {
     auto dialogArea = bounds.withSizeKeepingCentre(std::min(780, bounds.getWidth() - 30),
                                                    std::min(530, bounds.getHeight() - 30));
 
-    auto titleArea = dialogArea.removeFromTop(44);
-    closeBtn.setBounds(titleArea.removeFromRight(80).reduced(8, 8));
-    helpBtn.setBounds(titleArea.removeFromRight(86).reduced(4, 8));
+    auto titleArea = dialogArea.removeFromTop(40).reduced(10, 6);
+    closeBtn.setBounds(titleArea.removeFromRight(56));
+    titleArea.removeFromRight(4);
+    helpBtn.setBounds(titleArea.removeFromRight(68));
 
     auto bottomArea = dialogArea.removeFromBottom(40);
     usbInfoLabel.setBounds(bottomArea.reduced(16, 8));
 
     int colWidth = dialogArea.getWidth() / 2;
-    auto leftCol = dialogArea.removeFromLeft(colWidth).reduced(16, 12);
-    auto rightCol = dialogArea.reduced(16, 12);
+    auto leftCol = dialogArea.removeFromLeft(colWidth).reduced(18, 12);
+    auto rightCol = dialogArea.reduced(18, 12);
 
-    // --- Left Column (Wi-Fi SoftAP) ---
+    // Left Column (Wi-Fi SoftAP)
     wifiTitleLabel.setBounds(leftCol.removeFromTop(24));
     leftCol.removeFromTop(6);
 
@@ -246,7 +247,7 @@ void StageRemoteModalOverlay::resized() {
     wifiQrComponent.setBounds(wifiQrArea);
     wifiQrCaption.setBounds(leftCol.removeFromTop(20));
 
-    // --- Right Column (Web Companion HUD) ---
+    // Right Column (Web Companion HUD)
     webTitleLabel.setBounds(rightCol.removeFromTop(24));
     rightCol.removeFromTop(6);
 

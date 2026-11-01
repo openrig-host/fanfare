@@ -365,6 +365,181 @@ private:
 };
 
 // ==============================================================================
+// STEREO / PING-PONG / MONO / TAPE DELAY
+// Zero-allocation real-time delay line (pre-allocated up to 2.5s in prepare()).
+// ==============================================================================
+class StereoDelay {
+public:
+  StereoDelay() { prepare(48000.0); }
+
+  void prepare(double sampleRate) {
+    sr = sampleRate > 1000.0 ? sampleRate : 48000.0;
+    const int needed = juce::jmax(16384, (int)std::ceil(sr * 2.5) + 16);
+    if ((int)bufL.size() != needed) {
+      bufL.assign((size_t)needed, 0.0f);
+      bufR.assign((size_t)needed, 0.0f);
+    } else {
+      reset();
+    }
+    bufSize = needed;
+    writeIdx = 0;
+    timeSmoothCoeff = 1.0f - std::exp(-1.0f / (0.035f * (float)sr));
+    hpCoeff = 1.0f - std::exp(-2.0f * PI * 65.0f / (float)sr);
+    currentDelaySamples = juce::jlimit(
+        1.0f, (float)(bufSize - 4), targetTimeMs * 0.001f * (float)sr);
+    updateToneFilter(toneHz);
+  }
+
+  void reset() {
+    std::fill(bufL.begin(), bufL.end(), 0.0f);
+    std::fill(bufR.begin(), bufR.end(), 0.0f);
+    lpStateL = lpStateR = 0.0f;
+    hpStateL = hpStateR = 0.0f;
+    tapePhase = 0.0f;
+  }
+
+  void setParameters(bool enabled, int modeIdx, float timeMs, float fb,
+                     float cutoffHz, float wetMix) {
+    if (enabled && !wasEnabled) {
+      reset();
+      currentDelaySamples = juce::jlimit(
+          4.0f, (float)(bufSize - 8), timeMs * 0.001f * (float)sr);
+    }
+    wasEnabled = enabled;
+    isActive = enabled;
+    mode = juce::jlimit(0, 3, modeIdx);
+    targetTimeMs = juce::jlimit(10.0f, 2000.0f, timeMs);
+    feedback = juce::jlimit(0.0f, 0.92f, fb);
+    mix = juce::jlimit(0.0f, 1.0f, wetMix);
+    if (std::abs(cutoffHz - toneHz) > 1.0f) {
+      toneHz = juce::jlimit(600.0f, 16000.0f, cutoffHz);
+      updateToneFilter(toneHz);
+    }
+  }
+
+  void processStereo(float &L, float &R) {
+    if (!isActive || mix <= 0.001f || bufSize < 32)
+      return;
+
+    const float targetSamples = juce::jlimit(
+        4.0f, (float)(bufSize - 8), targetTimeMs * 0.001f * (float)sr);
+    currentDelaySamples +=
+        (targetSamples - currentDelaySamples) * timeSmoothCoeff;
+
+    float modSamplesL = 0.0f;
+    float modSamplesR = 0.0f;
+    if (mode == 3) { // Tape Warm subtle wow/flutter
+      modSamplesL = std::sin(tapePhase) * (0.00055f * (float)sr);
+      modSamplesR = std::cos(tapePhase) * (0.00055f * (float)sr);
+      tapePhase += 2.0f * PI * 0.55f / (float)sr;
+      if (tapePhase >= 2.0f * PI)
+        tapePhase -= 2.0f * PI;
+    }
+
+    const float delL = readInterp(bufL, currentDelaySamples + modSamplesL);
+    const float delR = readInterp(bufR, currentDelaySamples + modSamplesR);
+
+    // Damping LPF + gentle 65 Hz HPF in feedback path so repeats stay musical
+    lpStateL += (delL - lpStateL) * lpCoeff;
+    lpStateR += (delR - lpStateR) * lpCoeff;
+    hpStateL += (lpStateL - hpStateL) * hpCoeff;
+    hpStateR += (lpStateR - hpStateR) * hpCoeff;
+    float filtL = lpStateL - hpStateL;
+    float filtR = lpStateR - hpStateR;
+
+    if (mode == 3) {
+      filtL = std::tanh(filtL * 1.35f) * 0.82f;
+      filtR = std::tanh(filtR * 1.35f) * 0.82f;
+    } else {
+      filtL = std::tanh(filtL);
+      filtR = std::tanh(filtR);
+    }
+    if (std::abs(filtL) < 1.0e-15f)
+      filtL = 0.0f;
+    if (std::abs(filtR) < 1.0e-15f)
+      filtR = 0.0f;
+
+    const float monoIn = 0.5f * (L + R);
+    float writeL = 0.0f;
+    float writeR = 0.0f;
+    float wetOutL = delL;
+    float wetOutR = delR;
+
+    switch (mode) {
+    case 1: // Ping-Pong (bounces L -> R -> L -> R)
+      writeL = monoIn + filtR * feedback;
+      writeR = filtL * feedback;
+      break;
+    case 2: // Mono
+      writeL = monoIn + filtL * feedback;
+      writeR = writeL;
+      wetOutR = wetOutL;
+      break;
+    case 0: // Stereo
+    case 3: // Tape Warm
+    default:
+      writeL = L + filtL * feedback;
+      writeR = R + filtR * feedback;
+      break;
+    }
+
+    bufL[(size_t)writeIdx] = writeL;
+    bufR[(size_t)writeIdx] = writeR;
+    writeIdx = (writeIdx + 1) % bufSize;
+
+    // Unity dry up to 50% mix so adding stage delay never drops dry level
+    const float dryGain = (mix <= 0.5f) ? 1.0f : (2.0f * (1.0f - mix));
+    const float wetGain = juce::jmin(1.0f, mix * 1.6f);
+    L = L * dryGain + wetOutL * wetGain;
+    R = R * dryGain + wetOutR * wetGain;
+  }
+
+  void processMono(float &M) {
+    float dummyR = M;
+    processStereo(M, dummyR);
+    M = 0.5f * (M + dummyR);
+  }
+
+private:
+  void updateToneFilter(float hz) {
+    const float clamped =
+        juce::jlimit(400.0f, (float)(sr * 0.45), hz);
+    lpCoeff = 1.0f - std::exp(-2.0f * PI * clamped / (float)sr);
+  }
+
+  float readInterp(const std::vector<float> &buf, float delaySamps) const {
+    const float d = juce::jlimit(2.0f, (float)(bufSize - 4), delaySamps);
+    float readPos = (float)writeIdx - d;
+    if (readPos < 0.0f)
+      readPos += (float)bufSize;
+    const int i0 = (int)readPos;
+    const int i1 = (i0 + 1) % bufSize;
+    const float frac = readPos - (float)i0;
+    return buf[(size_t)(i0 % bufSize)] * (1.0f - frac) +
+           buf[(size_t)i1] * frac;
+  }
+
+  std::vector<float> bufL, bufR;
+  int bufSize = 0;
+  int writeIdx = 0;
+  double sr = 48000.0;
+  bool isActive = false;
+  bool wasEnabled = false;
+  int mode = 0; // 0 = Stereo, 1 = Ping-Pong, 2 = Mono, 3 = Tape Warm
+  float targetTimeMs = 375.0f;
+  float currentDelaySamples = 18000.0f;
+  float feedback = 0.35f;
+  float toneHz = 6500.0f;
+  float mix = 0.25f;
+  float timeSmoothCoeff = 0.001f;
+  float lpCoeff = 0.5f;
+  float hpCoeff = 0.01f;
+  float lpStateL = 0.0f, lpStateR = 0.0f;
+  float hpStateL = 0.0f, hpStateR = 0.0f;
+  float tapePhase = 0.0f;
+};
+
+// ==============================================================================
 // CONVOLUTION REVERB (IR loader)
 // Impulse-response reverb / cab sim via juce::dsp::Convolution. loadIR() is
 // wait-free-safe from the message thread while processBlock() runs on the
@@ -445,6 +620,7 @@ public:
   SimpleEQ eqL, eqR;
   SimpleComp compL, compR;
   SimpleChorus chorusL, chorusR;
+  StereoDelay delay;
   juce::Reverb reverb;
   ConvolutionReverb irReverb;
 
@@ -468,6 +644,14 @@ public:
   std::atomic<bool> chorusEnabled{false};
   std::atomic<float> chorusRate{1.0f};
   std::atomic<float> chorusMix{0.0f};
+
+  // Stereo / Ping-Pong / Mono / Tape Delay
+  std::atomic<bool> delayEnabled{false};
+  std::atomic<int> delayMode{0}; // 0 = Stereo, 1 = Ping-Pong, 2 = Mono, 3 = Tape Warm
+  std::atomic<float> delayTimeMs{375.0f};
+  std::atomic<float> delayFeedback{0.35f};
+  std::atomic<float> delayTone{6500.0f};
+  std::atomic<float> delayMix{0.25f};
 
   std::atomic<bool> reverbEnabled{false};
   std::atomic<float> reverbSize{0.5f};
@@ -515,6 +699,7 @@ public:
     compR.prepare(sampleRate);
     chorusL.prepare(sampleRate);
     chorusR.prepare(sampleRate);
+    delay.prepare(sampleRate);
     reverb.setSampleRate(sampleRate);
     irReverb.prepare(sampleRate, 4096);
     musette.prepare(sampleRate);
@@ -534,6 +719,14 @@ public:
     bool choEnabled = chorusEnabled.load();
     float choRate = chorusRate.load();
     float choMix = chorusMix.load();
+
+    bool delEnabled = delayEnabled.load(std::memory_order_relaxed);
+    int delMode = delayMode.load(std::memory_order_relaxed);
+    float delTime = delayTimeMs.load(std::memory_order_relaxed);
+    float delFb = delayFeedback.load(std::memory_order_relaxed);
+    float delTone = delayTone.load(std::memory_order_relaxed);
+    float delMix = delayMix.load(std::memory_order_relaxed);
+    delay.setParameters(delEnabled, delMode, delTime, delFb, delTone, delMix);
 
     bool musEnabled = musetteEnabled.load();
     float musCents = musetteCents.load();
@@ -641,6 +834,13 @@ public:
       L[i] = chorusL.process(L[i], 0.0f);
       if (R)
         R[i] = chorusR.process(R[i], PI * 0.5f);
+
+      if (delEnabled && delMix > 0.001f) {
+        if (R)
+          delay.processStereo(L[i], R[i]);
+        else
+          delay.processMono(L[i]);
+      }
     }
 
     if (reverbEnabled.load() && reverbMix.load() > 0.001f) {

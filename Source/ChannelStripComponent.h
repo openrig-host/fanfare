@@ -4,7 +4,7 @@
 #include "RackSlot.h"
 #include <JuceHeader.h>
 #include "BoutiqueLookAndFeel.h"
-#include "BoutiqueLookAndFeel.h"
+#include "ButtonRoles.h"
 #include "HelpLauncher.h"
 #include "ThemeManager.h"
 
@@ -39,12 +39,9 @@ public:
 
   void paint(juce::Graphics &g) override {
     auto bounds = getLocalBounds().toFloat();
-    
-    // Background meter well
-    g.setColour(juce::Colour(0xff121820));
-    g.fillRoundedRectangle(bounds, 4.0f);
-    g.setColour(juce::Colour(0xff2a3440));
-    g.drawRoundedRectangle(bounds, 4.0f, 1.0f);
+
+    // Recessed hardware meter well
+    Fanfare::ModalFrame::paintRecessedWell(g, bounds, 3.0f);
 
     float height = bounds.getHeight();
     // Scale up to 24 dB of gain reduction
@@ -56,14 +53,14 @@ public:
       auto grRect = barBounds.removeFromTop(barHeight);
 
       juce::ColourGradient grad(
-          ThemeManager::get(Theme::Role::ok), grRect.getX(), grRect.getY(),
-          ThemeManager::get(Theme::Role::accent), grRect.getX(), grRect.getBottom(), false);
+          ThemeManager::get(Theme::Role::warn), grRect.getX(), grRect.getY(),
+          ThemeManager::get(Theme::Role::meterPeak), grRect.getX(), grRect.getBottom(), false);
       g.setGradientFill(grad);
-      g.fillRoundedRectangle(grRect, 2.0f);
+      g.fillRoundedRectangle(grRect, 1.5f);
     }
 
     // Scale tick marks (-6dB, -12dB, -18dB)
-    g.setColour(juce::Colours::white.withAlpha(0.35f));
+    g.setColour(ThemeManager::get(Theme::Role::engrave).withAlpha(0.65f));
     float y6 = bounds.getY() + (6.0f / 24.0f) * height;
     float y12 = bounds.getY() + (12.0f / 24.0f) * height;
     float y18 = bounds.getY() + (18.0f / 24.0f) * height;
@@ -84,12 +81,18 @@ public:
       : slot(s), onCloseRequest(onClose),
         grMeter(slot.getStrip().getCompReference()) {
 
-    // Close Button
+    auto styleGroup = [](juce::GroupComponent &grp, const juce::String &title) {
+      grp.setText(title);
+      grp.setColour(juce::GroupComponent::outlineColourId, ThemeManager::get(Theme::Role::hairlineStrong));
+      grp.setColour(juce::GroupComponent::textColourId, ThemeManager::get(Theme::Role::engrave));
+    };
+
+    // Close & Help Buttons
     addAndMakeVisible(closeBtn);
     Fanfare::styleHelpButton(helpBtn, "#channel-strip-dsp", "HAAALP! Open the Strip DSP section of the User's Manual");
     addAndMakeVisible(helpBtn);
-    closeBtn.setButtonText("X");
-    closeBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::red);
+    closeBtn.setButtonText("CLOSE");
+    Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Danger);
     closeBtn.onClick = [this] {
       if (onCloseRequest)
         onCloseRequest();
@@ -107,13 +110,11 @@ public:
 
     // --- GATE ---
     addAndMakeVisible(gateGroup);
-    gateGroup.setText("NOISE GATE");
-    gateGroup.setColour(juce::GroupComponent::outlineColourId, juce::Colours::grey);
+    styleGroup(gateGroup, "NOISE GATE");
 
     addAndMakeVisible(gateToggle);
     gateToggle.setButtonText("ENABLE");
     gateToggle.setClickingTogglesState(true);
-    gateToggle.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::ok));
     gateToggle.getProperties().set("useToggleSwitch", true);
     gateToggle.getProperties().set("isOrangeToggle", false);
     gateToggle.setToggleState(slot.getStrip().gateEnabled, juce::dontSendNotification);
@@ -130,13 +131,11 @@ public:
 
     // --- 10-BAND GRAPHIC EQ ---
     addAndMakeVisible(eqGroup);
-    eqGroup.setText("10-BAND GRAPHIC EQ");
-    eqGroup.setColour(juce::GroupComponent::outlineColourId, juce::Colours::cyan);
+    styleGroup(eqGroup, "10-BAND GRAPHIC EQ");
 
     addAndMakeVisible(eqToggle);
     eqToggle.setButtonText("ENABLE");
     eqToggle.setClickingTogglesState(true);
-    eqToggle.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::ok));
     eqToggle.getProperties().set("useToggleSwitch", true);
     eqToggle.getProperties().set("isOrangeToggle", false);
     eqToggle.setToggleState(slot.getStrip().eqEnabled, juce::dontSendNotification);
@@ -147,7 +146,7 @@ public:
     addAndMakeVisible(flatBtn);
     flatBtn.setButtonText("FLAT");
     flatBtn.setTooltip("Reset all 10 EQ bands to 0 dB");
-    flatBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
+    Fanfare::setButtonRole(flatBtn, Fanfare::ButtonRole::Standard);
     flatBtn.onClick = [this] {
       for (int i = 0; i < 10; ++i) {
         slot.getStrip().eqBands[i].store(0.0f);
@@ -169,8 +168,9 @@ public:
 
     addAndMakeVisible(eqVolLabel);
     eqVolLabel.setText("VOL", juce::dontSendNotification);
-    eqVolLabel.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    eqVolLabel.setFont(juce::FontOptions("Barlow Condensed", 11.5f, juce::Font::bold));
     eqVolLabel.setJustificationType(juce::Justification::centred);
+    eqVolLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
 
     // 10 Frequency Band Sliders
     const char* bandNames[10] = { "31.25", "62.5", "125", "250", "500", "1K", "2K", "4K", "8K", "16K" };
@@ -191,9 +191,9 @@ public:
       eqLabels[i] = std::make_unique<juce::Label>();
       addAndMakeVisible(*eqLabels[i]);
       eqLabels[i]->setText(bandNames[i], juce::dontSendNotification);
-      eqLabels[i]->setFont(juce::FontOptions(10.0f, juce::Font::bold));
+      eqLabels[i]->setFont(juce::FontOptions("Barlow Condensed", 11.0f, juce::Font::bold));
       eqLabels[i]->setJustificationType(juce::Justification::centred);
-      eqLabels[i]->setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
+      eqLabels[i]->setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
     }
 
     // Gain Slider (Master Trim)
@@ -210,18 +210,17 @@ public:
 
     addAndMakeVisible(eqGainLabel);
     eqGainLabel.setText("GAIN", juce::dontSendNotification);
-    eqGainLabel.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    eqGainLabel.setFont(juce::FontOptions("Barlow Condensed", 11.5f, juce::Font::bold));
     eqGainLabel.setJustificationType(juce::Justification::centred);
+    eqGainLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
 
     // --- COMP ---
     addAndMakeVisible(compGroup);
-    compGroup.setText("COMPRESSOR");
-    compGroup.setColour(juce::GroupComponent::outlineColourId, juce::Colours::orange);
+    styleGroup(compGroup, "COMPRESSOR");
 
     addAndMakeVisible(compToggle);
     compToggle.setButtonText("ENABLE");
     compToggle.setClickingTogglesState(true);
-    compToggle.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::ok));
     compToggle.getProperties().set("useToggleSwitch", true);
     compToggle.getProperties().set("isOrangeToggle", false);
     compToggle.setToggleState(slot.getStrip().compEnabled, juce::dontSendNotification);
@@ -261,14 +260,12 @@ public:
 
     // --- REVERB & CHORUS ---
     addAndMakeVisible(revChoGroup);
-    revChoGroup.setText("SPACE / MOD");
-    revChoGroup.setColour(juce::GroupComponent::outlineColourId, juce::Colours::magenta.darker(0.3f));
+    styleGroup(revChoGroup, "SPACE / MOD");
 
     // Reverb
     addAndMakeVisible(reverbToggle);
     reverbToggle.setButtonText("REVERB");
     reverbToggle.setClickingTogglesState(true);
-    reverbToggle.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::ok));
     reverbToggle.getProperties().set("useToggleSwitch", true);
     reverbToggle.setToggleState(slot.getStrip().reverbEnabled, juce::dontSendNotification);
     reverbToggle.onClick = [this] {
@@ -292,11 +289,14 @@ public:
     };
 
     // IR / convolution reverb
+    addAndMakeVisible(irGroup);
+    styleGroup(irGroup, "IMPULSE RESPONSE (CAB / ROOM)");
+
     addAndMakeVisible(irToggle);
-    irToggle.setButtonText("IR");
+    irToggle.setButtonText("ENABLE");
     irToggle.setClickingTogglesState(true);
-    irToggle.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::iem));
     irToggle.getProperties().set("useToggleSwitch", true);
+    irToggle.getProperties().set("isOrangeToggle", false);
     irToggle.setToggleState(slot.getStrip().irEnabled.load(), juce::dontSendNotification);
     irToggle.onClick = [this] {
       slot.getStrip().irEnabled.store(irToggle.getToggleState());
@@ -304,7 +304,7 @@ public:
 
     addAndMakeVisible(irLoadBtn);
     irLoadBtn.setButtonText("LOAD IR");
-    irLoadBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::iem));
+    Fanfare::setButtonRole(irLoadBtn, Fanfare::ButtonRole::Standard);
     irLoadBtn.setTooltip("Load an impulse response (.wav) for convolution reverb / cab sim");
     irLoadBtn.onClick = [this] {
       irChooser = std::make_unique<juce::FileChooser>(
@@ -323,8 +323,22 @@ public:
       });
     };
 
+    addAndMakeVisible(irMixLabel);
+    irMixLabel.setText("MIX", juce::dontSendNotification);
+    irMixLabel.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.05f));
+    irMixLabel.setJustificationType(juce::Justification::centred);
+    irMixLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
+
     addAndMakeVisible(irMixKnob);
     irMixKnob.setRange(0.0, 1.0, 0.01);
+    irMixKnob.setDoubleClickReturnValue(true, 0.30);
+    irMixKnob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 18);
+    irMixKnob.textFromValueFunction = [](double val) {
+      return juce::String(juce::roundToInt(val * 100.0)) + "%";
+    };
+    irMixKnob.valueFromTextFunction = [](const juce::String &txt) {
+      return juce::jlimit(0.0, 1.0, txt.retainCharacters("0123456789.").getDoubleValue() * 0.01);
+    };
     irMixKnob.setValue(slot.getStrip().irMix.load(), juce::dontSendNotification);
     irMixKnob.setTooltip("IR Wet Mix");
     irMixKnob.onValueChange = [this] {
@@ -333,7 +347,8 @@ public:
 
     addAndMakeVisible(irNameLabel);
     irNameLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
-    irNameLabel.setFont(juce::FontOptions(12.0f));
+    irNameLabel.setJustificationType(juce::Justification::centredLeft);
+    irNameLabel.setFont(juce::FontOptions(11.5f));
     {
       auto p = slot.getStrip().getIRReverb().getLoadedPath();
       irNameLabel.setText(p.isEmpty() ? "(no IR loaded)" : juce::File(p).getFileName(),
@@ -344,7 +359,6 @@ public:
     addAndMakeVisible(chorusToggle);
     chorusToggle.setButtonText("CHORUS");
     chorusToggle.setClickingTogglesState(true);
-    chorusToggle.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::ok));
     chorusToggle.getProperties().set("useToggleSwitch", true);
     chorusToggle.setToggleState(slot.getStrip().chorusEnabled, juce::dontSendNotification);
     chorusToggle.onClick = [this] {
@@ -369,7 +383,9 @@ public:
 
     // --- CUSTOMIZE ---
     addAndMakeVisible(nameLabel);
-    nameLabel.setText("Strip Name:", juce::dontSendNotification);
+    nameLabel.setText("STRIP NAME", juce::dontSendNotification);
+    nameLabel.setFont(juce::FontOptions("Barlow Condensed", 12.0f, juce::Font::bold));
+    nameLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
     addAndMakeVisible(nameEditor);
     nameEditor.setText(slot.getName());
     nameEditor.onTextChange = [this] {
@@ -379,42 +395,105 @@ public:
 
     // Color picker
     addAndMakeVisible(colorLabel);
-    colorLabel.setText("Strip Color:", juce::dontSendNotification);
+    colorLabel.setText("STRIP COLOR", juce::dontSendNotification);
+    colorLabel.setFont(juce::FontOptions("Barlow Condensed", 12.0f, juce::Font::bold));
+    colorLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
     addAndMakeVisible(colorPreview);
     colorPreview.setColour(juce::Label::backgroundColourId, slot.getChannelColor());
+    colorPreview.setColour(juce::Label::outlineColourId, ThemeManager::get(Theme::Role::borderStrong));
     addAndMakeVisible(colorButton);
-    colorButton.setButtonText("Change Color");
-    colorButton.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
+    colorButton.setButtonText("CHANGE COLOR");
+    Fanfare::setButtonRole(colorButton, Fanfare::ButtonRole::Standard);
     colorButton.onClick = [this] { showColorPicker(); };
 
-    // --- AUX SENDS ---
+    // --- IEM MONITOR TRIM & AUX SENDS ---
     addAndMakeVisible(auxGroup);
-    auxGroup.setText("AUX SENDS");
-    auxGroup.setColour(juce::GroupComponent::outlineColourId, juce::Colours::orange);
+    styleGroup(auxGroup, "IEM & AUX SENDS");
+
+    auto styleMiniHeader = [](juce::Label &lbl, const juce::String &txt, juce::Colour col) {
+      lbl.setText(txt, juce::dontSendNotification);
+      lbl.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.05f));
+      lbl.setJustificationType(juce::Justification::centred);
+      lbl.setColour(juce::Label::textColourId, col);
+    };
+
+    addAndMakeVisible(iemLevelLabel);
+    styleMiniHeader(iemLevelLabel, "IEM TRIM", ThemeManager::get(Theme::Role::iem));
+
+    addAndMakeVisible(iemLevelKnob);
+    iemLevelKnob.setComponentID("iem");
+    iemLevelKnob.setRange(0.0, 2.0, 0.01);
+    iemLevelKnob.setDoubleClickReturnValue(true, 1.0);
+    iemLevelKnob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 78, 18);
+    iemLevelKnob.textFromValueFunction = [](double val) {
+      if (val <= 0.005)
+        return juce::String("OFF");
+      if (std::abs(val - 1.0) <= 0.008)
+        return juce::String("0.0 dB");
+      const double db = juce::Decibels::gainToDecibels(val, -60.0);
+      return (db > 0.0 ? "+" : "") + juce::String(db, 1) + " dB";
+    };
+    iemLevelKnob.valueFromTextFunction = [](const juce::String &txt) {
+      auto t = txt.trim();
+      if (t.equalsIgnoreCase("off") || t == "-inf")
+        return 0.0;
+      if (t.endsWithIgnoreCase("%"))
+        return juce::jlimit(0.0, 2.0, t.dropLastCharacters(1).getDoubleValue() * 0.01);
+      const double db = t.retainCharacters("-+0123456789.").getDoubleValue();
+      return juce::jlimit(0.0, 2.0, (double)juce::Decibels::decibelsToGain((float)db, -60.0f));
+    };
+    iemLevelKnob.setValue(slot.getIemOffset(), juce::dontSendNotification);
+    iemLevelKnob.setTooltip(
+        "Per-Strip IEM Trim relative to FOH fader (-inf to +6.0 dB; double-click for 0.0 dB unity)");
+    iemLevelKnob.onValueChange = [this] {
+      slot.setIemOffset((float)iemLevelKnob.getValue());
+    };
+
+    addAndMakeVisible(aux1Label);
+    styleMiniHeader(aux1Label, "AUX 1", ThemeManager::get(Theme::Role::engrave));
 
     addAndMakeVisible(aux1Knob);
     aux1Knob.setRange(0.0, 1.0, 0.01);
+    aux1Knob.setDoubleClickReturnValue(true, 0.0);
+    aux1Knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 72, 18);
+    aux1Knob.textFromValueFunction = [](double val) {
+      return juce::String(juce::roundToInt(val * 100.0)) + "%";
+    };
+    aux1Knob.valueFromTextFunction = [](const juce::String &txt) {
+      return juce::jlimit(0.0, 1.0, txt.retainCharacters("0123456789.").getDoubleValue() * 0.01);
+    };
     aux1Knob.setValue(slot.getAux1Send(), juce::dontSendNotification);
+    aux1Knob.setTooltip("Post-fader send level to Aux 1 return");
     aux1Knob.onValueChange = [this] {
       slot.setAux1Send((float)aux1Knob.getValue());
     };
 
+    addAndMakeVisible(aux2Label);
+    styleMiniHeader(aux2Label, "AUX 2", ThemeManager::get(Theme::Role::engrave));
+
     addAndMakeVisible(aux2Knob);
     aux2Knob.setRange(0.0, 1.0, 0.01);
+    aux2Knob.setDoubleClickReturnValue(true, 0.0);
+    aux2Knob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 72, 18);
+    aux2Knob.textFromValueFunction = [](double val) {
+      return juce::String(juce::roundToInt(val * 100.0)) + "%";
+    };
+    aux2Knob.valueFromTextFunction = [](const juce::String &txt) {
+      return juce::jlimit(0.0, 1.0, txt.retainCharacters("0123456789.").getDoubleValue() * 0.01);
+    };
     aux2Knob.setValue(slot.getAux2Send(), juce::dontSendNotification);
+    aux2Knob.setTooltip("Post-fader send level to Aux 2 return");
     aux2Knob.onValueChange = [this] {
       slot.setAux2Send((float)aux2Knob.getValue());
     };
 
     // --- MUSETTE DETUNER ---
     addAndMakeVisible(musetteGroup);
-    musetteGroup.setText("MUSETTE DETUNER");
-    musetteGroup.setColour(juce::GroupComponent::outlineColourId, ThemeManager::get(Theme::Role::catAccordion));
+    styleGroup(musetteGroup, "MUSETTE DETUNER");
 
     addAndMakeVisible(musetteToggle);
     musetteToggle.setButtonText("ENABLE");
     musetteToggle.setClickingTogglesState(true);
-    musetteToggle.setColour(juce::TextButton::buttonOnColourId, ThemeManager::get(Theme::Role::ok));
     musetteToggle.getProperties().set("useToggleSwitch", true);
     musetteToggle.getProperties().set("isOrangeToggle", false);
     musetteToggle.setToggleState(slot.getStrip().musetteEnabled.load(), juce::dontSendNotification);
@@ -450,7 +529,175 @@ public:
       slot.getStrip().musetteMix.store((float)musetteMixKnob.getValue());
     };
 
+    // --- DELAY / ECHO (STEREO, PING-PONG, MONO, TAPE WARM) ---
+    addAndMakeVisible(delayGroup);
+    styleGroup(delayGroup, "DELAY / ECHO");
+
+    addAndMakeVisible(delayToggle);
+    delayToggle.setButtonText("ENABLE");
+    delayToggle.setClickingTogglesState(true);
+    delayToggle.getProperties().set("useToggleSwitch", true);
+    delayToggle.getProperties().set("isOrangeToggle", false);
+    delayToggle.setToggleState(slot.getStrip().delayEnabled.load(), juce::dontSendNotification);
+    delayToggle.setTooltip("Enable per-strip Delay / Echo");
+    delayToggle.onClick = [this] {
+      slot.getStrip().delayEnabled.store(delayToggle.getToggleState());
+    };
+
+    addAndMakeVisible(delayModeBtn);
+    updateDelayModeButton();
+    delayModeBtn.onClick = [this] {
+      int next = (slot.getStrip().delayMode.load() + 1) % 4;
+      slot.getStrip().delayMode.store(next);
+      updateDelayModeButton();
+    };
+
+    addAndMakeVisible(delayTapBtn);
+    delayTapBtn.setButtonText("TAP TEMPO");
+    Fanfare::setButtonRole(delayTapBtn, Fanfare::ButtonRole::Standard);
+    delayTapBtn.setTooltip("Click rhythmically (2-4 taps) to set Delay Time to tempo");
+    delayTapBtn.onClick = [this] { handleDelayTapTempo(); };
+
+    addAndMakeVisible(delayTimeLabel);
+    styleMiniHeader(delayTimeLabel, "TIME", ThemeManager::get(Theme::Role::engrave));
+
+    addAndMakeVisible(delayTimeKnob);
+    delayTimeKnob.setRange(10.0, 2000.0, 1.0);
+    delayTimeKnob.setSkewFactorFromMidPoint(350.0);
+    delayTimeKnob.setDoubleClickReturnValue(true, 375.0);
+    delayTimeKnob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 84, 18);
+    delayTimeKnob.textFromValueFunction = [](double val) {
+      if (val >= 1000.0)
+        return juce::String(val * 0.001, 2) + " s";
+      return juce::String(juce::roundToInt(val)) + " ms";
+    };
+    delayTimeKnob.valueFromTextFunction = [](const juce::String &txt) {
+      auto t = txt.trim();
+      double v = t.retainCharacters("0123456789.").getDoubleValue();
+      if (t.endsWithIgnoreCase("s") && !t.endsWithIgnoreCase("ms"))
+        v *= 1000.0;
+      return juce::jlimit(10.0, 2000.0, v);
+    };
+    delayTimeKnob.setValue(slot.getStrip().delayTimeMs.load(), juce::dontSendNotification);
+    delayTimeKnob.setTooltip("Delay Time (10 ms to 2.00 s; double-click for 375 ms)");
+    delayTimeKnob.onValueChange = [this] {
+      slot.getStrip().delayTimeMs.store((float)delayTimeKnob.getValue());
+    };
+
+    addAndMakeVisible(delayFbLabel);
+    styleMiniHeader(delayFbLabel, "FEEDBACK", ThemeManager::get(Theme::Role::engrave));
+
+    addAndMakeVisible(delayFbKnob);
+    delayFbKnob.setRange(0.0, 0.92, 0.01);
+    delayFbKnob.setDoubleClickReturnValue(true, 0.35);
+    delayFbKnob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 76, 18);
+    delayFbKnob.textFromValueFunction = [](double val) {
+      return juce::String(juce::roundToInt(val * 100.0)) + "%";
+    };
+    delayFbKnob.valueFromTextFunction = [](const juce::String &txt) {
+      return juce::jlimit(0.0, 0.92, txt.retainCharacters("0123456789.").getDoubleValue() * 0.01);
+    };
+    delayFbKnob.setValue(slot.getStrip().delayFeedback.load(), juce::dontSendNotification);
+    delayFbKnob.setTooltip("Delay Feedback / Repeats (0% to 92%; soft-saturated so repeats stay controlled)");
+    delayFbKnob.onValueChange = [this] {
+      slot.getStrip().delayFeedback.store((float)delayFbKnob.getValue());
+    };
+
+    addAndMakeVisible(delayToneLabel);
+    styleMiniHeader(delayToneLabel, "TONE (LPF)", ThemeManager::get(Theme::Role::engrave));
+
+    addAndMakeVisible(delayToneKnob);
+    delayToneKnob.setRange(600.0, 16000.0, 10.0);
+    delayToneKnob.setSkewFactorFromMidPoint(4000.0);
+    delayToneKnob.setDoubleClickReturnValue(true, 6500.0);
+    delayToneKnob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 84, 18);
+    delayToneKnob.textFromValueFunction = [](double val) {
+      if (val >= 1000.0)
+        return juce::String(val * 0.001, 1) + " kHz";
+      return juce::String(juce::roundToInt(val)) + " Hz";
+    };
+    delayToneKnob.valueFromTextFunction = [](const juce::String &txt) {
+      auto t = txt.trim();
+      double v = t.retainCharacters("0123456789.").getDoubleValue();
+      if (t.containsIgnoreCase("k"))
+        v *= 1000.0;
+      return juce::jlimit(600.0, 16000.0, v);
+    };
+    delayToneKnob.setValue(slot.getStrip().delayTone.load(), juce::dontSendNotification);
+    delayToneKnob.setTooltip("Repeat High-Cut Damping Filter (lower = darker warm echoes, higher = crisp repeats)");
+    delayToneKnob.onValueChange = [this] {
+      slot.getStrip().delayTone.store((float)delayToneKnob.getValue());
+    };
+
+    addAndMakeVisible(delayMixLabel);
+    styleMiniHeader(delayMixLabel, "MIX", ThemeManager::get(Theme::Role::engrave));
+
+    addAndMakeVisible(delayMixKnob);
+    delayMixKnob.setRange(0.0, 1.0, 0.01);
+    delayMixKnob.setDoubleClickReturnValue(true, 0.25);
+    delayMixKnob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 76, 18);
+    delayMixKnob.textFromValueFunction = [](double val) {
+      return juce::String(juce::roundToInt(val * 100.0)) + "%";
+    };
+    delayMixKnob.valueFromTextFunction = [](const juce::String &txt) {
+      return juce::jlimit(0.0, 1.0, txt.retainCharacters("0123456789.").getDoubleValue() * 0.01);
+    };
+    delayMixKnob.setValue(slot.getStrip().delayMix.load(), juce::dontSendNotification);
+    delayMixKnob.setTooltip("Delay Wet Mix (maintains full dry level up to 50%)");
+    delayMixKnob.onValueChange = [this] {
+      slot.getStrip().delayMix.store((float)delayMixKnob.getValue());
+    };
+
     setSize(980, 520);
+  }
+
+  void updateDelayModeButton() {
+    int mode = slot.getStrip().delayMode.load();
+    switch (mode) {
+      case 1:
+        delayModeBtn.setButtonText("PING-PONG");
+        Fanfare::setButtonRole(delayModeBtn, Fanfare::ButtonRole::Primary);
+        delayModeBtn.setTooltip("Delay Mode: Stereo Ping-Pong (bounces Left -> Right -> Left -> Right)");
+        break;
+      case 2:
+        delayModeBtn.setButtonText("MONO");
+        Fanfare::setButtonRole(delayModeBtn, Fanfare::ButtonRole::Standard);
+        delayModeBtn.setTooltip("Delay Mode: Centered Mono Delay");
+        break;
+      case 3:
+        delayModeBtn.setButtonText("TAPE WARM");
+        Fanfare::setButtonRole(delayModeBtn, Fanfare::ButtonRole::Foh);
+        delayModeBtn.setTooltip("Delay Mode: Modulated Warm Tape Echo with gentle wow/flutter & soft saturation");
+        break;
+      default:
+        delayModeBtn.setButtonText("STEREO");
+        Fanfare::setButtonRole(delayModeBtn, Fanfare::ButtonRole::Primary);
+        delayModeBtn.setTooltip("Delay Mode: True Stereo Delay (click to cycle Stereo -> Ping-Pong -> Mono -> Tape Warm)");
+        break;
+    }
+    delayModeBtn.repaint();
+  }
+
+  void handleDelayTapTempo() {
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+    if (lastDelayTapMs > 0.0) {
+      const double dt = nowMs - lastDelayTapMs;
+      if (dt >= 80.0 && dt <= 2000.0) {
+        tapIntervals[tapIntervalWriteIdx % 4] = dt;
+        ++tapIntervalWriteIdx;
+        if (tapIntervalCount < 4)
+          ++tapIntervalCount;
+        double sum = 0.0;
+        for (int i = 0; i < tapIntervalCount; ++i)
+          sum += tapIntervals[i];
+        const double avgMs = juce::jlimit(10.0, 2000.0, sum / (double)tapIntervalCount);
+        delayTimeKnob.setValue(avgMs, juce::sendNotificationSync);
+      } else if (dt > 2000.0) {
+        tapIntervalCount = 0;
+        tapIntervalWriteIdx = 0;
+      }
+    }
+    lastDelayTapMs = nowMs;
   }
 
   void updateMusetteModeButton() {
@@ -458,23 +705,21 @@ public:
     switch (mode) {
       case 1:
         musetteModeToggle.setButtonText("3-REED MMM");
-        musetteModeToggle.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
-        musetteModeToggle.setColour(juce::TextButton::textColourOffId, ThemeManager::get(Theme::Role::text));
+        Fanfare::setButtonRole(musetteModeToggle, Fanfare::ButtonRole::Primary);
         musetteModeToggle.setTooltip("Musette Mode: 3-Reed MMM (+cents sharp & -4ct flat terzetti)");
         break;
       case 2:
         musetteModeToggle.setButtonText("TEMU MUSETTE");
-        musetteModeToggle.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFFFF5722)); // Temu orange
-        musetteModeToggle.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
+        Fanfare::setButtonRole(musetteModeToggle, Fanfare::ButtonRole::Help);
         musetteModeToggle.setTooltip("Musette Mode: TEMU Musette (wild bargain-bin extreme detuning for comedic wobble)");
         break;
       default:
         musetteModeToggle.setButtonText("2-REED MM");
-        musetteModeToggle.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
-        musetteModeToggle.setColour(juce::TextButton::textColourOffId, ThemeManager::get(Theme::Role::text));
+        Fanfare::setButtonRole(musetteModeToggle, Fanfare::ButtonRole::Standard);
         musetteModeToggle.setTooltip("Musette Mode: 2-Reed MM (+cents sharp only)");
         break;
     }
+    musetteModeToggle.repaint();
   }
 
   void updateStereoMonoButton() {
@@ -482,21 +727,22 @@ public:
     switch (mode) {
       case 1:
         stereoMonoBtn.setButtonText("MONO (L+R)");
-        stereoMonoBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
+        Fanfare::setButtonRole(stereoMonoBtn, Fanfare::ButtonRole::Primary);
         break;
       case 2:
         stereoMonoBtn.setButtonText("MONO (LEFT)");
-        stereoMonoBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
+        Fanfare::setButtonRole(stereoMonoBtn, Fanfare::ButtonRole::Primary);
         break;
       case 3:
         stereoMonoBtn.setButtonText("MONO (RIGHT)");
-        stereoMonoBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
+        Fanfare::setButtonRole(stereoMonoBtn, Fanfare::ButtonRole::Primary);
         break;
       default:
         stereoMonoBtn.setButtonText("STEREO");
-        stereoMonoBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
+        Fanfare::setButtonRole(stereoMonoBtn, Fanfare::ButtonRole::Standard);
         break;
     }
+    stereoMonoBtn.repaint();
   }
 
   void showColorPicker() {
@@ -528,26 +774,15 @@ public:
   }
 
   void paint(juce::Graphics &g) override {
-    auto* laf = dynamic_cast<BoutiqueLookAndFeel*>(&getLookAndFeel());
-    bool useModern = (laf != nullptr && laf->useModernStyle);
-
-    if (useModern) {
-      g.fillAll(ThemeManager::get(Theme::Role::panel));
-      g.setColour(ThemeManager::get(Theme::Role::border));
-      g.drawRect(getLocalBounds(), 1);
-    } else {
-      g.fillAll(ThemeManager::get(Theme::Role::background).withAlpha(0.9f));
-    }
-    g.setColour(juce::Colours::white);
-    g.setFont(24.0f);
-    g.drawText("STRIP DSP: " + slot.getName(), 20, 20, 400, 30, juce::Justification::left);
+    Fanfare::ModalFrame::paintOverlayScrimAndPanel(
+        g, getLocalBounds(), getLocalBounds(),
+        "STRIP DSP // " + slot.getName().toUpperCase(), 48);
   }
 
   void resized() override {
-    closeBtn.setBounds(getWidth() - 40, 10, 30, 30);
-    closeBtn.setBounds(getWidth() - 40, 10, 30, 30);
-    helpBtn.setBounds(getWidth() - 122, 12, 74, 26);
-    stereoMonoBtn.setBounds(getWidth() - 270, 12, 140, 26);
+    closeBtn.setBounds(getWidth() - 68, 11, 56, 26);
+    helpBtn.setBounds(getWidth() - 150, 11, 74, 26);
+    stereoMonoBtn.setBounds(getWidth() - 298, 11, 140, 26);
     int sectionY = 60;
     int sectionH = 200;
 
@@ -610,14 +845,7 @@ public:
     chorusRateKnob.setBounds(revX + 10, sectionY + 132, (revW - 30) / 2, 55);
     chorusMixKnob.setBounds(revX + 10 + (revW - 30) / 2, sectionY + 132, (revW - 30) / 2, 55);
 
-    // IR / convolution reverb row (bottom of panel)
-    int irY = 385;
-    irToggle.setBounds(20, irY, 60, 24);
-    irLoadBtn.setBounds(90, irY, 90, 24);
-    irMixKnob.setBounds(190, irY - 6, 90, 60);
-    irNameLabel.setBounds(290, irY, getWidth() - 300, 24);
-
-    int custY = sectionY + sectionH + 20;
+    int custY = sectionY + sectionH + 18;
     nameLabel.setBounds(20, custY, 95, 24);
     nameEditor.setBounds(120, custY, 155, 24);
     colorLabel.setBounds(20, custY + 36, 95, 24);
@@ -626,15 +854,91 @@ public:
 
     int musetteX = 290;
     int musetteW = 330;
-    musetteGroup.setBounds(musetteX, custY - 10, musetteW, 90);
+    musetteGroup.setBounds(musetteX, custY - 10, musetteW, 96);
     musetteToggle.setBounds(musetteX + 10, custY + 12, 100, 24);
     musetteModeToggle.setBounds(musetteX + 10, custY + 44, 100, 24);
-    musetteCentsKnob.setBounds(musetteX + 115, custY + 6, 95, 70);
-    musetteMixKnob.setBounds(musetteX + 220, custY + 6, 95, 70);
+    musetteCentsKnob.setBounds(musetteX + 115, custY + 8, 95, 72);
+    musetteMixKnob.setBounds(musetteX + 220, custY + 8, 95, 72);
 
-    auxGroup.setBounds(getWidth() - 340, custY - 10, 320, 90);
-    aux1Knob.setBounds(getWidth() - 325, custY + 10, 135, 70);
-    aux2Knob.setBounds(getWidth() - 175, custY + 10, 135, 70);
+    const int auxX = 630;
+    const int auxW = getWidth() - auxX - 10;
+    auxGroup.setBounds(auxX, custY - 10, auxW, 96);
+    const int colW = (auxW - 24) / 3;
+    const int c0 = auxX + 8;
+    const int c1 = c0 + colW + 4;
+    const int c2 = c1 + colW + 4;
+    iemLevelLabel.setBounds(c0, custY + 4, colW, 14);
+    iemLevelKnob.setBounds(c0, custY + 19, colW, 64);
+    aux1Label.setBounds(c1, custY + 4, colW, 14);
+    aux1Knob.setBounds(c1, custY + 19, colW, 64);
+    aux2Label.setBounds(c2, custY + 4, colW, 14);
+    aux2Knob.setBounds(c2, custY + 19, colW, 64);
+
+    // Row 3: Stereo / Ping-Pong / Mono / Tape Delay (left) + Convolution IR (right)
+    const int row3Y = custY + 94;
+    const int row3H = 128;
+    const int delayX = 10;
+    const int delayW = 610;
+    delayGroup.setBounds(delayX, row3Y, delayW, row3H);
+    delayToggle.setBounds(delayX + 12, row3Y + 22, 114, 24);
+    delayModeBtn.setBounds(delayX + 12, row3Y + 54, 114, 25);
+    delayTapBtn.setBounds(delayX + 12, row3Y + 86, 114, 25);
+
+    const int dKnobsX = delayX + 138;
+    const int dKnobW = (delayW - 148 - 12) / 4;
+    for (int k = 0; k < 4; ++k) {
+      const int kx = dKnobsX + k * (dKnobW + 4);
+      juce::Label *lbls[4] = {&delayTimeLabel, &delayFbLabel, &delayToneLabel, &delayMixLabel};
+      BigKnob *knobs[4] = {&delayTimeKnob, &delayFbKnob, &delayToneKnob, &delayMixKnob};
+      lbls[k]->setBounds(kx, row3Y + 18, dKnobW, 14);
+      knobs[k]->setBounds(kx, row3Y + 34, dKnobW, 82);
+    }
+
+    irGroup.setBounds(auxX, row3Y, auxW, row3H);
+    irToggle.setBounds(auxX + 12, row3Y + 22, 108, 24);
+    irLoadBtn.setBounds(auxX + 12, row3Y + 54, 108, 25);
+    irNameLabel.setBounds(auxX + 12, row3Y + 86, 208, 24);
+    irMixLabel.setBounds(auxX + auxW - 108, row3Y + 18, 96, 14);
+    irMixKnob.setBounds(auxX + auxW - 108, row3Y + 34, 96, 82);
+  }
+
+  void lookAndFeelChanged() override {
+    auto refreshGrp = [](juce::GroupComponent &grp) {
+      grp.setColour(juce::GroupComponent::outlineColourId,
+                    ThemeManager::get(Theme::Role::hairlineStrong));
+      grp.setColour(juce::GroupComponent::textColourId,
+                    ThemeManager::get(Theme::Role::engrave));
+    };
+    refreshGrp(gateGroup);
+    refreshGrp(eqGroup);
+    refreshGrp(compGroup);
+    refreshGrp(revChoGroup);
+    refreshGrp(musetteGroup);
+    refreshGrp(auxGroup);
+    refreshGrp(delayGroup);
+    refreshGrp(irGroup);
+    iemLevelLabel.setColour(juce::Label::textColourId,
+                            ThemeManager::get(Theme::Role::iem));
+    aux1Label.setColour(juce::Label::textColourId,
+                        ThemeManager::get(Theme::Role::engrave));
+    aux2Label.setColour(juce::Label::textColourId,
+                        ThemeManager::get(Theme::Role::engrave));
+    delayTimeLabel.setColour(juce::Label::textColourId,
+                             ThemeManager::get(Theme::Role::engrave));
+    delayFbLabel.setColour(juce::Label::textColourId,
+                           ThemeManager::get(Theme::Role::engrave));
+    delayToneLabel.setColour(juce::Label::textColourId,
+                             ThemeManager::get(Theme::Role::engrave));
+    delayMixLabel.setColour(juce::Label::textColourId,
+                            ThemeManager::get(Theme::Role::engrave));
+    irMixLabel.setColour(juce::Label::textColourId,
+                         ThemeManager::get(Theme::Role::engrave));
+    nameLabel.setColour(juce::Label::textColourId,
+                        ThemeManager::get(Theme::Role::engrave));
+    colorLabel.setColour(juce::Label::textColourId,
+                         ThemeManager::get(Theme::Role::engrave));
+    irNameLabel.setColour(juce::Label::textColourId,
+                          ThemeManager::get(Theme::Role::textDim));
   }
 
 private:
@@ -683,11 +987,31 @@ private:
   BigKnob chorusMixKnob{" Mix"};
 
   // IR / convolution reverb
+  juce::GroupComponent irGroup;
   juce::TextButton irToggle;
   juce::TextButton irLoadBtn{"LOAD IR"};
-  BigKnob irMixKnob{" Mix"};
+  juce::Label irMixLabel;
+  BigKnob irMixKnob{""};
   juce::Label irNameLabel{"irNameLabel", "(no IR loaded)"};
   std::unique_ptr<juce::FileChooser> irChooser;
+
+  // Delay / Echo UI
+  juce::GroupComponent delayGroup;
+  juce::TextButton delayToggle;
+  juce::TextButton delayModeBtn;
+  juce::TextButton delayTapBtn;
+  juce::Label delayTimeLabel;
+  BigKnob delayTimeKnob{""};
+  juce::Label delayFbLabel;
+  BigKnob delayFbKnob{""};
+  juce::Label delayToneLabel;
+  BigKnob delayToneKnob{""};
+  juce::Label delayMixLabel;
+  BigKnob delayMixKnob{""};
+  double lastDelayTapMs = 0.0;
+  double tapIntervals[4]{375.0, 375.0, 375.0, 375.0};
+  int tapIntervalCount = 0;
+  int tapIntervalWriteIdx = 0;
 
   juce::Label nameLabel;
   juce::TextEditor nameEditor;
@@ -696,8 +1020,12 @@ private:
   juce::TextButton colorButton;
 
   juce::GroupComponent auxGroup;
-  BigKnob aux1Knob{" Aux1"};
-  BigKnob aux2Knob{" Aux2"};
+  juce::Label iemLevelLabel;
+  BigKnob iemLevelKnob{""};
+  juce::Label aux1Label;
+  BigKnob aux1Knob{""};
+  juce::Label aux2Label;
+  BigKnob aux2Knob{""};
 
   // Musette Detuner UI
   juce::GroupComponent musetteGroup;

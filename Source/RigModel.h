@@ -54,6 +54,12 @@ struct ChannelStripSettings {
     bool chorusEnabled = false;
     float chorusRate = 1.0f;
     float chorusMix = 0.0f;
+    bool delayEnabled = false;
+    int delayMode = 0; // 0 = Stereo, 1 = Ping-Pong, 2 = Mono, 3 = Tape Warm
+    float delayTimeMs = 375.0f;
+    float delayFeedback = 0.35f;
+    float delayTone = 6500.0f;
+    float delayMix = 0.25f;
     bool reverbEnabled = false;
     float reverbSize = 0.5f;
     float reverbMix = 0.0f;

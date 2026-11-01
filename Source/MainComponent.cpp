@@ -11,7 +11,7 @@
 #include "RackSlotComponent.h"
 #include "ThemeManager.h"
 #include "FanfareLogoData.h"
-// Optional personal gig art. The file is deliberately gitignored � public
+// Optional personal gig art. The file is deliberately gitignored - public
 // checkouts build without it and fall back to the committed OpenRig logo.
 #if __has_include("LastWaltzLogoData.h")
   #include "LastWaltzLogoData.h"
@@ -160,7 +160,7 @@ static CpuTopologyMasks queryCpuTopology() {
 
 MainComponent::MainComponent() {
 #ifdef _WIN32
-  // Per-mechanism bisect flags � see FanfareConstants.h. Each test build
+  // Per-mechanism bisect flags - see FanfareConstants.h. Each test build
   // turns exactly one back on; the startup log line records the combo.
   avrtModule = LoadLibraryA("avrt.dll");
   if constexpr (FanfareConstants::kPowerSchemeMgmtEnabled)
@@ -191,7 +191,7 @@ MainComponent::MainComponent() {
   if constexpr (FanfareConstants::kWorkingSetLockEnabled) {
   // Lock a generous working set minimum so Windows cannot page out VST sample
   // libraries when other applications demand RAM. The 2 GB max we used before
-  // Oct 2026 starved massive rigs (many Kontakt multis) during state restore �
+  // Oct 2026 starved massive rigs (many Kontakt multis) during state restore -
   // Windows kept trimming sample data, making loads take minutes. 8 GB covers
   // the biggest setups; the OS still trims beyond it if RAM is truly short.
   SIZE_T wsMin = 512ULL * 1024 * 1024;
@@ -250,9 +250,9 @@ MainComponent::MainComponent() {
 
   // Collapsible library sidebar
   addAndMakeVisible(toggleLibraryBtn);
+  Fanfare::setButtonRole(toggleLibraryBtn, Fanfare::ButtonRole::Subtle);
   toggleLibraryBtn.setTooltip("Toggle Library Sidebar");
-  toggleLibraryBtn.setColour(juce::TextButton::buttonColourId,
-                              ThemeManager::get(Theme::Role::panelAlt));
+  refreshThemeDependentStyles();
   toggleLibraryBtn.onClick = [this] {
     libraryVisible = !libraryVisible;
     toggleLibraryBtn.setButtonText(libraryVisible ? "<<" : ">>");
@@ -347,6 +347,7 @@ MainComponent::MainComponent() {
 }
 
 MainComponent::~MainComponent() {
+  rackHScrollBar.removeListener(&rackScrollListener);
   if (webServer)
     webServer->stopServer();
   removeKeyListener (this);
@@ -510,6 +511,36 @@ void MainComponent::setupSlotComponents() {
     }
   }
 
+  rackStripContainer.setOpaque(false);
+  rackViewport.setViewedComponent(&rackStripContainer, false);
+  rackViewport.setScrollBarsShown(false, false);
+  rackViewport.onVisibleAreaChanged = [this](const juce::Rectangle<int> &vis) {
+    rackHScrollBar.setCurrentRange((double)vis.getX(), (double)vis.getWidth(),
+                                   juce::dontSendNotification);
+  };
+  addAndMakeVisible(rackViewport);
+
+  rackScrollListener.owner = this;
+  rackHScrollBar.setAutoHide(false);
+  rackHScrollBar.addListener(&rackScrollListener);
+  addChildComponent(rackHScrollBar);
+
+  Fanfare::setButtonRole(rackScrollLeftBtn, Fanfare::ButtonRole::Standard);
+  rackScrollLeftBtn.setTooltip("Scroll channel strips left (Tip: mousewheel over strip headers also pans horizontally)");
+  rackScrollLeftBtn.setRepeatSpeed(280, 75);
+  rackScrollLeftBtn.onClick = [this] {
+    scrollRackBy(-juce::jmax(160, preferredExpandedWidth * 2));
+  };
+  addChildComponent(rackScrollLeftBtn);
+
+  Fanfare::setButtonRole(rackScrollRightBtn, Fanfare::ButtonRole::Standard);
+  rackScrollRightBtn.setTooltip("Scroll channel strips right (Tip: mousewheel over strip headers also pans horizontally)");
+  rackScrollRightBtn.setRepeatSpeed(280, 75);
+  rackScrollRightBtn.onClick = [this] {
+    scrollRackBy(juce::jmax(160, preferredExpandedWidth * 2));
+  };
+  addChildComponent(rackScrollRightBtn);
+
   for (int i = 0; i < engine.getNumSlots(); ++i) {
     auto *slot = engine.getSlot(i);
     auto *comp = new RackSlotComponent(*slot, i, boutiqueLookAndFeel);
@@ -584,8 +615,13 @@ void MainComponent::setupSlotComponents() {
                   juce::AlertWindow::showMessageBoxAsync(
                       juce::MessageBoxIconType::WarningIcon,
                       "Plugin Load Failed", err);
-                else
+                else {
+                  if (comp->getIsCollapsed()) {
+                    comp->setCollapsed(false);
+                    resized();
+                  }
                   comp->repaint();
+                }
               });
         } else if (result == -1) {
           engine.clearSlotChainMidiOut(i, chainIndex);
@@ -697,7 +733,7 @@ void MainComponent::setupSlotComponents() {
       activeMidiNoteLearner = nrComp;
       juce::CallOutBox::launchAsynchronously(
           std::unique_ptr<juce::Component>(nrComp),
-          comp->getNoteRangeButtonBounds(), this);
+          getLocalArea(comp, comp->getNoteRangeButtonBounds()), this);
     };
 
     // MIDI CC Dialog Callback (Advanced UI with Learn). autoArmLearn:
@@ -707,7 +743,7 @@ void MainComponent::setupSlotComponents() {
       ccComp->setSize(660, 510);
       auto &box = juce::CallOutBox::launchAsynchronously(
           std::unique_ptr<juce::Component>(ccComp),
-          comp->getNoteRangeButtonBounds(), this);
+          getLocalArea(comp, comp->getNoteRangeButtonBounds()), this);
       box.setDismissalMouseClicksAreAlwaysConsumed(true);
     };
 
@@ -743,6 +779,9 @@ void MainComponent::setupSlotComponents() {
               Fanfare::SongSlot loadedSlot;
               if (Fanfare::RigSerializer::readStripFromFile(selectedFile, loadedSlot)) {
                   engine.loadSlotPreset(i, loadedSlot);
+                  if (comp->getIsCollapsed())
+                      comp->setCollapsed(false);
+                  resized();
                   comp->repaint();
               }
           };
@@ -777,6 +816,9 @@ void MainComponent::setupSlotComponents() {
                 Fanfare::SongSlot loadedSlot;
                 if (Fanfare::RigSerializer::readStripFromFile(file, loadedSlot)) {
                     engine.loadSlotPreset(i, loadedSlot);
+                    if (comp->getIsCollapsed())
+                        comp->setCollapsed(false);
+                    resized();
                     comp->repaint();
                 }
               });
@@ -784,8 +826,11 @@ void MainComponent::setupSlotComponents() {
     };
 
     // Quick-load a specific strip file (from right-click submenu)
-    comp->onLoadStripFile = [this, i](const juce::File &file) {
+    comp->onLoadStripFile = [this, i, comp](const juce::File &file) {
       engine.loadStripFromFile(i, file);
+      if (comp->getIsCollapsed())
+        comp->setCollapsed(false);
+      resized();
     };
 
     // Drag-and-drop strip preset from the library sidebar
@@ -793,12 +838,48 @@ void MainComponent::setupSlotComponents() {
       Fanfare::SongSlot loadedSlot;
       if (Fanfare::RigSerializer::readStripFromFile(file, loadedSlot))
         engine.loadSlotPreset(i, loadedSlot);
+      if (comp->getIsCollapsed())
+        comp->setCollapsed(false);
+      resized();
       comp->repaint();
     };
 
-    // Scene-aware collapse & resize callbacks
-    comp->onCollapseChanged = [this](bool) {
+    // Scene-aware collapse, horizontal scroll & resize callbacks
+    comp->onCollapseChanged = [this, comp](bool collapsed) {
       resized();
+      if (!collapsed)
+        ensureStripVisibleInRack(comp);
+    };
+    comp->onHorizontalScroll = [this](int deltaPx) {
+      scrollRackBy(deltaPx);
+    };
+    comp->onRightClickUnusedEmpty = [this, comp] {
+      juce::PopupMenu m;
+      m.addSectionHeader("Expand Empty Strip");
+      for (int sIdx = 1; sIdx < rackSlotComponents.size(); ++sIdx) {
+        auto *sc = rackSlotComponents[sIdx];
+        if (sc != nullptr && sc->getIsCollapsed() && sc->isUnusedEmptyStrip()) {
+          m.addItem(sIdx, "Expand Strip " + juce::String(sIdx + 1) +
+                              (sc == comp ? " (Next)" : ""));
+        }
+      }
+      m.addSeparator();
+      m.addItem(1000, "Expand All Unused Strips (Disable Stage Compact)");
+      m.showMenuAsync(juce::PopupMenu::Options(), [this](int res) {
+        if (res >= 1 && res < rackSlotComponents.size()) {
+          auto *sc = rackSlotComponents[res];
+          if (sc != nullptr) {
+            sc->setCollapsed(false);
+            resized();
+            ensureStripVisibleInRack(sc);
+          }
+        } else if (res == 1000) {
+          autoCollapseToggle.setToggleState(false, juce::dontSendNotification);
+          for (auto *sc : rackSlotComponents)
+            sc->setCollapsed(false);
+          resized();
+        }
+      });
     };
     comp->onBypassChanged = [this](bool) {
       if (autoCollapseToggle.getToggleState())
@@ -811,10 +892,11 @@ void MainComponent::setupSlotComponents() {
       preferredExpandedWidth = juce::jlimit(kMinExpandedWidth, kMaxExpandedWidth, dragBaseExpandedWidth + deltaX);
       stripWidthSlider.setValue(preferredExpandedWidth, juce::dontSendNotification);
       resized();
+      savePreferredStripWidth();
     };
 
     rackSlotComponents.add(comp);
-    addAndMakeVisible(comp);
+    rackStripContainer.addAndMakeVisible(comp);
   }
 
   // Setup Aux Returns
@@ -908,17 +990,56 @@ void MainComponent::setupSlotComponents() {
       activeMidiNoteLearner = nrComp;
       juce::CallOutBox::launchAsynchronously(
           std::unique_ptr<juce::Component>(nrComp),
-          comp->getNoteRangeButtonBounds(), this);
+          getLocalArea(comp, comp->getNoteRangeButtonBounds()), this);
     };
 
+    comp->onCollapseChanged = [this](bool) {
+      resized();
+    };
+    comp->onHorizontalScroll = [this](int deltaPx) {
+      scrollRackBy(deltaPx);
+    };
+
+    comp->setCollapsed(true);
     auxReturnComponents.add(comp);
     addAndMakeVisible(comp);
   }
 }
 
+void MainComponent::setRackScrollX(int newX) {
+  const int maxScroll =
+      juce::jmax(0, rackStripContainer.getWidth() - rackViewport.getWidth());
+  const int clamped = juce::jlimit(0, maxScroll, newX);
+  if (rackViewport.getViewPositionX() != clamped)
+    rackViewport.setViewPosition(clamped, 0);
+  rackHScrollBar.setCurrentRange((double)clamped,
+                                 (double)rackViewport.getWidth(),
+                                 juce::dontSendNotification);
+}
+
+void MainComponent::scrollRackBy(int deltaPx) {
+  setRackScrollX(rackViewport.getViewPositionX() + deltaPx);
+}
+
+void MainComponent::ensureStripVisibleInRack(RackSlotComponent *target) {
+  if (target == nullptr || !target->isVisible() || rackViewport.getWidth() <= 0)
+    return;
+  const int viewX = rackViewport.getViewPositionX();
+  const int viewW = rackViewport.getWidth();
+  const int stripLeft = target->getX();
+  // Include 36px lookahead on the right so the newly revealed "+ ADD" tile is visible too
+  const int stripRight =
+      juce::jmin(rackStripContainer.getWidth(), target->getRight() + 36);
+  if (stripRight > viewX + viewW)
+    setRackScrollX(stripRight - viewW);
+  else if (stripLeft < viewX)
+    setRackScrollX(stripLeft);
+}
+
 void MainComponent::setupHeaderButtons() {
   // Scan button
   addAndMakeVisible(scanButton);
+  Fanfare::setButtonRole(scanButton, Fanfare::ButtonRole::Primary);
   scanButton.onClick = [this] {
     scanButton.setButtonText("SCANNING...");
     scanButton.setEnabled(false);
@@ -933,7 +1054,7 @@ void MainComponent::setupHeaderButtons() {
 
   // Panic button
   addAndMakeVisible(panicBtn);
-  panicBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panic));
+  Fanfare::setButtonRole(panicBtn, Fanfare::ButtonRole::Panic);
   panicBtn.setTooltip("PANIC: Stage emergency button. Instantly silences all stuck MIDI notes & flushes audio buffers.");
   panicBtn.onClick = [this] {
     engine.triggerPanic();
@@ -942,21 +1063,19 @@ void MainComponent::setupHeaderButtons() {
 
   // Reset Audio button
   addAndMakeVisible(resetAudioBtn);
-  resetAudioBtn.setColour(juce::TextButton::buttonColourId,
-                          ThemeManager::get(Theme::Role::warn));
+  Fanfare::setButtonRole(resetAudioBtn, Fanfare::ButtonRole::Danger);
   resetAudioBtn.setTooltip("Reset Audio: Re-initializes audio driver threads & clears sample-rate locks mid-gig.");
   resetAudioBtn.onClick = [this] { resetAudioDevice(); };
 
   // Exit button
   addAndMakeVisible(exitBtn);
-  exitBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel));
+  Fanfare::setButtonRole(exitBtn, Fanfare::ButtonRole::Subtle);
   exitBtn.setTooltip("Quit Fanfare");
   exitBtn.onClick = [] { juce::JUCEApplication::quit(); };
 
   // Audio Settings button
   addAndMakeVisible(audioSettingsBtn);
-  audioSettingsBtn.setColour(juce::TextButton::buttonColourId,
-                             ThemeManager::get(Theme::Role::accent));
+  Fanfare::setButtonRole(audioSettingsBtn, Fanfare::ButtonRole::Primary);
   audioSettingsBtn.setTooltip("Audio & MIDI Setup: Low-latency driver configuration, sample rates & MIDI routing.");
   audioSettingsBtn.onClick = [this] {
     auto *selector = new juce::AudioDeviceSelectorComponent(
@@ -976,15 +1095,12 @@ void MainComponent::setupHeaderButtons() {
 
   // MIDI Monitor
   addAndMakeVisible(midiMonitorLabel);
-  midiMonitorLabel.setFont(juce::FontOptions(14.0f, juce::Font::bold));
-  midiMonitorLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::midiNote));
+  midiMonitorLabel.setFont(BoutiqueLookAndFeel::monoFont(11.5f, true));
+  midiMonitorLabel.setJustificationType(juce::Justification::centredLeft);
 
   // MIDI Monitor toggle button
   addAndMakeVisible(midiMonitorToggle);
-  midiMonitorToggle.setColour(juce::TextButton::buttonColourId,
-                              ThemeManager::get(Theme::Role::ok));
-  midiMonitorToggle.setColour(juce::TextButton::buttonOnColourId,
-                              ThemeManager::get(Theme::Role::ok).brighter(0.3f));
+  Fanfare::setButtonRole(midiMonitorToggle, Fanfare::ButtonRole::Standard);
   midiMonitorToggle.onClick = [this] {
     midiMonitorVisible = !midiMonitorVisible;
     if (midiMonitorVisible) {
@@ -1025,8 +1141,7 @@ void MainComponent::setupHeaderButtons() {
 
   // Bus Routing button
   addAndMakeVisible(busRoutingBtn);
-  busRoutingBtn.setColour(juce::TextButton::buttonColourId,
-                          ThemeManager::get(Theme::Role::iem));
+  Fanfare::setButtonRole(busRoutingBtn, Fanfare::ButtonRole::Standard);
   busRoutingBtn.onClick = [this] {
     juce::PopupMenu menu;
     menu.addSectionHeader("FOH Output Channels");
@@ -1063,7 +1178,7 @@ void MainComponent::setupHeaderButtons() {
 
   // Save/Load buttons
   addAndMakeVisible(saveBtn);
-  saveBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::ok));
+  Fanfare::setButtonRole(saveBtn, Fanfare::ButtonRole::Standard);
   saveBtn.onClick = [this] {
     auto chooser = std::make_shared<juce::FileChooser>(
         "Save Song Configuration",
@@ -1091,8 +1206,7 @@ void MainComponent::setupHeaderButtons() {
   };
 
   addAndMakeVisible(loadBtn);
-  loadBtn.setColour(juce::TextButton::buttonColourId,
-                    ThemeManager::get(Theme::Role::warn));
+  Fanfare::setButtonRole(loadBtn, Fanfare::ButtonRole::Standard);
   loadBtn.onClick = [this] {
     auto chooser = std::make_shared<juce::FileChooser>(
         "Load Song Configuration",
@@ -1110,21 +1224,20 @@ void MainComponent::setupHeaderButtons() {
 
   // Gig Notepad & Stage Notes button
   addAndMakeVisible(gigNotepadBtn);
-  gigNotepadBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
+  Fanfare::setButtonRole(gigNotepadBtn, Fanfare::ButtonRole::Standard);
   gigNotepadBtn.setTooltip("Open Gig Notepad & Stage Notes for Current Song (Ctrl+N)");
   gigNotepadBtn.onClick = [this] { showGigNotepadWindow(); };
 
   // Web Remote HUD button
   addAndMakeVisible(webRemoteBtn);
-  webRemoteBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
+  Fanfare::setButtonRole(webRemoteBtn, Fanfare::ButtonRole::Standard);
   webRemoteBtn.setTooltip("Open Web Remote HUD Settings & Tablet Connection URL");
   webRemoteBtn.onClick = [this] { showWebRemoteDialog(); };
 
   // Quick-Start [?] First Steps button
   addAndMakeVisible(quickStartBtn);
   quickStartBtn.setButtonText("?");
-  quickStartBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
-  quickStartBtn.setColour(juce::TextButton::textColourOffId, juce::Colours::black);
+  Fanfare::setButtonRole(quickStartBtn, Fanfare::ButtonRole::Primary);
   quickStartBtn.setTooltip("First Steps: Quick-Start Checklist & VST3 Plugin Scan");
   quickStartBtn.onClick = [this] { showQuickStartDialog(false); };
 
@@ -1133,7 +1246,7 @@ void MainComponent::setupHeaderButtons() {
 
   // Prev / Next Setlist buttons
   addAndMakeVisible(prevSetlistBtn);
-  prevSetlistBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panelAlt));
+  Fanfare::setButtonRole(prevSetlistBtn, Fanfare::ButtonRole::Standard);
   prevSetlistBtn.setTooltip("Previous Song in Setlist");
   prevSetlistBtn.onClick = [this] {
       auto& sm = Fanfare::SetlistManager::getInstance();
@@ -1144,7 +1257,7 @@ void MainComponent::setupHeaderButtons() {
   };
 
   addAndMakeVisible(nextSetlistBtn);
-  nextSetlistBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panelAlt));
+  Fanfare::setButtonRole(nextSetlistBtn, Fanfare::ButtonRole::Standard);
   nextSetlistBtn.setTooltip("Next Song in Setlist (Background Preloaded)");
   nextSetlistBtn.onClick = [this] {
       auto& sm = Fanfare::SetlistManager::getInstance();
@@ -1154,31 +1267,32 @@ void MainComponent::setupHeaderButtons() {
       }
   };
 
-  // CPU/RAM monitors
+  // CPU/RAM/Latency/XRUNS monitors (monospace hardware LCD telemetry)
   addAndMakeVisible(cpuLabel);
-  cpuLabel.setFont(juce::FontOptions(12.0f));
-  cpuLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
+  cpuLabel.setFont(BoutiqueLookAndFeel::monoFont(11.0f, true));
+  cpuLabel.setJustificationType(juce::Justification::centred);
   cpuLabel.setTooltip("Click to view Per-VST Memory & Resource Inspector");
   cpuLabel.addMouseListener(this, false);
 
   addAndMakeVisible(ramLabel);
-  ramLabel.setFont(juce::FontOptions(12.0f));
-  ramLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::meterMid));
+  ramLabel.setFont(BoutiqueLookAndFeel::monoFont(11.0f, true));
+  ramLabel.setJustificationType(juce::Justification::centred);
   ramLabel.setTooltip("Click to view Per-VST Memory & Resource Inspector");
   ramLabel.addMouseListener(this, false);
 
   addAndMakeVisible(latencyLabel);
-  latencyLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+  latencyLabel.setFont(BoutiqueLookAndFeel::monoFont(11.0f, true));
+  latencyLabel.setJustificationType(juce::Justification::centred);
   latencyLabel.setTooltip("Round-trip audio interface latency (Input + Output)");
+
   addAndMakeVisible(xrunsLabel);
-  xrunsLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
-  xrunsLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::ok));
+  xrunsLabel.setFont(BoutiqueLookAndFeel::monoFont(11.0f, true));
+  xrunsLabel.setJustificationType(juce::Justification::centred);
   xrunsLabel.setTooltip("Audio Glitch / Underrun Counter (Click to view log)");
   xrunsLabel.addMouseListener(this, false);
 
   addAndMakeVisible(setupNameLabel);
-  setupNameLabel.setFont(juce::FontOptions(22.0f, juce::Font::bold));
-  setupNameLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
+  setupNameLabel.setFont(BoutiqueLookAndFeel::condensedFont(20.0f, 0.04f));
   setupNameLabel.setJustificationType(juce::Justification::centredLeft);
 
   addAndMakeVisible(freshBuildToggle);
@@ -1204,7 +1318,7 @@ void MainComponent::setupHeaderButtons() {
   };
 
   addAndMakeVisible(autoCollapseToggle);
-  autoCollapseToggle.setToggleState(true, juce::dontSendNotification);
+  autoCollapseToggle.setToggleState(false, juce::dontSendNotification);
   autoCollapseToggle.setColour(juce::ToggleButton::textColourId, ThemeManager::get(Theme::Role::accent));
   autoCollapseToggle.setTooltip("Stage Compact: Automatically collapses muted/inactive strips to save screen space, expanding active channels.");
   autoCollapseToggle.onClick = [this] {
@@ -1218,8 +1332,7 @@ void MainComponent::setupHeaderButtons() {
   };
 
   addAndMakeVisible(stripWidthLabel);
-  stripWidthLabel.setFont(juce::FontOptions(10.0f, juce::Font::bold));
-  stripWidthLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
+  stripWidthLabel.setFont(BoutiqueLookAndFeel::condensedFont(10.5f, 0.06f));
   stripWidthLabel.setJustificationType(juce::Justification::centredRight);
 
   addAndMakeVisible(stripWidthSlider);
@@ -1231,6 +1344,7 @@ void MainComponent::setupHeaderButtons() {
   stripWidthSlider.onValueChange = [this] {
     preferredExpandedWidth = (int)stripWidthSlider.getValue();
     resized();
+    savePreferredStripWidth();
   };
 
   // Load embedded Fanfare white logo (for dark stage UI)
@@ -1268,14 +1382,12 @@ void MainComponent::setupHeaderButtons() {
   loadAuxLogoPreference();
 
   addAndMakeVisible(clockLabel);
-  clockLabel.setFont(juce::FontOptions(13.0f, juce::Font::bold));
-  clockLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent).withAlpha(0.7f));
+  clockLabel.setFont(BoutiqueLookAndFeel::monoFont(11.5f, true));
   clockLabel.setJustificationType(juce::Justification::centred);
 
   addAndMakeVisible(preloadStatusLabel);
-  preloadStatusLabel.setFont(juce::FontOptions(13.0f, juce::Font::italic));
+  preloadStatusLabel.setFont(BoutiqueLookAndFeel::condensedFont(12.5f, 0.04f));
   preloadStatusLabel.setJustificationType(juce::Justification::centredRight);
-  preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
   updatePreloadStatus();
 }
 
@@ -1285,9 +1397,9 @@ void MainComponent::setupSetupButtons() {
   addAndMakeVisible(loadSetBtn);
   addAndMakeVisible(setupBuilderBtn);
   
-  saveSetBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::ok));
-  loadSetBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::warn));
-  setupBuilderBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
+  Fanfare::setButtonRole(saveSetBtn, Fanfare::ButtonRole::Standard);
+  Fanfare::setButtonRole(loadSetBtn, Fanfare::ButtonRole::Standard);
+  Fanfare::setButtonRole(setupBuilderBtn, Fanfare::ButtonRole::Primary);
   
   saveSetBtn.onClick = [this] { saveSetToFile(); };
   loadSetBtn.onClick = [this] { loadSetFromFile(); };
@@ -1326,10 +1438,10 @@ void MainComponent::setupSetupButtons() {
   addAndMakeVisible(renameSceneBtn);
   addAndMakeVisible(deleteSceneBtn);
 
-  addSceneBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::iem));
-  saveSceneBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::ok));
-  renameSceneBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
-  deleteSceneBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::danger));
+  Fanfare::setButtonRole(addSceneBtn, Fanfare::ButtonRole::Standard);
+  Fanfare::setButtonRole(saveSceneBtn, Fanfare::ButtonRole::Standard);
+  Fanfare::setButtonRole(renameSceneBtn, Fanfare::ButtonRole::Standard);
+  Fanfare::setButtonRole(deleteSceneBtn, Fanfare::ButtonRole::Danger);
 
   addSceneBtn.onClick = [this] {
     engine.createNewScene("SCENE " + juce::String(engine.getNumScenes() + 1));
@@ -1524,7 +1636,13 @@ void MainComponent::setupMasterSection() {
 
   // Labels & VU Meters
   addAndMakeVisible(fohLabel);
+  fohLabel.setFont(BoutiqueLookAndFeel::condensedFont(13.0f, 0.08f));
+  fohLabel.setJustificationType(juce::Justification::centred);
+
   addAndMakeVisible(iemLabel);
+  iemLabel.setFont(BoutiqueLookAndFeel::condensedFont(13.0f, 0.08f));
+  iemLabel.setJustificationType(juce::Justification::centred);
+
   addAndMakeVisible(masterVuMeterL);
   addAndMakeVisible(masterVuMeterR);
 
@@ -1532,29 +1650,31 @@ void MainComponent::setupMasterSection() {
   for (int i = 0; i < 3; ++i) {
     addAndMakeVisible(fohFxBtns[i]);
     bool fohHas = !engine.getMasterPluginName(true, i).isEmpty();
+    Fanfare::setButtonRole(fohFxBtns[i], Fanfare::ButtonRole::PluginSlot);
     fohFxBtns[i].getProperties().set("isPluginSlot", true);
     fohFxBtns[i].getProperties().set("hasPlugin", fohHas);
+    fohFxBtns[i].getProperties().set("slotAccent", (int)ThemeManager::get(Theme::Role::foh).getARGB());
     fohFxBtns[i].setButtonText(fohHas ? engine.getMasterPluginName(true, i) : ("FOH " + juce::String(i + 1)));
     fohFxBtns[i].onClick = [this, i] { showMasterPluginMenu(true, i); };
 
     addAndMakeVisible(fohEditGuiBtns[i]);
     fohEditGuiBtns[i].setButtonText("E");
+    Fanfare::setButtonRole(fohEditGuiBtns[i], Fanfare::ButtonRole::Subtle);
     fohEditGuiBtns[i].onClick = [this, i] { openMasterPluginEditor(true, i); };
 
     addAndMakeVisible(iemFxBtns[i]);
     bool iemHas = !engine.getMasterPluginName(false, i).isEmpty();
+    Fanfare::setButtonRole(iemFxBtns[i], Fanfare::ButtonRole::PluginSlot);
     iemFxBtns[i].getProperties().set("isPluginSlot", true);
     iemFxBtns[i].getProperties().set("hasPlugin", iemHas);
+    iemFxBtns[i].getProperties().set("slotAccent", (int)ThemeManager::get(Theme::Role::iem).getARGB());
     iemFxBtns[i].setButtonText(iemHas ? engine.getMasterPluginName(false, i) : ("IEM " + juce::String(i + 1)));
     iemFxBtns[i].onClick = [this, i] { showMasterPluginMenu(false, i); };
 
     addAndMakeVisible(iemEditGuiBtns[i]);
     iemEditGuiBtns[i].setButtonText("E");
+    Fanfare::setButtonRole(iemEditGuiBtns[i], Fanfare::ButtonRole::Subtle);
     iemEditGuiBtns[i].onClick = [this, i] { openMasterPluginEditor(false, i); };
-
-    // Color styles matching routing destinations
-    fohFxBtns[i].setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::foh).darker(0.3f));
-    iemFxBtns[i].setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::iem).darker(0.3f));
   }
 }
 
@@ -1571,7 +1691,7 @@ void MainComponent::logAudioGlitch(double actualMs, double expectedMs,
 
   // Batched: appends collect in memory and flush to disk at most once per
   // second (glitchMonitorTimer). During a storm this replaces ~13 file
-  // opens/second with a single append � the message thread stays responsive.
+  // opens/second with a single append - the message thread stays responsive.
   pendingGlitchLogText += entry;
 }
 
@@ -1631,7 +1751,7 @@ void MainComponent::audioDeviceIOCallbackWithContext(
     }
   }
 
-  // Per-thread hardening, flag-gated per mechanism (bisect � MinHost runs
+  // Per-thread hardening, flag-gated per mechanism (bisect - MinHost runs
   // no MMCSS and no shelter, and is clean where Fanfare storms).
 #ifdef _WIN32
   if constexpr (FanfareConstants::kCpuShelterEnabled) {
@@ -1671,27 +1791,27 @@ void MainComponent::audioDeviceIOCallbackWithContext(
         mmcssThreadId = ::GetCurrentThreadId();
         LOG_INFO("Audio thread registered with MMCSS Pro Audio characteristics");
       } else {
-        // Log the reason � MMCSS refusals were previously invisible.
+        // Log the reason - MMCSS refusals were previously invisible.
         DWORD err = ::GetLastError();
         if (err == 1552 /* ERROR_INVALID_THREAD_ID: "already joining a task" */) {
           // Not a failure: ASIO drivers like Yamaha Steinberg USB join their
           // callback thread to the MMCSS Pro Audio task before we run, so the
           // thread already has Pro Audio priority. Don't touch it.
           mmcssThreadId = ::GetCurrentThreadId();
-          LOG_INFO("Audio thread already MMCSS-registered by the audio driver � Pro Audio priority active");
+          LOG_INFO("Audio thread already MMCSS-registered by the audio driver - Pro Audio priority active");
         } else {
-          // Fallback HIGHEST, not TIME_CRITICAL � TIME_CRITICAL can starve
+          // Fallback HIGHEST, not TIME_CRITICAL - TIME_CRITICAL can starve
           // the OS when combined with the audio spin-wait barrier.
           SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
           mmcssThreadId = ::GetCurrentThreadId();
           LOG_WARN("MMCSS unavailable (error " + juce::String((int)err) +
-                   ") � audio thread set to THREAD_PRIORITY_HIGHEST");
+                   ") - audio thread set to THREAD_PRIORITY_HIGHEST");
         }
       }
     } else {
       SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
       mmcssThreadId = ::GetCurrentThreadId();
-      LOG_WARN("avrt.dll not loaded � audio thread set to THREAD_PRIORITY_HIGHEST");
+      LOG_WARN("avrt.dll not loaded - audio thread set to THREAD_PRIORITY_HIGHEST");
     }
   }
   } // end kMmcssEnabled (bisect)
@@ -2029,6 +2149,24 @@ void MainComponent::loadEngineTuningSettings() {
     engineTuningSettings.preventPowerThrottling = (bool)v["preventPowerThrottling"];
   if (v.hasProperty("parallelProcessing"))
     engineTuningSettings.parallelProcessing = (bool)v["parallelProcessing"];
+  if (v.hasProperty("preferredStripWidth")) {
+    preferredExpandedWidth = juce::jlimit(
+        kMinExpandedWidth, kMaxExpandedWidth, (int)v["preferredStripWidth"]);
+    stripWidthSlider.setValue(preferredExpandedWidth, juce::dontSendNotification);
+  }
+}
+
+void MainComponent::savePreferredStripWidth() const {
+  auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
+  juce::var v;
+  if (f.existsAsFile())
+    v = juce::JSON::parse(f.loadFileAsString());
+  if (!v.isObject())
+    v = juce::var(new juce::DynamicObject());
+  if (auto *obj = v.getDynamicObject())
+    obj->setProperty("preferredStripWidth", preferredExpandedWidth);
+  f.getParentDirectory().createDirectory();
+  f.replaceWithText(juce::JSON::toString(v));
 }
 
 void MainComponent::saveEngineTuningSettings() {
@@ -2240,13 +2378,13 @@ void MainComponent::showAboutDialog() {
 
       linkButton.setButtonText("this philosophy.");
       linkButton.setURL(juce::URL("https://youtu.be/WPc-VEqBPHI?si=H_G9lJGNPGONcPLP&t=108"));
-      linkButton.setColour(juce::HyperlinkButton::textColourId, juce::Colour(0xFF00E5FF));
+      linkButton.setColour(juce::HyperlinkButton::textColourId, ThemeManager::get(Theme::Role::accent));
       linkButton.setFont(juce::FontOptions(13.5f, juce::Font::underlined), false, juce::Justification::topLeft);
       addAndMakeVisible(linkButton);
 
       footerLabel.setText("No virtual patch cords. No node graphs. Just pure stage-tested horsepower.", juce::dontSendNotification);
       footerLabel.setFont(juce::FontOptions(12.0f, juce::Font::italic));
-      footerLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.6f));
+      footerLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
       footerLabel.setJustificationType(juce::Justification::topLeft);
       addAndMakeVisible(footerLabel);
 
@@ -2311,7 +2449,7 @@ void MainComponent::showQuickStartDialog(bool isFirstRunPrompt) {
        << "   Click the Gear icon (top-left) -> SCAN FOR PLUGINS (or click 'Scan VST3 Folder Now' below) so Fanfare registers your installed instruments & effects. You can also choose your ASIO audio driver & MIDI keyboard in AUDIO SETTINGS.\n\n"
        << "2. Add a VST to a Strip Slot\n"
        << "   On any channel strip (start with Strip 2: Keyboard), click one of the 3 plugin slots (Slot 1, 2, or 3) to load an instrument, and click [E] to open its editor window.\n\n"
-       << "Tip: Need help on any screen? Click the red HAAALP! button to jump straight to that chapter of the Stage Survival Manual.";
+       << "Tip: Need help on any screen? Click the amber HAAALP! button to jump straight to that chapter of the Stage Survival Manual.";
 
   auto *w = new juce::AlertWindow(title, body, juce::MessageBoxIconType::InfoIcon);
   w->addButton("Scan VST3 Folder Now", 1, juce::KeyPress(juce::KeyPress::returnKey));
@@ -2389,6 +2527,11 @@ void MainComponent::showSlotMidiOutDialog(int slotIdx, int chainIdx) {
               } else {
                 engine.setSlotChainMidiOut(slotIdx, chainIdx,
                                             deviceIds[devSel], ch);
+                if (slotIdx >= 0 && slotIdx < rackSlotComponents.size() &&
+                    rackSlotComponents[slotIdx]->getIsCollapsed()) {
+                  rackSlotComponents[slotIdx]->setCollapsed(false);
+                  resized();
+                }
               }
               repaint();
             }
@@ -2465,8 +2608,18 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source) {
     syncHotplugMidiInputs(false);
     saveAudioSettings();
   } else if (source == &ThemeManager::getInstance()) {
-    // Theme changed: re-apply LookAndFeel colours and repaint everything.
+    // Theme changed: re-apply LookAndFeel colours, propagate lookAndFeelChanged()
+    // to every ComboBox/Slider/TextEditor/DialogWindow on the desktop, and repaint.
     boutiqueLookAndFeel.applyThemeColors();
+    refreshThemeDependentStyles();
+    sendLookAndFeelChange();
+    auto& desktop = juce::Desktop::getInstance();
+    for (int i = 0; i < desktop.getNumComponents(); ++i) {
+      if (auto* comp = desktop.getComponent(i)) {
+        comp->sendLookAndFeelChange();
+        comp->repaint();
+      }
+    }
     repaint();
     for (auto* c : getChildren())
       c->repaint();
@@ -2506,7 +2659,7 @@ void MainComponent::updatePreloadStatus() {
       preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::ok));
     } else if (sm.isPreloadFailed()) {
       preloadStatusLabel.setText("Preload Failed: " + nextName, juce::dontSendNotification);
-      preloadStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xffff4444));
+      preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::danger));
     } else {
       preloadStatusLabel.setText("Next: " + nextName + " (Not Preloaded)", juce::dontSendNotification);
       preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
@@ -2543,156 +2696,248 @@ void MainComponent::audioDeviceAboutToStart(juce::AudioIODevice *device) {
 
 void MainComponent::audioDeviceStopped() {}
 
+void MainComponent::refreshThemeDependentStyles() {
+  const auto& t = ThemeManager::getInstance().active();
+
+  auto gearNorm = createGearImage(24, t.textDim);
+  auto gearOver = createGearImage(24, t.accent);
+  settingsGearBtn.setImages(false, true, true,
+                            gearNorm, 1.0f, juce::Colours::transparentBlack,
+                            gearOver, 1.0f, juce::Colours::transparentBlack,
+                            gearOver, 0.85f, juce::Colours::transparentBlack);
+
+  setupNameLabel.setColour(juce::Label::textColourId, t.text);
+  stripWidthLabel.setColour(juce::Label::textColourId, t.engrave);
+  midiMonitorLabel.setColour(juce::Label::textColourId, t.midiNote);
+  cpuLabel.setColour(juce::Label::textColourId, t.text);
+  ramLabel.setColour(juce::Label::textColourId, t.textDim);
+  latencyLabel.setColour(juce::Label::textColourId, t.textDim);
+  xrunsLabel.setColour(juce::Label::textColourId,
+                       (audioUnderrunCount.load() + engineStallCount.load() > 0) ? t.warn : t.ok);
+  clockLabel.setColour(juce::Label::textColourId, t.accent);
+  freshBuildToggle.setColour(juce::ToggleButton::textColourId, t.textDim);
+  autoCollapseToggle.setColour(juce::ToggleButton::textColourId, t.textDim);
+
+  fohLabel.setColour(juce::Label::textColourId, t.foh);
+  iemLabel.setColour(juce::Label::textColourId, t.iem);
+
+  for (int i = 0; i < 3; ++i) {
+    fohFxBtns[i].getProperties().set("slotAccent", (int)t.foh.getARGB());
+    iemFxBtns[i].getProperties().set("slotAccent", (int)t.iem.getARGB());
+  }
+
+  updatePreloadStatus();
+}
+
 void MainComponent::paint(juce::Graphics &g) {
-  // Themed background
-  g.fillAll(ThemeManager::get(Theme::Role::background));
+  const auto& t = ThemeManager::getInstance().active();
+  g.fillAll(t.canvas);
 
-  // Draw Master VU Meters
-  auto drawMasterMeter = [&](juce::Graphics &g, juce::Rectangle<float> area,
-                             float L, float R, juce::Colour low,
-                             juce::Colour mid, juce::Colour high) {
-    g.setColour(ThemeManager::get(Theme::Role::trackGroove));
-    g.fillRoundedRectangle(area, 2.0f);
+  // Row 1: Stage Header Face
+  if (!stageHeaderBounds.isEmpty()) {
+    g.setColour(t.panel);
+    g.fillRect(stageHeaderBounds);
+    g.setColour(t.bevelHi);
+    g.drawHorizontalLine(stageHeaderBounds.getY(), 0.0f, (float)getWidth());
+    g.setColour(t.hairline);
+    g.drawHorizontalLine(stageHeaderBounds.getBottom() - 1, 0.0f, (float)getWidth());
 
-    auto lRect = area.removeFromLeft(area.getWidth() / 2).reduced(1);
-    auto rRect = area.reduced(1);
+    // Keep white Fanfare emblem legible on warm paper (Front Panel Bright)
+    if (logoComponent.isVisible() && !t.dark) {
+      g.setColour(juce::Colour(0xFF1F2428));
+      g.fillRoundedRectangle(logoComponent.getBounds().toFloat().expanded(1.0f), 3.0f);
+    }
+  }
 
-    auto drawSegmentedBar = [&](juce::Rectangle<float> barArea, float val) {
-      const int numSegments = 16;
-      const float gap = 1.0f;
-      float segmentHeight =
-          (barArea.getHeight() - (numSegments - 1) * gap) / (float)numSegments;
-      int activeSegments = (int)(val * numSegments);
+  // Row 2: Control & Telemetry Bar
+  if (!controlBarBounds.isEmpty()) {
+    g.setColour(t.panelAlt);
+    g.fillRect(controlBarBounds);
+    g.setColour(t.hairlineStrong);
+    g.drawHorizontalLine(controlBarBounds.getBottom() - 1, 0.0f, (float)getWidth());
+  }
 
-      for (int i = 0; i < numSegments; ++i) {
-        auto seg = barArea.removeFromBottom(segmentHeight);
-        barArea.removeFromBottom(gap);
+  // Recessed LCD wells for MIDI activity & system telemetry
+  if (!midiWellBounds.isEmpty()) {
+    Fanfare::ModalFrame::paintRecessedWell(g, midiWellBounds.toFloat(), 2.5f);
+  }
+  if (!telemetryWellBounds.isEmpty()) {
+    Fanfare::ModalFrame::paintRecessedWell(g, telemetryWellBounds.toFloat(), 2.5f);
+    g.setColour(t.hairline);
+    const int topY = telemetryWellBounds.getY() + 4;
+    const int botY = telemetryWellBounds.getBottom() - 4;
+    for (auto* lbl : {&cpuLabel, &ramLabel, &latencyLabel, &xrunsLabel}) {
+      g.drawVerticalLine(lbl->getRight(), (float)topY, (float)botY);
+    }
+  }
 
-        if (i < activeSegments) {
-          float ratio = (float)i / (float)numSegments;
-          juce::Colour c = (ratio < 0.6f) ? low : ((ratio < 0.85f) ? mid : high);
-          g.setColour(c);
-        } else {
-          g.setColour(ThemeManager::get(Theme::Role::bypassed).darker(0.4f));
-        }
-        g.fillRect(seg);
-      }
-    };
+  // Rows 3 & 4: Stage Queue & Scene Trays
+  if (!queueRowBounds.isEmpty()) {
+    g.setColour(t.panel);
+    g.fillRect(queueRowBounds);
+    g.setColour(t.hairline);
+    g.drawHorizontalLine(queueRowBounds.getBottom() - 1, 0.0f, (float)getWidth());
+  }
+  if (!sceneRowBounds.isEmpty()) {
+    g.setColour(t.sunken);
+    g.fillRect(sceneRowBounds);
+    g.setColour(t.hairlineStrong);
+    g.drawHorizontalLine(sceneRowBounds.getBottom() - 1, 0.0f, (float)getWidth());
+  }
 
-    drawSegmentedBar(lRect, L);
-    drawSegmentedBar(rRect, R);
-  };
+  // Master Console Column Face
+  if (!masterColumnBounds.isEmpty()) {
+    auto mf = masterColumnBounds.toFloat().reduced(1.0f, 0.0f);
+    g.setColour(t.panel);
+    g.fillRoundedRectangle(mf, 3.0f);
+    g.setColour(t.border);
+    g.drawRoundedRectangle(mf.reduced(0.5f), 3.0f, 1.0f);
 
+    // Gold FOH / Cyan IEM engraved bus header bars
+    auto fohHdr = fohLabel.getBounds().toFloat().reduced(4.0f, 0.0f);
+    auto iemHdr = iemLabel.getBounds().toFloat().reduced(4.0f, 0.0f);
+    g.setColour(t.foh);
+    g.fillRect(fohHdr.getX(), fohHdr.getBottom() - 2.0f, fohHdr.getWidth(), 2.0f);
+    g.setColour(t.iem);
+    g.fillRect(iemHdr.getX(), iemHdr.getBottom() - 2.0f, iemHdr.getWidth(), 2.0f);
+  }
+
+  // Segmented Master FOH & IEM Stereo LED Meters
   auto fohBounds = masterFohSlider.getBounds().toFloat();
-  drawMasterMeter(g, fohBounds.withX(fohBounds.getRight() + 2).withWidth(14),
-                  masterFohL, masterFohR,
-                  ThemeManager::get(Theme::Role::meterLow),
-                  ThemeManager::get(Theme::Role::meterMid),
-                  ThemeManager::get(Theme::Role::meterPeak));
+  if (!fohBounds.isEmpty()) {
+    auto fohMeter = juce::Rectangle<float>(fohBounds.getRight() + 2.0f, fohBounds.getY() + 4.0f,
+                                           13.0f, juce::jmax(16.0f, fohBounds.getHeight() - 8.0f));
+    int segs = juce::jlimit(12, 24, (int)(fohMeter.getHeight() / 9.0f));
+    BoutiqueLookAndFeel::drawStereoSegmentedMeter(g, fohMeter, masterFohL, masterFohR,
+                                                  segs, t.meterLow, t.meterMid, t.meterPeak);
+  }
 
   auto iemBounds = masterIemSlider.getBounds().toFloat();
-  drawMasterMeter(g, iemBounds.withX(iemBounds.getRight() + 2).withWidth(14),
-                  masterIemL, masterIemR,
-                  ThemeManager::get(Theme::Role::iem),
-                  ThemeManager::get(Theme::Role::meterMid),
-                  ThemeManager::get(Theme::Role::meterPeak));
+  if (!iemBounds.isEmpty()) {
+    auto iemMeter = juce::Rectangle<float>(iemBounds.getRight() + 2.0f, iemBounds.getY() + 4.0f,
+                                           13.0f, juce::jmax(16.0f, iemBounds.getHeight() - 8.0f));
+    int segs = juce::jlimit(12, 24, (int)(iemMeter.getHeight() / 9.0f));
+    BoutiqueLookAndFeel::drawStereoSegmentedMeter(g, iemMeter, masterIemL, masterIemR,
+                                                  segs, t.iem, t.meterMid, t.meterPeak);
+  }
 }
 
 void MainComponent::resized() {
   auto r = getLocalBounds();
 
-  // Header area - Row 1: Stage View (Logo Emblem + setup name + setlist nav)
-  auto stageHeader = r.removeFromTop(38);
+  // Header Row 1: Stage View (Logo Emblem + Song Title + Compact Controls + Setlist Nav)
+  auto stageHeader = r.removeFromTop(36);
+  stageHeaderBounds = stageHeader;
+  auto sh = stageHeader.reduced(6, 0);
+
   if (logoComponent.isVisible()) {
-    logoComponent.setBounds(stageHeader.removeFromLeft(40).reduced(2));
+    logoComponent.setBounds(sh.removeFromLeft(34).reduced(2, 4));
+    sh.removeFromLeft(4);
   }
-  setupNameLabel.setBounds(stageHeader.removeFromLeft(300).reduced(4));
-  freshBuildToggle.setBounds(stageHeader.removeFromLeft(120).reduced(2));
-  autoCollapseToggle.setBounds(stageHeader.removeFromLeft(130).reduced(2));
-  stripWidthLabel.setBounds(stageHeader.removeFromLeft(80).reduced(2, 6));
-  stripWidthSlider.setBounds(stageHeader.removeFromLeft(90).reduced(2, 6));
 
-  // Right side: Setlist Navigation
-  nextSetlistBtn.setBounds(stageHeader.removeFromRight(55).reduced(3));
-  prevSetlistBtn.setBounds(stageHeader.removeFromRight(55).reduced(3));
-  preloadStatusLabel.setBounds(stageHeader.removeFromRight(140).reduced(4));
+  // Right side: Setlist Navigation reserved first so center toggles never clip them
+  nextSetlistBtn.setBounds(sh.removeFromRight(42).reduced(2, 5));
+  prevSetlistBtn.setBounds(sh.removeFromRight(42).reduced(2, 5));
+  preloadStatusLabel.setBounds(sh.removeFromRight(juce::jlimit(90, 210, sh.getWidth() / 4)).reduced(4, 2));
 
-  // Header area - Row 2: Controls, Telemetry & Clock
+  int songTitleW = juce::jlimit(150, 310, sh.getWidth() - 390);
+  setupNameLabel.setBounds(sh.removeFromLeft(songTitleW).reduced(2, 2));
+  freshBuildToggle.setBounds(sh.removeFromLeft(106).reduced(2, 4));
+  autoCollapseToggle.setBounds(sh.removeFromLeft(118).reduced(2, 4));
+  stripWidthLabel.setBounds(sh.removeFromLeft(72).reduced(2, 6));
+  stripWidthSlider.setBounds(sh.removeFromLeft(juce::jmin(92, sh.getWidth())).reduced(2, 6));
+
+  // Header Row 2: Controls, Recessed Telemetry Well & Clock (overlap-proof at all widths)
   auto controlBar = r.removeFromTop(34);
-  headerBounds = stageHeader.getUnion(controlBar);
+  controlBarBounds = controlBar;
+  headerBounds = stageHeaderBounds.getUnion(controlBarBounds);
+
+  auto cb = controlBar.reduced(4, 0);
 
   // Left Controls
-  toggleLibraryBtn.setBounds(controlBar.removeFromLeft(30).reduced(3));
-  settingsGearBtn.setBounds(controlBar.removeFromLeft(44).reduced(4));
-  midiMonitorLabel.setBounds(controlBar.removeFromLeft(130).reduced(4));
-  midiMonitorToggle.setBounds(controlBar.removeFromLeft(75).reduced(4));
+  toggleLibraryBtn.setBounds(cb.removeFromLeft(28).reduced(2, 4));
+  settingsGearBtn.setBounds(cb.removeFromLeft(32).reduced(3, 4));
+  midiWellBounds = cb.removeFromLeft(98).reduced(2, 4);
+  midiMonitorLabel.setBounds(midiWellBounds.reduced(5, 0));
+  midiMonitorToggle.setBounds(cb.removeFromLeft(66).reduced(2, 4));
 
-  // Right Actions
-  exitBtn.setBounds(controlBar.removeFromRight(60).reduced(4));
-  panicBtn.setBounds(controlBar.removeFromRight(75).reduced(4));
-  saveBtn.setBounds(controlBar.removeFromRight(85).reduced(4));
-  loadBtn.setBounds(controlBar.removeFromRight(85).reduced(4));
-  webRemoteBtn.setBounds(controlBar.removeFromRight(75).reduced(4));
-  gigNotepadBtn.setBounds(controlBar.removeFromRight(75).reduced(4));
-  mainHelpBtn.setBounds(controlBar.removeFromRight(72).reduced(4));
-  quickStartBtn.setBounds(controlBar.removeFromRight(36).reduced(4));
+  // Right Actions (uniform 26px cap height)
+  exitBtn.setBounds(cb.removeFromRight(46).reduced(2, 4));
+  panicBtn.setBounds(cb.removeFromRight(68).reduced(2, 4));
+  saveBtn.setBounds(cb.removeFromRight(74).reduced(2, 4));
+  loadBtn.setBounds(cb.removeFromRight(74).reduced(2, 4));
+  webRemoteBtn.setBounds(cb.removeFromRight(58).reduced(2, 4));
+  gigNotepadBtn.setBounds(cb.removeFromRight(64).reduced(2, 4));
+  mainHelpBtn.setBounds(cb.removeFromRight(64).reduced(2, 4));
+  quickStartBtn.setBounds(cb.removeFromRight(28).reduced(2, 4));
 
-  // Center: Telemetry + Clock packed together
-  auto centerBar = controlBar.reduced(4, 2);
-  int telemetryWidth = 68;
-  int clockWidth = 90;
-  int xrunsWidth = 85;
-  int totalCenter = telemetryWidth * 3 + xrunsWidth + clockWidth;
-  int startX = centerBar.getCentreX() - totalCenter / 2;
-  cpuLabel.setBounds(startX, centerBar.getY(), telemetryWidth, centerBar.getHeight());
-  ramLabel.setBounds(startX + telemetryWidth, centerBar.getY(), telemetryWidth, centerBar.getHeight());
-  latencyLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
-  latencyLabel.setBounds(startX + telemetryWidth * 2, centerBar.getY(), telemetryWidth, centerBar.getHeight());
-  xrunsLabel.setBounds(startX + telemetryWidth * 3, centerBar.getY(), xrunsWidth, centerBar.getHeight());
-  clockLabel.setBounds(startX + telemetryWidth * 3 + xrunsWidth, centerBar.getY(), clockWidth, centerBar.getHeight());
+  // Center Recessed Telemetry LCD Well — strictly bounded inside remaining cb
+  int availCenter = juce::jmax(120, cb.getWidth() - 8);
+  int wellW = juce::jmin(availCenter, 468);
+  telemetryWellBounds = cb.withSizeKeepingCentre(wellW, controlBar.getHeight() - 8);
+  auto tele = telemetryWellBounds.reduced(4, 0);
+  const int tw = tele.getWidth();
+  const int cpuW = (tw * 18) / 100;
+  const int ramW = (tw * 28) / 100;
+  const int latW = (tw * 18) / 100;
+  const int xrW  = (tw * 17) / 100;
+  cpuLabel.setBounds(tele.removeFromLeft(cpuW));
+  ramLabel.setBounds(tele.removeFromLeft(ramW));
+  latencyLabel.setBounds(tele.removeFromLeft(latW));
+  xrunsLabel.setBounds(tele.removeFromLeft(xrW));
+  clockLabel.setBounds(tele);
 
-  // Header area - Row 2: stage queue buttons
+  // Header Row 3: Stage Queue Slots
   auto presetRow = r.removeFromTop(38);
+  queueRowBounds = presetRow;
+  auto pr = presetRow.reduced(4, 2);
 
-  // Save/Load Set buttons on left
-  saveSetBtn.setBounds(presetRow.removeFromLeft(70).reduced(2));
-  loadSetBtn.setBounds(presetRow.removeFromLeft(70).reduced(2));
-  setupBuilderBtn.setBounds(presetRow.removeFromLeft(90).reduced(2));
+  saveSetBtn.setBounds(pr.removeFromLeft(68).reduced(1, 2));
+  loadSetBtn.setBounds(pr.removeFromLeft(68).reduced(1, 2));
+  setupBuilderBtn.setBounds(pr.removeFromLeft(84).reduced(1, 2));
+  pr.removeFromLeft(3);
 
-  // Stage Queue buttons fill rest
   if (!queueButtons.isEmpty()) {
-    int btnWidth = presetRow.getWidth() / queueButtons.size();
-    for (int i = 0; i < queueButtons.size(); ++i) {
-      queueButtons[i]->setBounds(presetRow.removeFromLeft(btnWidth).reduced(1));
+    const int n = queueButtons.size();
+    for (int i = 0; i < n; ++i) {
+      int w = pr.getWidth() / (n - i);
+      queueButtons[i]->setBounds(pr.removeFromLeft(w).reduced(1, 1));
     }
   }
 
-  // Header area - Row 3: scene (preset) buttons
+  // Header Row 4: Scene Recall Row
   auto sceneRow = r.removeFromTop(30);
-  addSceneBtn.setBounds(sceneRow.removeFromLeft(70).reduced(2));
-  saveSceneBtn.setBounds(sceneRow.removeFromLeft(80).reduced(2));
-  renameSceneBtn.setBounds(sceneRow.removeFromLeft(60).reduced(2));
-  deleteSceneBtn.setBounds(sceneRow.removeFromLeft(60).reduced(2));
+  sceneRowBounds = sceneRow;
+  auto sr = sceneRow.reduced(4, 2);
+
+  addSceneBtn.setBounds(sr.removeFromLeft(64).reduced(1, 1));
+  saveSceneBtn.setBounds(sr.removeFromLeft(76).reduced(1, 1));
+  renameSceneBtn.setBounds(sr.removeFromLeft(58).reduced(1, 1));
+  deleteSceneBtn.setBounds(sr.removeFromLeft(56).reduced(1, 1));
+  sr.removeFromLeft(3);
+
   if (!sceneButtons.isEmpty()) {
-    int sceneBtnWidth = sceneRow.getWidth() / sceneButtons.size();
-    for (int i = 0; i < sceneButtons.size(); ++i) {
-      sceneButtons[i]->setBounds(sceneRow.removeFromLeft(sceneBtnWidth).reduced(1));
+    const int n = sceneButtons.size();
+    for (int i = 0; i < n; ++i) {
+      int w = sr.getWidth() / (n - i);
+      sceneButtons[i]->setBounds(sr.removeFromLeft(w).reduced(1, 1));
     }
   }
 
-  r.removeFromTop(10); // spacer
+  r.removeFromTop(4); // crisp chassis gap
 
   // MIDI Monitor panel (slides open when toggled)
   if (midiMonitorVisible && midiMonitorPanel) {
     int monitorHeight = 180;
     auto monitorArea = r.removeFromTop(monitorHeight);
     midiMonitorPanel->setBounds(monitorArea);
-    r.removeFromTop(4); // gap after monitor
+    r.removeFromTop(4);
   }
 
   // Library sidebar (collapsible, left side)
   if (libraryVisible) {
-    auto libraryArea = r.removeFromLeft(240);
+    auto libraryArea = r.removeFromLeft(238);
+    r.removeFromLeft(3);
     if (libraryPanel)
       libraryPanel->setBounds(libraryArea);
   } else {
@@ -2700,92 +2945,178 @@ void MainComponent::resized() {
       libraryPanel->setBounds(0, 0, 0, 0);
   }
 
-  // Master sliders area (wider for VU meters & faders)
-  auto masterArea = r.removeFromRight(170);
-  masterColumnBounds = masterArea;  // snapshot before slicing for timer repaint
+  // Master Console Column (right side)
+  auto masterArea = r.removeFromRight(176);
+  masterColumnBounds = masterArea;
+  auto ma = masterArea.reduced(4, 3);
 
-  // 1. Dual Retro Analog VU Meters at top of master section (wide rectangular ratio)
-  auto vuArea = masterArea.removeFromTop(62).reduced(2);
+  // 1. Dual Analog VU Meters
+  auto vuArea = ma.removeFromTop(62);
   auto vuL = vuArea.removeFromLeft(vuArea.getWidth() / 2);
-  masterVuMeterL.setBounds(vuL.reduced(1));
-  masterVuMeterR.setBounds(vuArea.reduced(1));
+  masterVuMeterL.setBounds(vuL.reduced(2, 1));
+  masterVuMeterR.setBounds(vuArea.reduced(2, 1));
 
-  // 2. Labels
-  auto labels = masterArea.removeFromTop(20);
+  // 2. Engraved Bus Headers
+  ma.removeFromTop(2);
+  auto labels = ma.removeFromTop(20);
   fohLabel.setBounds(labels.removeFromLeft(labels.getWidth() / 2));
   iemLabel.setBounds(labels);
 
-  // 3. FX Slots (3 slots)
-  auto fxArea = masterArea.removeFromTop(70);
+  // 3. Master FX Slots (3 per bus)
+  ma.removeFromTop(2);
+  auto fxArea = ma.removeFromTop(64);
   auto fohFxArea = fxArea.removeFromLeft(fxArea.getWidth() / 2);
   auto iemFxArea = fxArea;
 
   for (int i = 0; i < 3; ++i) {
-    auto fRow = fohFxArea.removeFromTop(20).reduced(2, 1);
-    fohEditGuiBtns[i].setBounds(
-        fRow.removeFromRight((int)(fRow.getWidth() * 0.25f)));
+    auto fRow = fohFxArea.removeFromTop(21).reduced(2, 1);
+    fohEditGuiBtns[i].setBounds(fRow.removeFromRight(18));
+    fRow.removeFromRight(1);
     fohFxBtns[i].setBounds(fRow);
 
-    auto iRow = iemFxArea.removeFromTop(20).reduced(2, 1);
-    iemEditGuiBtns[i].setBounds(
-        iRow.removeFromRight((int)(iRow.getWidth() * 0.25f)));
+    auto iRow = iemFxArea.removeFromTop(21).reduced(2, 1);
+    iemEditGuiBtns[i].setBounds(iRow.removeFromRight(18));
+    iRow.removeFromRight(1);
     iemFxBtns[i].setBounds(iRow);
   }
 
-  // 4. Faders take the rest
-  masterFohSlider.setBounds(masterArea.removeFromLeft(masterArea.getWidth() / 2).reduced(8, 2));
-  masterIemSlider.setBounds(masterArea.reduced(8, 2));
+  // 4. Master Faders (leaving 16px on each bus's right side for its stereo segmented meter)
+  ma.removeFromTop(4);
+  auto fohFaderCol = ma.removeFromLeft(ma.getWidth() / 2);
+  auto iemFaderCol = ma;
+  masterFohSlider.setBounds(fohFaderCol.withTrimmedRight(16).reduced(6, 2));
+  masterIemSlider.setBounds(iemFaderCol.withTrimmedRight(16).reduced(6, 2));
 
-  // Channel Strips (horizontal arrangement in center)
+  // Channel Strips (horizontal rack in center) + pinned Aux Returns on right
   int numMain = rackSlotComponents.size();
   int numReturns = auxReturnComponents.size();
 
   if (numMain > 0 || numReturns > 0) {
-    const int collapsedWidth = 28;
-    int numCollapsed = 0;
-    int numExpanded = 0;
+    const int mutedCollapsedWidth = 28;
+    const int emptyCollapsedWidth = 30;
+    const int expandedWidth =
+        juce::jlimit(kMinExpandedWidth, kMaxExpandedWidth, preferredExpandedWidth);
 
-    for (auto *c : rackSlotComponents) {
-      if (c->getIsCollapsed())
-        numCollapsed++;
-      else
-        numExpanded++;
+    // 1. Pin Aux Returns on the right: collapsed Aux Returns shrink to 28px!
+    const int returnExpandedW =
+        juce::jlimit(68, 84, juce::jmax(68, r.getWidth() / 11));
+    if (numReturns > 0) {
+      int returnsTotalW = 0;
+      for (auto *c : auxReturnComponents)
+        returnsTotalW += c->getIsCollapsed() ? mutedCollapsedWidth : returnExpandedW;
+
+      auto returnsArea =
+          r.removeFromRight(juce::jmin(r.getWidth() / 2, returnsTotalW));
+      juce::Rectangle<int> lwLogoArea;
+      for (auto *c : auxReturnComponents) {
+        const int cw = c->getIsCollapsed() ? mutedCollapsedWidth : returnExpandedW;
+        auto col =
+            returnsArea.removeFromLeft(juce::jmin(cw, returnsArea.getWidth()));
+        int stripH = juce::jmax(240, col.getHeight() / 2);
+        c->setBounds(col.removeFromTop(stripH).reduced(1, 2));
+        lwLogoArea = lwLogoArea.isEmpty() ? col : lwLogoArea.getUnion(col);
+      }
+      lastWaltzLogoComponent.setVisible(lastWaltzLogoImage.isValid() &&
+                                        lwLogoArea.getWidth() >= 48 &&
+                                        lwLogoArea.getHeight() >= 48);
+      if (lastWaltzLogoComponent.isVisible())
+        lastWaltzLogoComponent.setBounds(lwLogoArea.reduced(2));
+    } else {
+      lastWaltzLogoComponent.setVisible(false);
     }
 
-    int totalAvail = r.getWidth();
-    int returnWidth = (numExpanded > 0) ? juce::jlimit(60, 95, totalAvail / (numExpanded + numReturns + 2)) : 80;
-    int fixedWidths = (numCollapsed * collapsedWidth) + (numReturns * returnWidth);
-    
-    // Distribute remaining width, capped at preferredExpandedWidth (default 140px, max 260px)
-    int availForExpanded = totalAvail - fixedWidths;
-    int calcWidth = (numExpanded > 0) ? (availForExpanded / numExpanded) : preferredExpandedWidth;
-    int expandedWidth = juce::jlimit(kMinExpandedWidth, preferredExpandedWidth, calcWidth);
+    // 2. When Stage Compact is ON, collapse all unused empty strips into a single
+    //    "+ ADD" next-strip tile right after the last active/expanded strip.
+    const bool compactOn = autoCollapseToggle.getToggleState();
+    int nextEmptyIdx = -1;
+    if (compactOn) {
+      int lastUsedOrExpandedIdx = 0;
+      for (int i = 1; i < rackSlotComponents.size(); ++i) {
+        auto *comp = rackSlotComponents[i];
+        if (!(comp->getIsCollapsed() && comp->isUnusedEmptyStrip()))
+          lastUsedOrExpandedIdx = i;
+      }
+      for (int i = lastUsedOrExpandedIdx + 1; i < rackSlotComponents.size(); ++i) {
+        auto *comp = rackSlotComponents[i];
+        if (comp->getIsCollapsed() && comp->isUnusedEmptyStrip()) {
+          nextEmptyIdx = i;
+          break;
+        }
+      }
+      if (nextEmptyIdx < 0) {
+        for (int i = 1; i < rackSlotComponents.size(); ++i) {
+          auto *comp = rackSlotComponents[i];
+          if (comp->getIsCollapsed() && comp->isUnusedEmptyStrip()) {
+            nextEmptyIdx = i;
+            break;
+          }
+        }
+      }
+    }
 
-    // Draw regular slots first (skip monitor in at index 0)
+    int totalStripsWidth = 0;
     for (int i = 1; i < rackSlotComponents.size(); ++i) {
-      int w = rackSlotComponents[i]->getIsCollapsed() ? collapsedWidth : expandedWidth;
-      rackSlotComponents[i]->setBounds(r.removeFromLeft(juce::jmin(w, r.getWidth())).reduced(2));
+      auto *comp = rackSlotComponents[i];
+      const bool isEmptyCollapsed =
+          comp->getIsCollapsed() && comp->isUnusedEmptyStrip();
+      const bool hideExtraEmpty =
+          compactOn && isEmptyCollapsed && (i != nextEmptyIdx);
+      comp->setVisible(!hideExtraEmpty);
+      if (!hideExtraEmpty) {
+        const int cw = isEmptyCollapsed ? emptyCollapsedWidth : mutedCollapsedWidth;
+        totalStripsWidth += comp->getIsCollapsed() ? cw : expandedWidth;
+      }
     }
-
-    // Draw Monitor In (index 0) next to aux returns
     if (rackSlotComponents.size() > 0) {
-      int w = rackSlotComponents[0]->getIsCollapsed() ? collapsedWidth : expandedWidth;
-      rackSlotComponents[0]->setBounds(r.removeFromLeft(juce::jmin(w, r.getWidth())).reduced(2));
+      auto *comp = rackSlotComponents[0];
+      comp->setVisible(true);
+      totalStripsWidth += comp->getIsCollapsed() ? mutedCollapsedWidth : expandedWidth;
     }
 
-    // Draw aux returns last � half height; the freed lower half of their
-    // columns hosts the gig logo (The Last Waltz)
-    juce::Rectangle<int> lwLogoArea;
-    for (auto *c : auxReturnComponents) {
-      auto col = r.removeFromLeft(juce::jmin(returnWidth, r.getWidth()));
-      int stripH = juce::jmax(240, col.getHeight() / 2); // keep strips usable
-      c->setBounds(col.removeFromTop(stripH).reduced(2));
-      lwLogoArea = lwLogoArea.isEmpty() ? col : lwLogoArea.getUnion(col);
+    // 3. Dedicated high-contrast bottom navigation bar [ < ] [===] [ > ] when needed
+    const bool needsHScroll = totalStripsWidth > r.getWidth();
+    if (needsHScroll) {
+      auto navRow = r.removeFromBottom(20).reduced(1, 2);
+      rackScrollLeftBtn.setBounds(navRow.removeFromLeft(30));
+      navRow.removeFromLeft(3);
+      rackScrollRightBtn.setBounds(navRow.removeFromRight(30));
+      navRow.removeFromRight(3);
+      rackHScrollBar.setBounds(navRow);
     }
-    lastWaltzLogoComponent.setVisible(lastWaltzLogoImage.isValid() &&
-                                      !lwLogoArea.isEmpty());
-    if (lastWaltzLogoComponent.isVisible())
-      lastWaltzLogoComponent.setBounds(lwLogoArea.reduced(2));
+    rackScrollLeftBtn.setVisible(needsHScroll);
+    rackScrollRightBtn.setVisible(needsHScroll);
+    rackHScrollBar.setVisible(needsHScroll);
+
+    rackViewport.setBounds(r);
+    const int stripAreaH = juce::jmax(120, r.getHeight());
+    rackStripContainer.setSize(juce::jmax(r.getWidth(), totalStripsWidth),
+                               stripAreaH);
+
+    int xPos = 0;
+    for (int i = 1; i < rackSlotComponents.size(); ++i) {
+      auto *comp = rackSlotComponents[i];
+      if (!comp->isVisible())
+        continue;
+      const bool isEmptyCollapsed =
+          comp->getIsCollapsed() && comp->isUnusedEmptyStrip();
+      const int cw = isEmptyCollapsed ? emptyCollapsedWidth : mutedCollapsedWidth;
+      const int w = comp->getIsCollapsed() ? cw : expandedWidth;
+      comp->setBounds(juce::Rectangle<int>(xPos, 0, w, stripAreaH).reduced(1, 0));
+      xPos += w;
+    }
+
+    // Place Monitor In (index 0) after the main channels, adjacent to Aux Returns
+    if (rackSlotComponents.size() > 0) {
+      auto *comp = rackSlotComponents[0];
+      const int w = comp->getIsCollapsed() ? mutedCollapsedWidth : expandedWidth;
+      comp->setBounds(juce::Rectangle<int>(xPos, 0, w, stripAreaH).reduced(1, 0));
+      xPos += w;
+    }
+
+    // Sync scrollbar range and clamp scroll offset if rack shrank
+    rackHScrollBar.setRangeLimits(0.0, (double)rackStripContainer.getWidth(),
+                                  juce::dontSendNotification);
+    setRackScrollX(rackViewport.getViewPositionX());
   }
 
   if (channelStripOverlay)
@@ -2902,6 +3233,13 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
                     }
                     repaint();
                     refreshSceneButtons();
+                    if (autoCollapseToggle.getToggleState()) {
+                        updateStripCollapseStates();
+                    } else {
+                        for (auto *comp : rackSlotComponents)
+                            comp->setCollapsed(false);
+                        resized();
+                    }
                     // Active-queue highlighting is driven by updatePreloadStatus()
                     // via the SetlistManager change broadcaster (setActiveIndex).
 midiMonitorLabel.setText("SONG: " + message,
@@ -3069,7 +3407,7 @@ void MainComponent::timerCallback() {
 
   if (engine.consumeAudioUnderrun()) {
     // Engine-side stall (worker didn't finish, rack mid-transition): the block
-    // was genuinely silent � count it in XRUNS so the meter matches the ears,
+    // was genuinely silent - count it in XRUNS so the meter matches the ears,
     // but tally it separately from callback-gap underruns.
     engineStallCount++;
     FanfareLog::log(FanfareLog::Level::Warning,
@@ -3098,10 +3436,12 @@ void MainComponent::timerCallback() {
   // Sync Master FX buttons
   for (int i = 0; i < 3; ++i) {
     auto fohName = engine.getMasterPluginName(true, i);
+    fohFxBtns[i].getProperties().set("hasPlugin", fohName.isNotEmpty());
     fohFxBtns[i].setButtonText(fohName.isEmpty() ? "FOH " + juce::String(i + 1)
                                                  : fohName);
 
     auto iemName = engine.getMasterPluginName(false, i);
+    iemFxBtns[i].getProperties().set("hasPlugin", iemName.isNotEmpty());
     iemFxBtns[i].setButtonText(iemName.isEmpty() ? "IEM " + juce::String(i + 1)
                                                  : iemName);
   }

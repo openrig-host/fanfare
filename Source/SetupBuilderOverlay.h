@@ -4,6 +4,7 @@
 #include "RigLibrary.h"
 #include "RigSerializer.h"
 #include "BoutiqueLookAndFeel.h"
+#include "ButtonRoles.h"
 #include "FanfareConstants.h"
 #include "HelpLauncher.h"
 #include "ThemeManager.h"
@@ -11,8 +12,8 @@
 class StripRowComponent : public juce::Component {
 public:
     StripRowComponent(juce::String name, bool initiallyChecked, int defaultCC, std::function<void(bool, int)> onChange)
-        : onStateChange(onChange) {
-        
+        : onStateChange(std::move(onChange)) {
+
         checkbox.setToggleState(initiallyChecked, juce::dontSendNotification);
         checkbox.onClick = [this] {
             updateEnabledStates();
@@ -21,16 +22,21 @@ public:
         addAndMakeVisible(checkbox);
 
         nameLabel.setText(name, juce::dontSendNotification);
-        nameLabel.setFont(juce::FontOptions(12.0f));
+        nameLabel.setFont(BoutiqueLookAndFeel::uiFont(12.5f, false));
+        nameLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::text));
         addAndMakeVisible(nameLabel);
 
-        ccLabel.setText("CC:", juce::dontSendNotification);
-        ccLabel.setFont(juce::FontOptions(11.0f));
+        ccLabel.setText("CC", juce::dontSendNotification);
+        ccLabel.setFont(BoutiqueLookAndFeel::condensedFont(10.5f, 0.06f));
+        ccLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
         addAndMakeVisible(ccLabel);
 
         ccInput.setText(juce::String(defaultCC));
         ccInput.setInputRestrictions(3, "0123456789");
-        ccInput.setColour(juce::TextEditor::backgroundColourId, ThemeManager::get(Theme::Role::panel));
+        ccInput.setFont(BoutiqueLookAndFeel::monoFont(11.5f, true));
+        ccInput.setColour(juce::TextEditor::backgroundColourId, ThemeManager::get(Theme::Role::sunken));
+        ccInput.setColour(juce::TextEditor::outlineColourId, ThemeManager::get(Theme::Role::border));
+        ccInput.setColour(juce::TextEditor::textColourId, ThemeManager::get(Theme::Role::text));
         ccInput.onTextChange = [this] { triggerCallback(); };
         addAndMakeVisible(ccInput);
 
@@ -41,15 +47,18 @@ public:
         auto r = getLocalBounds();
         checkbox.setBounds(r.removeFromLeft(24).reduced(2));
         r.removeFromLeft(4);
-        
-        auto rightSide = r.removeFromRight(80);
-        ccInput.setBounds(rightSide.removeFromRight(40).reduced(2));
+
+        auto rightSide = r.removeFromRight(76);
+        ccInput.setBounds(rightSide.removeFromRight(42).reduced(2));
         ccLabel.setBounds(rightSide.reduced(2));
 
         nameLabel.setBounds(r.reduced(2));
     }
 
-    void setCheckedAndCC(const juce::String& name, bool checked, int cc, std::function<void(bool, int)> onChange) { nameLabel.setText(name, juce::dontSendNotification); onStateChange = std::move(onChange);
+    void setCheckedAndCC(const juce::String& name, bool checked, int cc, std::function<void(bool, int)> onChange) {
+        nameLabel.setText(name, juce::dontSendNotification);
+        nameLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::text));
+        onStateChange = std::move(onChange);
         checkbox.setToggleState(checked, juce::dontSendNotification);
         ccInput.setText(juce::String(cc), juce::dontSendNotification);
         updateEnabledStates();
@@ -83,44 +92,41 @@ public:
     };
 
     SetupBuilderOverlay(Actions a) : actions(std::move(a)) {
-        titleLabel.setText("SONG BUILDER", juce::dontSendNotification);
-        titleLabel.setFont(juce::FontOptions(20.0f, juce::Font::bold));
-        titleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
-        titleLabel.setJustificationType(juce::Justification::centred);
-        addAndMakeVisible(titleLabel);
+        titleLabel.setVisible(false);
 
-        closeBtn.setButtonText("X");
-        closeBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::danger));
+        closeBtn.setButtonText("CLOSE");
+        Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Subtle);
         closeBtn.onClick = [this] { if (actions.onClose) actions.onClose(); };
         addAndMakeVisible(closeBtn);
+
         Fanfare::styleHelpButton(helpBtn, "#song-builder", "HAAALP! Open the Song Builder section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
-        // Load strips list
         stripsDir = Fanfare::RigLibrary::getPresetsDirectory();
         stripFiles = stripsDir.findChildFiles(juce::File::findFiles, false, "*.orstrip");
         selectedStates.resize(stripFiles.size(), false);
-        ccValues.resize(stripFiles.size(), 7); // Default to CC 7 (Volume)
+        ccValues.resize(stripFiles.size(), 7);
 
         listBox.setModel(this);
-        listBox.setRowHeight(24);
-        listBox.setColour(juce::ListBox::backgroundColourId, ThemeManager::get(Theme::Role::panel));
+        listBox.setRowHeight(26);
+        listBox.setColour(juce::ListBox::backgroundColourId, ThemeManager::get(Theme::Role::sunken));
         listBox.setOutlineThickness(1);
         listBox.setColour(juce::ListBox::outlineColourId, ThemeManager::get(Theme::Role::border));
         addAndMakeVisible(listBox);
 
-        // Setup Name Input
-        nameLabel.setText("Song Name:", juce::dontSendNotification);
-        nameLabel.setFont(juce::FontOptions(13.0f));
+        nameLabel.setText("SONG NAME", juce::dontSendNotification);
+        nameLabel.setFont(BoutiqueLookAndFeel::condensedFont(11.5f, 0.08f));
+        nameLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
         addAndMakeVisible(nameLabel);
 
         nameEditor.setText("My Custom Song");
         nameEditor.setInputRestrictions(30);
-        nameEditor.setColour(juce::TextEditor::backgroundColourId, ThemeManager::get(Theme::Role::panel));
+        nameEditor.setFont(BoutiqueLookAndFeel::uiFont(13.5f, false));
+        nameEditor.setColour(juce::TextEditor::backgroundColourId, ThemeManager::get(Theme::Role::sunken));
         nameEditor.setColour(juce::TextEditor::outlineColourId, ThemeManager::get(Theme::Role::border));
+        nameEditor.setColour(juce::TextEditor::textColourId, ThemeManager::get(Theme::Role::text));
         addAndMakeVisible(nameEditor);
 
-        // Options
         assignMidiChannelsBtn.setButtonText("Pre-assign Consecutive MIDI Channels");
         assignMidiChannelsBtn.setToggleState(true, juce::dontSendNotification);
         addAndMakeVisible(assignMidiChannelsBtn);
@@ -130,21 +136,20 @@ public:
         addAndMakeVisible(freshBuildBtn);
 
         buildBtn.setButtonText("BUILD & LOAD SONG");
-        buildBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
-        buildBtn.setColour(juce::TextButton::textColourOffId, ThemeManager::get(Theme::Role::textOnAccent));
+        Fanfare::setButtonRole(buildBtn, Fanfare::ButtonRole::Primary);
         buildBtn.onClick = [this] { buildSetup(); };
         addAndMakeVisible(buildBtn);
 
-        setSize(400, 510);
+        setSize(412, 500);
     }
 
     int getNumRows() override {
         return stripFiles.size();
     }
 
-    void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override {
-        juce::ignoreUnused(rowIsSelected, rowNumber, width, height);
-        g.fillAll(ThemeManager::get(Theme::Role::panel));
+    void paintListBoxItem(int rowNumber, juce::Graphics& g, int, int, bool) override {
+        const auto& t = ThemeManager::getInstance().active();
+        g.fillAll((rowNumber % 2 == 0) ? t.sunken : t.panel);
     }
 
     juce::Component* refreshComponentForRow(int rowNumber, bool isRowSelected, juce::Component* existingComponentToUpdate) override {
@@ -161,46 +166,52 @@ public:
                 }
             );
         } else {
-            rowComp->setCheckedAndCC(stripFiles[rowNumber].getFileNameWithoutExtension(), selectedStates[rowNumber], ccValues[rowNumber], [this, rowNumber](bool checked, int cc) { selectedStates[rowNumber] = checked; ccValues[rowNumber] = cc; });
+            rowComp->setCheckedAndCC(
+                stripFiles[rowNumber].getFileNameWithoutExtension(),
+                selectedStates[rowNumber],
+                ccValues[rowNumber],
+                [this, rowNumber](bool checked, int cc) {
+                    selectedStates[rowNumber] = checked;
+                    ccValues[rowNumber] = cc;
+                }
+            );
         }
-
         return rowComp;
     }
 
     void paint(juce::Graphics& g) override {
-        g.fillAll(ThemeManager::get(Theme::Role::scrim));
-        g.setColour(ThemeManager::get(Theme::Role::accent));
-        g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(1.0f), 8.0f, 1.5f);
+        Fanfare::ModalFrame::paintOverlayScrimAndPanel(
+            g, getLocalBounds(), getLocalBounds(), "SONG BUILDER", 38);
 
         if (stripFiles.isEmpty()) {
-            g.setColour(ThemeManager::get(Theme::Role::text).withAlpha(0.5f));
-            g.setFont(14.0f);
+            g.setColour(ThemeManager::get(Theme::Role::textDim));
+            g.setFont(BoutiqueLookAndFeel::uiFont(13.0f, false));
             g.drawText("No saved strips found in:\n" + stripsDir.getFullPathName(),
-                       listBox.getBounds(), juce::Justification::centred, true);
+                       listBox.getBounds().reduced(12), juce::Justification::centred, true);
         }
     }
 
     void resized() override {
-        auto area = getLocalBounds().reduced(16);
-        auto top = area.removeFromTop(30);
-        titleLabel.setBounds(top.removeFromLeft(top.getWidth() - 115));
-        helpBtn.setBounds(top.removeFromLeft(74).reduced(2, 2));
-        closeBtn.setBounds(top.removeFromRight(30));
+        auto full = getLocalBounds();
+        auto top = full.removeFromTop(38).reduced(10, 6);
+        closeBtn.setBounds(top.removeFromRight(52));
+        top.removeFromRight(4);
+        helpBtn.setBounds(top.removeFromRight(68));
 
-        area.removeFromTop(10);
-        listBox.setBounds(area.removeFromTop(200));
+        auto area = full.reduced(16, 12);
+        listBox.setBounds(area.removeFromTop(214));
 
-        area.removeFromTop(15);
+        area.removeFromTop(14);
         auto nameRow = area.removeFromTop(28);
-        nameLabel.setBounds(nameRow.removeFromLeft(90));
+        nameLabel.setBounds(nameRow.removeFromLeft(84));
         nameEditor.setBounds(nameRow);
 
         area.removeFromTop(10);
         assignMidiChannelsBtn.setBounds(area.removeFromTop(24));
         freshBuildBtn.setBounds(area.removeFromTop(24));
 
-        area.removeFromTop(15);
-        buildBtn.setBounds(area.removeFromTop(36).reduced(2, 0));
+        area.removeFromTop(14);
+        buildBtn.setBounds(area.removeFromTop(34));
     }
 
 private:
@@ -243,7 +254,6 @@ private:
         juce::String songName = nameEditor.getText().trim();
         if (songName.isEmpty()) songName = "My Custom Song";
 
-        // Create the Setup JSON object
         auto* root = new juce::DynamicObject();
         juce::Array<juce::var> channelsArr;
 
@@ -253,15 +263,12 @@ private:
                 auto stripFile = chosenStrips[i];
                 auto stripJson = juce::JSON::parse(stripFile);
                 if (auto* obj = stripJson.getDynamicObject()) {
-                    // Lock-to-Muted: All loaded slots are initialized as bypassed/muted
                     obj->setProperty("mute", true);
 
-                    // Pre-assign MIDI channel
                     if (assignMidiChannelsBtn.getToggleState()) {
                         obj->setProperty("midiChannel", midiChannel++);
                     }
 
-                    // Map volume CC as specified for this strip
                     int ccNum = chosenCCs[i];
                     if (ccNum >= 0 && ccNum <= 127) {
                         obj->setProperty("fohCC", ccNum);
@@ -271,9 +278,8 @@ private:
                     channelsArr.add(juce::var(obj));
                 }
             } else {
-                // Empty channel
                 auto* emptyObj = new juce::DynamicObject();
-                emptyObj->setProperty("name", "[EMPTY]");
+                emptyObj->setProperty("name", "Slot " + juce::String(i + 1));
                 emptyObj->setProperty("mute", true);
                 channelsArr.add(juce::var(emptyObj));
             }
@@ -281,11 +287,9 @@ private:
         root->setProperty("channels", channelsArr);
         root->setProperty("freshBuild", freshBuildBtn.getToggleState());
 
-        // Add standard master sections
         root->setProperty("fohFx", juce::Array<juce::var>{});
         root->setProperty("iemFx", juce::Array<juce::var>{});
-        
-        // Add default scenes list
+
         juce::Array<juce::var> scenesArr;
         auto* defaultScene = new juce::DynamicObject();
         defaultScene->setProperty("name", "SCENE 1");
@@ -339,7 +343,6 @@ private:
         root->setProperty("scenes", scenesArr);
         root->setProperty("currentSceneIndex", 0);
 
-        // Save new setup file to Songs/ folder
         auto targetFile = Fanfare::RigLibrary::getSongsDirectory().getChildFile(songName + ".json");
         targetFile.deleteFile();
         targetFile.getParentDirectory().createDirectory();
@@ -350,7 +353,6 @@ private:
             fos.flush();
         }
 
-        // Notify parent to load the newly built file
         if (actions.onBuildComplete) {
             actions.onBuildComplete(targetFile);
         }
