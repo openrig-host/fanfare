@@ -8,7 +8,7 @@
 		<title>Fanfare: Live VST3 Host for Keyboard Players</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-		<meta name="description" content="Fanfare is a rack-based VST3 host for keyboard players who gig. Clean song changes, separate FOH and IEM mixes, MIDI learn, setlist preloading, and a panic button that works." />
+		<meta name="description" content="Fanfare v1.4 is a rack-based VST3 host for keyboard players who gig. Clean song changes, separate FOH and IEM mixes with per-strip IEM trim, stereo/ping-pong/tape delay, Front Panel Dark &amp; Bright skins, tablet HUD, and a panic button that works." />
 		<link rel="stylesheet" href="assets/css/main.css" />
 		<noscript><link rel="stylesheet" href="assets/css/noscript.css" /></noscript>
 		<style>
@@ -145,7 +145,7 @@
 									<li><a href="https://github.com/openrig-host/fanfare" class="button" target="_blank" rel="noopener">Source Code</a></li>
 								</ul>
 								<span class="image main"><img src="vu_meters_detail.png" alt="Analog peak VU metering and dual FOH/IEM bus faders" /></span>
-								<p>Separate master faders and VU meters for <strong>FOH</strong> (front of house) and <strong>IEM</strong> (in-ear monitors). Turn up your ears without touching what the room hears.</p>
+								<p>Separate master faders and VU meters for <strong>FOH</strong> (front of house) and <strong>IEM</strong> (in-ear monitors), plus per-strip <strong>IEM Trim</strong> (<code>-inf</code> to <code>+6 dB</code>) so you can turn up your Rhodes in your ears without touching what the room hears.</p>
 							</article>
 
 						<!-- Features -->
@@ -157,8 +157,20 @@
 										<p>Every song is a plain JSON file. Jump between sections with MIDI, and the next song loads while you play.</p>
 									</div>
 									<div>
-										<h3>Channel Strip DSP &amp; Musette</h3>
-										<p>Gate, EQ, compressor, chorus, reverb, and convolution on every slot. Plus an accordion detuner with 2-reed MM, 3-reed MMM, and &ldquo;TEMU Musette&rdquo;, which is exactly as out of tune as it sounds.</p>
+										<h3>Strip DSP, Delay &amp; Musette</h3>
+										<p>Gate, 10-band EQ, compressor, chorus, reverb, IR cab loader, and stereo/ping-pong/tape delay with Tap Tempo on every strip. Plus an accordion detuner with 2-reed MM, 3-reed MMM, and &ldquo;TEMU Musette&rdquo;, which is exactly as out of tune as it sounds.</p>
+									</div>
+									<div>
+										<h3>FOH + Per-Strip IEM Trim</h3>
+										<p>Gold FOH and cyan IEM buses, plus a per-strip IEM Trim knob inside DYN with live dB badges right on the console. Dial more of yourself into your monitors while FOH stays locked.</p>
+									</div>
+									<div>
+										<h3>Front Panel Dark &amp; Bright</h3>
+										<p>Hardware-inspired dark console for dim clubs, plus a one-click high-contrast Bright skin (on both laptop and tablet) engineered for sunlit outdoor festival stages.</p>
+									</div>
+									<div>
+										<h3>Tablet Stage HUD &amp; Hotspot</h3>
+										<p>Built-in Wi-Fi SoftAP hotspot and touchscreen Web HUD with 88-key zone map, Gig Notepad chord badges, Bright/Dark toggle, live ping readout, and hold-to-fire Panic.</p>
 									</div>
 									<div>
 										<h3>Direct Outs</h3>
@@ -318,8 +330,8 @@
 			<script src="assets/js/main.js"></script>
 			<script>
 				const captions = [
-					"Full live mixer interface with setlist manager, dual FOH/IEM mixes, and peak VU metering.",
-					"Channel strip: noise gate, EQ, compressor, reverb, convolution, and aux sends.",
+					"Full live mixer interface with setlist manager, dual FOH/IEM mixes, scrollable 24-strip rack, and peak VU metering.",
+					"Channel strip DSP: noise gate, 10-band EQ, compressor, stereo/ping-pong/tape delay with tap tempo, reverb, IR loader, and per-strip IEM trim.",
 					"MIDI FX module with transposer, arpeggiator patterns, and harmonizer.",
 					"8 one-shot pad sampler with drag-and-drop WAV support and sample-accurate splice handles.",
 					"Active VST3 floating editor windows showing synth and sampler controls.",
