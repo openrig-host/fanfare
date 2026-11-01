@@ -7,7 +7,7 @@
 class GigNotepadWindow : public juce::DocumentWindow {
 public:
     GigNotepadWindow(FanfareEngine& eng, std::function<void()> onClose)
-        : DocumentWindow("OpenRig Gig Notepad & Stage Notes",
+        : DocumentWindow("Fanfare Gig Notepad & Stage Notes",
                          ThemeManager::get(Theme::Role::panel),
                          DocumentWindow::closeButton | DocumentWindow::minimiseButton),
           onCloseCallback(onClose)

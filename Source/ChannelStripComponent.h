@@ -4,6 +4,8 @@
 #include "RackSlot.h"
 #include <JuceHeader.h>
 #include "BoutiqueLookAndFeel.h"
+#include "BoutiqueLookAndFeel.h"
+#include "HelpLauncher.h"
 #include "ThemeManager.h"
 
 class BigKnob : public juce::Slider {
@@ -84,6 +86,8 @@ public:
 
     // Close Button
     addAndMakeVisible(closeBtn);
+    Fanfare::styleHelpButton(helpBtn, "#channel-strip-dsp", "HAAALP! Open the Strip DSP section of the User's Manual");
+    addAndMakeVisible(helpBtn);
     closeBtn.setButtonText("X");
     closeBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::red);
     closeBtn.onClick = [this] {
@@ -365,7 +369,7 @@ public:
 
     // --- CUSTOMIZE ---
     addAndMakeVisible(nameLabel);
-    nameLabel.setText("Channel Name:", juce::dontSendNotification);
+    nameLabel.setText("Strip Name:", juce::dontSendNotification);
     addAndMakeVisible(nameEditor);
     nameEditor.setText(slot.getName());
     nameEditor.onTextChange = [this] {
@@ -375,7 +379,7 @@ public:
 
     // Color picker
     addAndMakeVisible(colorLabel);
-    colorLabel.setText("Channel Color:", juce::dontSendNotification);
+    colorLabel.setText("Strip Color:", juce::dontSendNotification);
     addAndMakeVisible(colorPreview);
     colorPreview.setColour(juce::Label::backgroundColourId, slot.getChannelColor());
     addAndMakeVisible(colorButton);
@@ -501,7 +505,7 @@ public:
     colourSelector->setSize(300, 400);
 
     juce::DialogWindow::LaunchOptions options;
-    options.dialogTitle = "Select Channel Color";
+    options.dialogTitle = "Select Strip Color";
     options.dialogBackgroundColour = ThemeManager::get(Theme::Role::panel);
     options.escapeKeyTriggersCloseButton = true;
     options.useNativeTitleBar = false;
@@ -536,12 +540,14 @@ public:
     }
     g.setColour(juce::Colours::white);
     g.setFont(24.0f);
-    g.drawText("CHANNEL STRIP: " + slot.getName(), 20, 20, 400, 30, juce::Justification::left);
+    g.drawText("STRIP DSP: " + slot.getName(), 20, 20, 400, 30, juce::Justification::left);
   }
 
   void resized() override {
     closeBtn.setBounds(getWidth() - 40, 10, 30, 30);
-    stereoMonoBtn.setBounds(getWidth() - 190, 12, 140, 26);
+    closeBtn.setBounds(getWidth() - 40, 10, 30, 30);
+    helpBtn.setBounds(getWidth() - 122, 12, 74, 26);
+    stereoMonoBtn.setBounds(getWidth() - 270, 12, 140, 26);
     int sectionY = 60;
     int sectionH = 200;
 
@@ -646,6 +652,7 @@ private:
   RackSlot &slot;
   std::function<void()> onCloseRequest;
   juce::TextButton closeBtn;
+  juce::TextButton helpBtn{"HAAALP!"};
   juce::GroupComponent gateGroup;
   juce::TextButton gateToggle;
   BigKnob gateThreshKnob{" dB"};

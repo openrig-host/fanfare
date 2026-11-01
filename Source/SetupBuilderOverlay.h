@@ -5,6 +5,7 @@
 #include "RigSerializer.h"
 #include "BoutiqueLookAndFeel.h"
 #include "FanfareConstants.h"
+#include "HelpLauncher.h"
 #include "ThemeManager.h"
 
 class StripRowComponent : public juce::Component {
@@ -48,7 +49,7 @@ public:
         nameLabel.setBounds(r.reduced(2));
     }
 
-    void setCheckedAndCC(bool checked, int cc) {
+    void setCheckedAndCC(const juce::String& name, bool checked, int cc, std::function<void(bool, int)> onChange) { nameLabel.setText(name, juce::dontSendNotification); onStateChange = std::move(onChange);
         checkbox.setToggleState(checked, juce::dontSendNotification);
         ccInput.setText(juce::String(cc), juce::dontSendNotification);
         updateEnabledStates();
@@ -82,7 +83,7 @@ public:
     };
 
     SetupBuilderOverlay(Actions a) : actions(std::move(a)) {
-        titleLabel.setText("SETUP BUILDER", juce::dontSendNotification);
+        titleLabel.setText("SONG BUILDER", juce::dontSendNotification);
         titleLabel.setFont(juce::FontOptions(20.0f, juce::Font::bold));
         titleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
         titleLabel.setJustificationType(juce::Justification::centred);
@@ -92,6 +93,8 @@ public:
         closeBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::danger));
         closeBtn.onClick = [this] { if (actions.onClose) actions.onClose(); };
         addAndMakeVisible(closeBtn);
+        Fanfare::styleHelpButton(helpBtn, "#song-builder", "HAAALP! Open the Song Builder section of the User's Manual");
+        addAndMakeVisible(helpBtn);
 
         // Load strips list
         stripsDir = Fanfare::RigLibrary::getPresetsDirectory();
@@ -107,11 +110,11 @@ public:
         addAndMakeVisible(listBox);
 
         // Setup Name Input
-        nameLabel.setText("Setup Name:", juce::dontSendNotification);
+        nameLabel.setText("Song Name:", juce::dontSendNotification);
         nameLabel.setFont(juce::FontOptions(13.0f));
         addAndMakeVisible(nameLabel);
 
-        nameEditor.setText("My Custom Rig");
+        nameEditor.setText("My Custom Song");
         nameEditor.setInputRestrictions(30);
         nameEditor.setColour(juce::TextEditor::backgroundColourId, ThemeManager::get(Theme::Role::panel));
         nameEditor.setColour(juce::TextEditor::outlineColourId, ThemeManager::get(Theme::Role::border));
@@ -126,7 +129,7 @@ public:
         freshBuildBtn.setToggleState(false, juce::dontSendNotification);
         addAndMakeVisible(freshBuildBtn);
 
-        buildBtn.setButtonText("BUILD & LOAD SETUP");
+        buildBtn.setButtonText("BUILD & LOAD SONG");
         buildBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
         buildBtn.setColour(juce::TextButton::textColourOffId, ThemeManager::get(Theme::Role::textOnAccent));
         buildBtn.onClick = [this] { buildSetup(); };
@@ -158,7 +161,7 @@ public:
                 }
             );
         } else {
-            rowComp->setCheckedAndCC(selectedStates[rowNumber], ccValues[rowNumber]);
+            rowComp->setCheckedAndCC(stripFiles[rowNumber].getFileNameWithoutExtension(), selectedStates[rowNumber], ccValues[rowNumber], [this, rowNumber](bool checked, int cc) { selectedStates[rowNumber] = checked; ccValues[rowNumber] = cc; });
         }
 
         return rowComp;
@@ -180,7 +183,8 @@ public:
     void resized() override {
         auto area = getLocalBounds().reduced(16);
         auto top = area.removeFromTop(30);
-        titleLabel.setBounds(top.removeFromLeft(top.getWidth() - 40));
+        titleLabel.setBounds(top.removeFromLeft(top.getWidth() - 115));
+        helpBtn.setBounds(top.removeFromLeft(74).reduced(2, 2));
         closeBtn.setBounds(top.removeFromRight(30));
 
         area.removeFromTop(10);
@@ -208,6 +212,7 @@ private:
 
     juce::Label titleLabel;
     juce::TextButton closeBtn;
+    juce::TextButton helpBtn{"HAAALP!"};
     juce::ListBox listBox{ "StripsList", nullptr };
 
     juce::Label nameLabel;
@@ -230,13 +235,13 @@ private:
 
         if (chosenStrips.isEmpty()) {
             juce::AlertWindow::showMessageBoxAsync(
-                juce::MessageBoxIconType::InfoIcon, "Build Setup",
+                juce::MessageBoxIconType::InfoIcon, "Build Song",
                 "Please select at least one channel strip preset from the list.");
             return;
         }
 
         juce::String songName = nameEditor.getText().trim();
-        if (songName.isEmpty()) songName = "My Custom Rig";
+        if (songName.isEmpty()) songName = "My Custom Song";
 
         // Create the Setup JSON object
         auto* root = new juce::DynamicObject();
@@ -283,7 +288,7 @@ private:
         // Add default scenes list
         juce::Array<juce::var> scenesArr;
         auto* defaultScene = new juce::DynamicObject();
-        defaultScene->setProperty("name", "INIT PRESET");
+        defaultScene->setProperty("name", "SCENE 1");
         juce::Array<juce::var> statesArr;
         for (int i = 0; i < FanfareConstants::kNumSlots; ++i) {
             auto* stateObj = new juce::DynamicObject();

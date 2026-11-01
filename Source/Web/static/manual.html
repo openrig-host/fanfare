@@ -1,0 +1,879 @@
+<!DOCTYPE HTML>
+<!--
+	Read Only by HTML5 UP
+	html5up.net | @ajlkn
+	Free for personal and commercial use under the CCA 3.0 license (html5up.net/license)
+-->
+<html>
+	<head>
+		<title>Fanfare v1.3.1: Stage Survival Manual</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+		<meta name="description" content="Fanfare User's Manual & Stage Survival Guide. Strips, Songs, Scenes, Setlists, B3 inverse drawbars, and bass-player-proof USB hotplugging." />
+		<link rel="stylesheet" href="assets-readonly/css/main.css" />
+		<style>
+			/* Readability & navigation refinements for 20-chapter manual */
+			body, input, select, textarea {
+				color: #4a4a4a;
+			}
+			h1, h2, h3, h4, h5, h6, strong, b {
+				color: #2c3e50;
+			}
+			blockquote {
+				background: #f7fbfa;
+				border-left: solid 6px #4acaa8;
+				font-style: normal;
+				padding: 1.25em 1.5em;
+				border-radius: 0 6px 6px 0;
+				color: #3a4a46;
+			}
+			blockquote strong {
+				color: #1f7a61;
+			}
+			#header > header {
+				padding: 1.6em 1.5em 1em 1.5em;
+			}
+			#header > header .avatar {
+				width: 4.5em;
+				margin: 0 auto 0.9em auto;
+			}
+			#header > header h1 {
+				font-size: 1.35em;
+			}
+			#header > header p {
+				font-size: 0.85em;
+				margin: 0.4em 0 0.8em 0;
+				line-height: 1.4em;
+			}
+			#header > nav ul li a {
+				padding: 0.42em 1.2em;
+				font-size: 0.82em;
+				text-align: left;
+			}
+			#nav-filter {
+				width: 100%;
+				height: 2.3em;
+				padding: 0 0.75em;
+				font-size: 0.82em;
+				border-radius: 4px;
+				border: solid 1px rgba(0, 0, 0, 0.25);
+				background: rgba(0, 0, 0, 0.35);
+				color: #ffffff;
+			}
+			#nav-filter::placeholder {
+				color: rgba(255, 255, 255, 0.85);
+			}
+			#nav-filter:focus {
+				background: #ffffff;
+				color: #2c3e50;
+				border-color: #ffffff;
+			}
+			#nav-filter:focus::placeholder {
+				color: rgba(44, 62, 80, 0.55);
+			}
+			.image.main {
+				height: auto;
+				max-height: 26em;
+				overflow: hidden;
+				border-bottom: solid 4px #f4f4f4;
+			}
+			.image.fit {
+				text-align: center;
+				background: #f8f9fa;
+				border: solid 1px #e4e4e4;
+				border-radius: 6px;
+				padding: 0.75em;
+			}
+			.image.fit img {
+				width: auto;
+				max-width: 100%;
+				max-height: 22em;
+				margin: 0 auto;
+				border-radius: 4px;
+				cursor: zoom-in;
+			}
+			.image.right {
+				max-width: 14em;
+			}
+			.image.right img {
+				width: auto;
+				max-width: 100%;
+				max-height: 24em;
+				border: solid 1px #e4e4e4;
+				border-radius: 5px;
+				cursor: zoom-in;
+			}
+			.use-case-label {
+				display: inline-block;
+				background: #4acaa8;
+				color: #ffffff;
+				font-size: 0.72em;
+				font-weight: 700;
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+				padding: 0.2em 0.7em;
+				border-radius: 4px;
+				margin-bottom: 0.6em;
+			}
+			.lightbox {
+				display: none; position: fixed; z-index: 20000; top: 0; left: 0;
+				width: 100%; height: 100%; background: rgba(0,0,0,0.9); cursor: zoom-out;
+			}
+			.lightbox-content {
+				max-width: 94%; max-height: 92vh; position: absolute;
+				top: 50%; left: 50%; transform: translate(-50%, -50%);
+				border-radius: 6px;
+				box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+			}
+		</style>
+	</head>
+	<body class="is-preload">
+
+		<!-- Header (Right Sidebar in Read Only) -->
+			<section id="header">
+				<header>
+					<span class="image avatar"><img src="OpenRig_Icon.png" alt="Fanfare" /></span>
+					<h1 id="logo"><a href="#workflow">Fanfare v1.3.1</a></h1>
+					<p>The Stage Survival Manual</p>
+					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. B3, Wolf, USB)..." />
+				</header>
+				<nav id="nav">
+					<ul>
+						<li><a href="#workflow" class="active">1. Building-Block Workflow</a></li>
+						<li><a href="#quick-start">2. Quick Start: Noise in Ten Minutes</a></li>
+						<li><a href="#no-sound">3. The No-Sound Emergency Checklist</a></li>
+						<li><a href="#main-mixer">4. Main Console &amp; Panic</a></li>
+						<li><a href="#usb-hotplug">5. USB Hotplug (v1.3)</a></li>
+						<li><a href="#strips">6. Strips &amp; FOH / IEM</a></li>
+						<li><a href="#channel-strip-dsp">7. Strip DSP, EQ &amp; IR</a></li>
+						<li><a href="#musette">8. Accordion Musette</a></li>
+						<li><a href="#note-range">9. Note Range &amp; Splits</a></li>
+						<li><a href="#cc-assignments">10. CCs &amp; B3 Drawbars</a></li>
+						<li><a href="#midi-effects">11. Transpose, Arp &amp; Octaver</a></li>
+						<li><a href="#sampler">12. 8-Pad Sampler</a></li>
+						<li><a href="#break-music">13. Strip 10: Break DJ</a></li>
+						<li><a href="#song-builder">14. The Song Builder</a></li>
+						<li><a href="#scenes">15. Scenes (Snapshots)</a></li>
+						<li><a href="#stage-queue">16. Stage Queue &amp; Preload</a></li>
+						<li><a href="#setlists">17. Setlists &amp; Library</a></li>
+						<li><a href="#gig-notepad">18. Gig Notepad &amp; Chords</a></li>
+						<li><a href="#web-remote">19. Tablet HUD &amp; Hotspot</a></li>
+						<li><a href="#settings">20. Settings &amp; Routing</a></li>
+						<li><a href="#engine-tuning">21. Engine &amp; CPU Tuning</a></li>
+						<li><a href="#resource-inspector">22. Resource Inspector</a></li>
+						<li><a href="#community">23. Feedback &amp; Roll Your Own</a></li>
+					</ul>
+				</nav>
+				<footer>
+					<ul class="icons">
+						<li><a href="index.html" class="icon solid fa-broadcast-tower" title="Tablet Stage HUD"><span class="label">Stage HUD</span></a></li>
+						<li><a href="https://github.com/openrig-host/openrig" target="_blank" rel="noopener" class="icon brands fa-github" title="GitHub"><span class="label">Github</span></a></li>
+					</ul>
+				</footer>
+			</section>
+
+		<!-- Wrapper -->
+			<div id="wrapper">
+
+				<!-- Main -->
+					<div id="main">
+
+						<!-- 1. WORKFLOW -->
+							<section id="workflow">
+								<div class="image main" data-position="center">
+									<img src="full_mixer_v2.png" alt="Fanfare Live Console" />
+								</div>
+								<div class="container">
+									<header class="major">
+										<h2>Welcome to Fanfare. Don't Panic.</h2>
+										<p>1. The Building-Block Workflow: Strips &rarr; Songs &rarr; Scenes &rarr; Setlists</p>
+									</header>
+									<blockquote>
+										<span class="use-case-label">Why Fanfare Exists</span><br />
+										Fanfare was originally created for an audience of one: the author, built directly around his gigs playing in Eastern Canadian folk-rock and cover bands. His trusty old favourite Windows VST host, <strong>Brainspawn Forte</strong>, was discontinued nearly a decade ago, and he was far too cheap to buy a Mac just to run Apple MainStage. So, he built Fanfare to fill the void.
+									</blockquote>
+									<p>If you clicked a bright amber <code>HAAALP!</code> button during soundcheck because nothing is making noise and the drummer is already counting off, take a breath. The chapter you actually want is <a href="#no-sound">The No-Sound Emergency Checklist</a> (Chapter 3). Fanfare was built for one job: getting keyboard players through a live gig without a single dropout, stuck note, or fumbled song switch. No virtual patch cords, and no spaghetti node graphs that require an electrical engineering degree at 11:30 PM in a dark bar.</p>
+									<p>Most plugin hosts force you to rebuild your entire universe from scratch for every tune, or cram 60 plugins into one gigantic file until your laptop smells like a toaster. Fanfare uses a strict four-level hierarchy where you build your favorite instruments once and snap them together like LEGO bricks:</p>
+
+									<div class="row">
+										<div class="col-6 col-12-xsmall">
+											<h4>Level 1: Strip (<code>.orstrip</code>)</h4>
+											<p><strong>The Brick.</strong> A single channel strip with up to 3 stacked VST3 plugins, 10-band EQ, compressor, note split, and MIDI CC mappings (like your B3 drawbars).</p>
+										</div>
+										<div class="col-6 col-12-xsmall">
+											<h4>Level 2: Song (<code>.json</code>)</h4>
+											<p><strong>The Arrangement.</strong> A complete 10-strip mixer rack assembled for a specific tune, plus Master FOH/IEM effects and song-specific chord charts.</p>
+										</div>
+										<div class="col-6 col-12-xsmall">
+											<h4>Level 3: Scene</h4>
+											<p><strong>The Snapshot.</strong> Instant, zero-latency snapshots <em>inside</em> a Song that flip strip mutes, fader levels, note ranges, and arpeggiators between Verse, Chorus, and Solo.</p>
+										</div>
+										<div class="col-6 col-12-xsmall">
+											<h4>Level 4: Setlist (<code>.orset</code>)</h4>
+											<p><strong>The Show.</strong> Your ordered list of Songs for tonight's gig, with automatic background preloading of the next Song while you play the current one.</p>
+										</div>
+									</div>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Why Build Bricks First?</strong> Suppose you spend Tuesday afternoon dialing in the ultimate Hammond B3 + Leslie strip, complete with all nine drawbars mapped to your controller sliders, expression pedal on CC 11, and a high-pass filter so you don't step on the bass player's frequencies. Save that strip once as <code>Dirty B3.orstrip</code>.<br /><br />
+										Now, whenever your band adds three new classic rock tunes on Friday afternoon, you don't re-map a single knob. You open <strong>BUILD SONG</strong>, check the box next to <code>Dirty B3</code>, check <code>70s Rhodes</code>, check <code>Oberheim Brass</code>, type the song title, and hit <strong>BUILD &amp; LOAD SONG</strong>. You're gig-ready in twelve seconds.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 2. QUICK START -->
+							<section id="quick-start">
+								<div class="container">
+									<h3>2. Quick Start: From Download to Noise in Ten Minutes</h3>
+									<p>Everything else in this manual assumes you have a working rig. Here is how to get one in about the time it takes to brew a coffee. Do this at the kitchen table, not at soundcheck.</p>
+									<ol>
+										<li><strong>Plug in the power brick.</strong> Yes, first. Windows laptops do unspeakable things to audio clocks and USB hubs on battery, no matter what any settings screen claims (see the Golden Stage Rule in Chapter 21). If you remember one thing from this page, remember this one.</li>
+										<li><strong>Launch Fanfare, click the Gear Icon, and open <code>AUDIO SETTINGS</code>.</strong> Pick your ASIO driver (prefer it over WASAPI), enable the output channels your speakers or IEM rig are actually plugged into, set the sample rate to match the rest of your gear (44.1 or 48 kHz), and start at a 256-sample buffer. Lower it later, at home, with one eye on <code>XRUNS</code>. Chasing 64 samples for the first time at soundcheck is how you meet the guitar player's new pedalboard.</li>
+										<li><strong>Enable your MIDI keyboard</strong> in the same window, then tick only the input channels you actually use. Some controllers expose extra input channels that return junk data, and junk data is how phantom sustain pedals happen.</li>
+										<li><strong>Click <code>SCAN FOR PLUGINS</code></strong> so Fanfare inventories your installed VST3s.</li>
+										<li><strong>Build your first strip.</strong> Click a <code>+</code> on any strip, load a piano you like, wind up the gold <code>FOH</code> fader, and play something. If you hear nothing, stop reading and go straight to <a href="#no-sound">Chapter 3</a>; the checklist exists precisely for this moment.</li>
+										<li><strong>Click <code>SAVE</code> on the strip</strong> and store it as <code>My Piano.orstrip</code>. It lands in your strip presets folder (<code>%APPDATA%\Fanfare\strips</code>), and from that moment on it is a LEGO brick the Song Builder can snap into any song, forever.</li>
+										<li><strong>Repeat until you have a piano, an organ, and a pad you like.</strong> Then open <code>BUILD SONG</code>, tick their boxes, type a song name, and hit <code>BUILD &amp; LOAD SONG</code>. Congratulations: you are now a two-keyboard player with one keyboard.</li>
+									</ol>
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>The Kitchen Table Rule:</strong> Every minute spent building and saving strips at home is a minute not spent doing it in front of a drummer. Ten minutes of kitchen-table rig building on Tuesday buys you a twelve-second song build at Friday's soundcheck, and that buys you the good chair.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 3. NO-SOUND CHECKLIST -->
+							<section id="no-sound">
+								<div class="container">
+									<h3>3. The No-Sound Emergency Checklist</h3>
+									<p>Nothing is coming out and the drummer is counting. Work down this list from the top; it is ordered by how often each item turns out to be the culprit, and number one is embarrassingly common.</p>
+									<div class="table-wrapper">
+										<table class="alt">
+											<thead>
+												<tr>
+													<th>#</th>
+													<th>Check</th>
+													<th>The Fix</th>
+												</tr>
+											</thead>
+											<tbody>
+												<tr>
+													<td>1</td>
+													<td><strong>Is the strip muted?</strong></td>
+													<td>Songs load with every strip safely muted (so nothing blasts at load time), and a Scene change may have muted it since. Unmute and move on.</td>
+												</tr>
+												<tr>
+													<td>2</td>
+													<td><strong>Are the faders up?</strong></td>
+													<td>Gold <code>FOH</code> fader for the house, cyan <code>IEM</code> fader for your ears. Also read the strip's bottom routing dropdown: if it says <code>Direct: Out 3+4</code> but your speakers are on outputs 1+2, your piano is playing to an empty room.</td>
+												</tr>
+												<tr>
+													<td>3</td>
+													<td><strong>MIDI channel mismatch.</strong></td>
+													<td>Your keyboard transmits on one channel; the strip is listening on another. Open the strip's <code>CC</code> window and set <code>MIDI Ch</code> to <code>Omni</code> as a test. Sound appears? It was the channel; set it properly afterwards.</td>
+												</tr>
+												<tr>
+													<td>4</td>
+													<td><strong>Note Range collapsed.</strong></td>
+													<td>Click the range button on the strip. If the highlighted zone is a tiny sliver of the keyboard, hit <code>RESET</code> for the full range.</td>
+												</tr>
+												<tr>
+													<td>5</td>
+													<td><strong>Wrong audio device or channels.</strong></td>
+													<td>Open <code>AUDIO SETTINGS</code> from the Gear Icon: correct ASIO driver selected, and the output channels your speakers are on actually enabled.</td>
+												</tr>
+												<tr>
+													<td>6</td>
+													<td><strong>The plugin didn't load.</strong></td>
+													<td>Look at the strip's slots: an empty slot means the plugin failed or is missing. Run <code>SCAN FOR PLUGINS</code> and reload the strip.</td>
+												</tr>
+												<tr>
+													<td>7</td>
+													<td><strong>Hit <code>PANIC</code> anyway.</strong></td>
+													<td>Stuck notes, stuck sustain, wedged controllers: one press of <code>PANIC</code> (or <code>P</code>) sweeps all 16 channels and gives you a clean slate.</td>
+												</tr>
+											</tbody>
+										</table>
+									</div>
+									<blockquote>
+										<span class="use-case-label">The 11:30 PM Version</span><br />
+										<strong>Mute. Faders. Channel. Range. Device. Slot. Panic.</strong> Seven checks, thirty seconds, and it is virtually always one of the first three. If all seven come up clean, check whether the PA speakers are turned on. It has happened to better players than you.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 2. MAIN MIXER -->
+							<section id="main-mixer">
+								<div class="container">
+									<h3>4. Main Console &amp; Header Bar</h3>
+									<p>The top of the Fanfare window is organized into four horizontal rows above your 10-strip mixer console:</p>
+
+									<div class="table-wrapper">
+										<table class="alt">
+											<thead>
+												<tr>
+													<th>Control</th>
+													<th>What It Does</th>
+												</tr>
+											</thead>
+											<tbody>
+												<tr>
+													<td><strong>Song Title &amp; CLEAN SLATE</strong></td>
+													<td>Shows the active Song name. When <code>CLEAN SLATE</code> is ticked, loading this Song unloads all prior plugins first instead of reusing matching plugin instances across songs.</td>
+												</tr>
+												<tr>
+													<td><strong>STAGE COMPACT &amp; WIDTH</strong></td>
+													<td>When <code>STAGE COMPACT</code> is enabled, any muted or empty strip automatically collapses into a slim 28px vertical tab so your active instruments get the whole screen. Drag the <code>WIDTH</code> slider (or drag the right border of any strip) to widen or narrow your strips.</td>
+												</tr>
+												<tr>
+													<td><strong><code>&lt;&lt;</code> Sidebar Toggle</strong></td>
+													<td>Shows or hides the Library Sidebar (the Songs, Sets, Strips, and Setlist tabs).</td>
+												</tr>
+												<!-- VERIFY(spacebar): owner believes Spacebar advances the setlist but it is unconfirmed. Test: queue two songs, click empty background, press Space. If nothing happens, delete this row. -->
+												<tr>
+													<td><strong>Spacebar</strong></td>
+													<td>Advances to the next Song in your Setlist (ignored while you're typing in a text box).</td>
+												</tr>
+												<tr>
+													<td><strong><code>CPU</code> / <code>RAM</code> / <code>LAT</code> / <code>XRUNS</code></strong></td>
+													<td>Live telemetry. <code>CPU</code> is the audio-callback budget: the one number that predicts dropouts. Click <code>CPU</code> or <code>RAM</code> to open the Per-Strip Resource Inspector. <code>LAT</code> shows round-trip audio latency (or <code>RECONNECT...</code> if your USB cable was yanked). <code>XRUNS</code> reads <code>gap/stall</code>: a <em>gap</em> means Windows never delivered the audio callback in time (a machine problem: drivers, power management, USB delivery), while a <em>stall</em> means Fanfare's own engine workers ran late. Click <code>XRUNS</code> to reset the counter and open the timestamped glitch log.</td>
+												</tr>
+												<tr>
+													<td><strong><code>NOTEPAD</code> / <code>REMOTE</code> / <code>HAAALP!</code></strong></td>
+													<td>Opens the Gig Notepad (<code>Ctrl+N</code>), the Tablet Web HUD &amp; Wi-Fi Hotspot modal, or this manual right here.</td>
+												</tr>
+												<tr>
+													<td><strong><code>PANIC</code> (or <code>P</code> key)</strong></td>
+													<td>The Stage Emergency Button. Sends MIDI CC 123 (All Notes Off), CC 120 (All Sound Off), CC 121 (Reset All Controllers), and CC 64 (sustain pedal release) on all 16 MIDI channels, including external MIDI-OUT hardware synths, and flushes every audio buffer. The sustain release deserves the mention: a pedal cable half-tripped out of its jack is the most common "why is that note STILL ringing" cause in live keyboard work.</td>
+												</tr>
+											</tbody>
+										</table>
+									</div>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>The Stuck High C in the Ballad:</strong> You're playing a pin-drop ballad. Somebody trips over a sustain pedal cable, or a vintage synth module decides that MIDI Note-Off messages are merely a polite suggestion. Hit the giant red <code>PANIC</code> button (or tap <code>P</code> on your laptop keyboard). Even if you've filtered out MIDI controllers on that strip, Fanfare bypasses the CC filter specifically for Panic messages so every internal VST and external hardware rack module shuts up immediately.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 3. USB HOTPLUG -->
+							<section id="usb-hotplug">
+								<div class="container">
+									<h3>5. Stage-Proof USB Hotplug &amp; Auto-Recovery (v1.3)</h3>
+									<!-- VERIFY(hotplug): bench test PASSED Oct 31 (cable yanked mid-playback, recovered clean). The 1s MIDI re-scan and 1.5s stall-threshold constants are not yet verified against current source; behavior itself is confirmed. -->
+									<p>In most Windows DAWs, if a USB MIDI controller or USB ASIO audio interface loses connection for half a second, you are rewarded with a frozen screen, a dead MIDI port that refuses to reconnect until you restart the app, or a terrifying blast of full-scale white noise.</p>
+									<p>Fanfare v1.3 continuously monitors both your USB MIDI ports and your ASIO/WASAPI audio stream:</p>
+									<ul>
+										<li><strong>Automatic USB MIDI Re-Binding:</strong> Every second, Fanfare checks for newly connected or power-cycled USB MIDI keyboards. If a keyboard drops out, Fanfare fires an automatic <code>PANIC</code> to prevent hung notes; the moment you plug it back in, Fanfare closes the stale Windows handle and re-opens the port live.</li>
+										<li><strong>Automatic ASIO Audio Recovery:</strong> If your audio interface disappears or its hardware callbacks stall for more than 1.5 seconds, Fanfare enters recovery mode (displaying <code>LAT: RECONNECT...</code> in the top bar) and automatically re-initializes your exact ASIO driver, sample rate, buffer size, and channel routing as soon as the USB bus settles.</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>The Bass Player Incident:</strong> When your bass player accidentally yanks your USB cable out of the computer mid-song, don't touch the mouse. Don't restart Fanfare. Don't even open Audio Settings. Just put the USB cable back in, count to three, go back to playing, and smile at your bass player. Possibly the single most important update in Fanfare history.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 4. STRIPS -->
+							<section id="strips">
+								<div class="container">
+									<h3>6. Channel Strips &amp; Dual FOH/IEM Faders</h3>
+									<p><span class="image right"><img src="vu_meters_detail.png" alt="Dual FOH and IEM faders and VU meters" /></span>Fanfare gives you 10 main Channel Strips (plus 2 Aux Return strips):</p>
+									<ul>
+										<li><strong>Strip 1 (Monitor In):</strong> Defaults to your live audio input monitor strip, positioned right next to the Aux Returns for quick reach.</li>
+										<li><strong>Strips 2 through 9:</strong> Full instrument/audio strips, each capable of hosting a <strong>3-slot vertical plugin chain</strong> (e.g., Piano VST in slot 1 &rarr; Vintage Philly Phaser in slot 2 &rarr; Tape Delay in slot 3) OR forwarding filtered/transposed MIDI out to an external hardware synth.</li>
+										<li><strong>Strip 10 (MP3 / DJ Player):</strong> Dedicated dual-deck break music and backing track player.</li>
+									</ul>
+									<p>Every strip has <strong>two independent vertical faders</strong> and routing buttons:</p>
+									<ul>
+										<li><strong><code>FOH</code> (Gold):</strong> The level sent to the Front of House sound engineer (and your Master FOH bus).</li>
+										<li><strong><code>IEM</code> (Cyan):</strong> The level sent to your personal In-Ear Monitors or stage wedges (and your Master IEM bus).</li>
+										<li><strong><code>LINK</code>:</strong> Locks the FOH and IEM faders together so moving one moves the other at their relative offset. Unlink them when you need more of yourself in your ears without touching the house mix.</li>
+										<li><strong>Output Routing Selector (Bottom Dropdown):</strong> Route any strip to <code>Master (FOH/IEM)</code>, directly out to hardware pairs (<code>Direct: Out 1+2</code> through <code>7+8</code> or mono <code>Out 1..8</code>), or <strong>Subgroup to Strip</strong> (routing audio into any higher-numbered strip so one strip acts as a submix bus).</li>
+									</ul>
+									<p>Each strip also carries an orange <strong>AUX SENDS</strong> group with two knobs. These feed the two <strong>Aux Return</strong> strips at the far left of the console, and the returns are full channel strips in their own right: load a reverb into Aux Return 1, send a taste of every keyboard to it with the AUX 1 knob, and ten strips share one reverb instead of ten plugins doing ten impressions of the same room.</p>
+									<p>One more strip trick: any of the three chain slots can be switched from hosting a plugin to acting as a <strong>MIDI OUT</strong> destination for a hardware synth's MIDI port. The strip's note range, transposes, and arpeggiator all still apply before the notes leave the building, so your split points and one-finger synth bubbles work identically on software and hardware voices alike.</p>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>"More Me" Without Getting Fired:</strong> Halfway through the second set, the guitar player turns his amp up to eleven and you can't hear your Rhodes comping anymore. If you turn up your main volume knob on a regular keyboard, the Front of House engineer immediately pulls your fader down at the mixing desk and leaves it there for the rest of the night. In Fanfare, just uncheck <code>LINK</code> on your Rhodes strip and push the cyan <code>IEM</code> fader up 4 dB. Your stage monitor gets louder; the Front of House mix doesn't budge by a tenth of a decibel.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 5. CHANNEL STRIP DSP -->
+							<section id="channel-strip-dsp">
+								<div class="container">
+									<h3>7. Strip DSP (Gate, 10-Band EQ, Compressor, Space &amp; IR)</h3>
+									<span class="image fit"><img src="channel_strip_dsp.png" alt="Channel strip DSP panel" /></span>
+									<p>Click the <code>FX / EQ</code> button (or right-click a strip header and choose <strong>Open Channel Strip (EQ/Comp)...</strong>) to open the built-in zero-latency DSP console for that strip. It runs after your 3 VST slots and uses virtually zero CPU:</p>
+									<ul>
+										<li><strong>Input Channel Mode Button (Top Right):</strong> Cycles between <code>STEREO</code>, <code>MONO (L+R)</code>, <code>MONO (LEFT)</code>, and <code>MONO (RIGHT)</code>.</li>
+										<li><strong>Noise Gate:</strong> Silences noisy analog inputs or vintage amp-sim hiss when you aren't playing.</li>
+										<li><strong>10-Band Graphic EQ:</strong> Classic octave bands from <code>31.25 Hz</code> to <code>16 kHz</code> (&plusmn;12 dB per band), plus an input <code>VOL</code> trim, output <code>GAIN</code> trim, and a one-click <code>FLAT</code> reset button.</li>
+										<li><strong>Compressor + Gain Reduction Meter:</strong> Includes 5 stage-tuned presets: <code>Manual</code>, <code>MP3 / Track Leveler</code>, <code>Vocal / Lead Focus</code>, <code>Punchy Drums</code>, and <code>Brickwall Limiter</code>.</li>
+										<li><strong>Space / Mod (Reverb &amp; Chorus):</strong> Built-in stereo room reverb and chorus for strips that just need a touch of air or width without loading another VST.</li>
+										<li><strong>Impulse Response (IR) Loader:</strong> Load any <code>.wav</code> cabinet or acoustic body impulse response with dry/wet mix control.</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Fixing the "Left-Ear Only" Guitar DI &amp; Piezo Quack:</strong> You plug an acoustic instrument or a hardware synth into Input 1 of your stereo interface, and suddenly it only comes out of the left PA speaker. Click the top-right mode button to switch from <code>STEREO</code> to <code>MONO (LEFT)</code>. Instant centered stereo image. Got an acoustic pickup that sounds like a rubber band stretched over a tin can? Click <code>LOAD IR</code>, drop in a mic'd acoustic body impulse response WAV file, and blend the <code>IR Mix</code> knob to 40%.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 6. MUSETTE -->
+							<section id="musette">
+								<div class="container">
+									<h3>8. Accordion Musette Detuner ("TEMU Mode")</h3>
+									<p>Located at the bottom center of the Strip DSP window, the <strong>Accordion Musette Detuner</strong> uses dual pitch-shifting delay lines modulated by quadrature LFOs to turn a dry single-reed accordion, organ, or synth patch into a shimmering European musette register:</p>
+									<ul>
+										<li><strong><code>2-REED (MM)</code>:</strong> Classic two-reed wet detune (one dry reed + one sharp detuned reed).</li>
+										<li><strong><code>3-REED (MMM)</code>:</strong> Full French/Italian three-reed chorus (dry center reed + symmetrical sharp and flat detuned reeds).</li>
+										<li><strong><code>TEMU</code> (42 ct):</strong> Locks the detune depth to a glorious 42 cents of unapologetically seasick street-cafe wobble.</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>From Newfoundland Fish Tunes to Baguettes:</strong> The app author got an accordion to add to some songs. Despite being the worst accordion player in his city, people liked the sound. His accordion had two reeds, slightly detuned, giving a cool "French cafe" feel. Then he got a better one, but it was just one reed. Cool for Newfoundland fish tunes, but did not evoke baguettes.<br /><br />
+										Enter <strong>TEMU Musette Mode!</strong> Adds just enough warble to a single-reed accordion tone to allow you to sniff, <em>"that is NOT how you pronounce Peugeot..."</em> to your bass player.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 7. NOTE RANGE -->
+							<section id="note-range">
+								<div class="container">
+									<h3>9. Note Range &amp; Keyboard Splits</h3>
+									<span class="image fit"><img src="note_range_learn.png" alt="Note range learn piano editor" /></span>
+									<p>Click the Note Range button (e.g., <code>C-1 - G9 (Full)</code>) on any strip to open the interactive 128-key Piano Range Callout. The moment the callout opens, <strong>MIDI Learn is automatically armed</strong>:</p>
+									<ul>
+										<li><strong>Play two keys on your controller:</strong> The first note you strike sets both Low and High to that single key; the second note you strike expands the zone to span between your lowest and highest played keys.</li>
+										<li><strong>Or drag with the mouse:</strong> Click and drag across the virtual keyboard to set the split visually.</li>
+										<li>Click <strong><code>DONE</code></strong> to lock it in, or <strong><code>RESET</code></strong> to restore the full <code>C-1</code> to <code>G9</code> range (MIDI notes 0 to 127).</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>The 4-Zone 88-Key Frankensplit:</strong> You have one 88-key board on stage and the arrangement calls for synth bass in the bottom octave, Rhodes chords in the middle, brass stabs in the upper-mid, and a single high C#7 that triggers a gong sample. Instead of doing mental math to remember whether Middle C is MIDI note 60 or 48, click the Note Range button on each strip, tap the lowest and highest key of that zone on your physical keyboard, and hit <code>DONE</code>.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 8. CC ASSIGNMENTS -->
+							<section id="cc-assignments">
+								<div class="container">
+									<h3>10. CC Assignments &amp; B3 Inverse Drawbars</h3>
+									<span class="image fit"><img src="cc_assignment_manager.png" alt="CC Assignment Manager" /></span>
+									<p>Click the <code>CC</code> button on any strip (or long-press its FOH/IEM/Mute controls) to open the <strong>CC Assignment Manager</strong>. By default, Fanfare blocks unmapped MIDI CCs from reaching your plugins so an accidental brush of a controller knob doesn't detune your synth mid-solo. Only the CCs you map or passthrough here are allowed in.</p>
+
+									<div class="table-wrapper">
+										<table class="alt">
+											<thead>
+												<tr>
+													<th>Feature</th>
+													<th>How It Works</th>
+												</tr>
+											</thead>
+											<tbody>
+												<tr>
+													<td><strong>Strip Fader &amp; Mute CCs</strong></td>
+													<td>Bind hardware sliders or buttons directly to this strip's <code>FOH CC</code>, <code>IEM CC</code>, or <code>Mute</code> toggle, plus override the strip's <code>MIDI Ch</code> (<code>Global</code>, <code>Omni</code>, <code>None (Routed Only)</code>, or <code>Ch 1..16</code>).</td>
+												</tr>
+												<tr>
+													<td><strong><code>QUICK</code> Learn (Purple Button)</strong></td>
+													<td>The fastest way to map anything: click <code>QUICK</code>, wiggle a knob inside your VST plugin window, and wiggle a fader on your MIDI keyboard (in either order). Fanfare binds them automatically.</td>
+												</tr>
+												<tr>
+													<td><strong><code>INV</code> (Invert Direction)</strong></td>
+													<td>Reverses the CC polarity so pulling a physical slider <em>down toward you</em> increases the parameter from <code>Min</code> to <code>Max</code>, and pushing it <em>up away from you</em> decreases it.</td>
+												</tr>
+												<tr>
+													<td><strong><code>TOG</code> (Latching Toggle Mode)</strong></td>
+													<td>Turns a momentary footswitch or drum pad into a latching switch: press once to flip the parameter to <code>Max</code>, press again to flip it back to <code>Min</code>.</td>
+												</tr>
+												<tr>
+													<td><strong><code>Pass: [in] &gt; [out]</code> &amp; <code>CK88</code></strong></td>
+													<td>Lets a CC pass directly into the plugin (and optionally remaps its number). The <code>CK88</code> button one-click-enables Mod Wheel, Expression, Sustain, Soft, and Sostenuto.</td>
+												</tr>
+												<tr>
+													<td><strong><code>Swap: [Plugin A] [Plugin B]</code></strong></td>
+													<td>Assigns one CC button to alternate which of two loaded plugins on the strip receives MIDI notes, while keeping both warm so held notes decay naturally without getting cut off.</td>
+												</tr>
+											</tbody>
+										</table>
+									</div>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Pulling Out All The Stops (Literally):</strong> Why does the <strong><code>INV</code> (Invert)</strong> button exist? Because of Hammond B3 drawbars.<br /><br />
+										On a standard MIDI controller, pushing a slider <em>away</em> from you sends <code>127</code> (maximum), and pulling it <em>toward</em> you sends <code>0</code> (minimum). On a real Hammond organ, drawbars work the exact opposite way: pushing them in (away from you) is <code>0</code> (silent), and <strong>pulling them out toward you</strong> makes the organ roar at <code>8</code> (full volume). Hence the phrase <em>"pulling out all the stops."</em><br /><br />
+										If you map your 9 MIDI sliders to a B3 plugin without <code>INV</code>, your muscle memory will be completely backwards all night: you'll pull the sliders toward you for the big gospel chorus and the organ will vanish into thin air. Click <strong><code>INV</code></strong> on your 9 drawbar mappings, and pulling your physical sliders down toward you pulls the virtual drawbars out, just like Laurens Hammond intended in 1935.<br /><br />
+										<strong>Bonus Use Case (Leslie Speed Footswitch):</strong> Got a momentary footswitch or controller button that only sends <code>127</code> while your foot is actively holding it down? Enable <strong><code>TOG</code></strong> on your Leslie Fast/Slow mapping so tapping the switch once latches the rotor into Fast, and tapping it again drops it back to Slow.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 9. MIDI EFFECTS -->
+							<section id="midi-effects">
+								<div class="container">
+									<h3>11. MIDI Effects: Transpose, Arpeggiator &amp; Harmonizer</h3>
+									<span class="image fit"><img src="midi_effects_panel.png" alt="MIDI Effects panel" /></span>
+									<p>Click <code>ARP / OCT</code> on any strip to open its real-time MIDI processor. Everything on this screen happens <em>after</em> the strip's Note Range split filter and <em>before</em> your VST plugins (or external MIDI-OUT synth), which opens up an absurd number of stage shortcuts:</p>
+
+									<div class="table-wrapper">
+										<table class="alt">
+											<thead>
+												<tr>
+													<th>Module</th>
+													<th>What It Does &amp; How It Works</th>
+												</tr>
+											</thead>
+											<tbody>
+												<tr>
+													<td><strong>Transpose (<code>-48</code> to <code>+48 st</code>)</strong></td>
+													<td>Shifts incoming notes in semitones for <em>this strip only</em>. Because it runs after the Note Range split, your split points on the physical keyboard never move when you transpose a sound up two octaves or into another key.</td>
+												</tr>
+												<tr>
+													<td><strong>Arpeggiator (<code>ON / OFF</code>)</strong></td>
+													<td>Tempo-synced pattern generator with exact <code>BPM</code> (<code>1</code> to <code>999</code> with hold-to-repeat <code>+/-</code> nudge arrows), <code>OCT UP</code> (<code>0..4</code>), <code>OCT DN</code> (<code>0..4</code>), staccato/legato <code>GATE</code> length (<code>0.01..1.0</code>), and four pattern engines: <code>UP</code>, <code>DOWN</code>, <code>U/D</code> (Up/Down), and <code>RND</code> (Random).</td>
+												</tr>
+												<tr>
+													<td><strong>Octaver (<code>OCTAVES UP / DOWN</code>)</strong></td>
+													<td>Stacks up to 3 octaves above and 3 octaves below every note you play. Uses reference-counted note tracking so if your hand plays a note that the Octaver is already holding, releasing one key won't prematurely choke the other.</td>
+												</tr>
+												<tr>
+													<td><strong>Africa Harmonizer &amp; <code>PLAY IN C SPLIT</code></strong></td>
+													<td>Cycles between <code>AFRICA: PART 1</code>, <code>AFRICA: PART 2</code>, and <code>PLAY IN C SPLIT</code> to generate automatic diatonic parallel harmonies from a single-finger melody line.</td>
+												</tr>
+												<tr>
+													<td><strong><code>ROUTE HARMONY TO</code></strong></td>
+													<td>Sends the generated harmony/octave notes across the console into a <em>different</em> strip while keeping your played root note on the current strip.</td>
+												</tr>
+											</tbody>
+										</table>
+									</div>
+
+									<blockquote>
+										<span class="use-case-label">Stage Use Case 1 &middot; Transpose</span><br />
+										<strong>Playing Every Song in C ("The People's Key!"):</strong> Look, nobody became a gigging keyboard player because they love reading five flats in D-flat major at 12:45 AM, or because the singer woke up with a scratchy throat and wants to drop "Valerie" down a half-step into E-flat.<br /><br />
+										With per-strip <strong>Transpose</strong>, you can set up every single song in your setlist so you play in <strong>C Major (The People's Key!)</strong> the entire night. Song is in E-flat? Set Transpose to <code>+3 st</code> and hammer away on the white keys. Song is in B? Set it to <code>-1 st</code>. The audience won't care! (Though the bass player who's watching your hands to know the next chord will be thrown for an absolute loop.)<br /><br />
+										<strong>Split-Board Bonus:</strong> When you slice an 88-key board into four small zones, your upper-right horn section ends up living in the piccolo register where trumpets sound like angry mosquitoes. Drop that strip's Transpose to <code>-24 st</code> (two octaves down), and playing the top octave of your keyboard triggers rich, chest-rattling baritone and tenor brass right in their sweet spot.
+									</blockquote>
+
+									<blockquote>
+										<span class="use-case-label">Stage Use Case 2 &middot; Arpeggiator</span><br />
+										<strong>"Hungry Like the Wolf" &amp; One-Finger 80s Synth Bubbles:</strong> Trying to hand-play Nick Rhodes' relentless 16th-note Roland Jupiter-8 percolation on "Hungry Like the Wolf" for four straight minutes while also hitting the chorus brass stabs and synth strings is a recipe for carpal tunnel.<br /><br />
+										Instead, isolate a single bottom key on your keyboard (say, <code>C2</code>) as its own strip zone, turn the <strong>Arpeggiator</strong> <code>ON</code>, dial the <code>BPM</code> to <code>127.0</code>, set Pattern to <code>RND</code> (or <code>U/D</code>) with <code>OCT UP: 2</code> and a tight, bouncy <code>GATE</code> around <code>0.35</code>. Hold down one finger in the bottom corner (or tap a sustain pedal) and the classic 1982 Rio synth bubble locks in all night while both of your hands stay free for the rest of the arrangement. Same trick works for "Baba O'Riley," "Save a Prayer," Stranger Things synth beds, or turning a static string pad into a rhythmic disco chop.
+									</blockquote>
+
+									<blockquote>
+										<span class="use-case-label">Stage Use Case 3 &middot; Octaver &amp; Harmonizer</span><br />
+										<strong>Monster 3-Octave Brass &amp; One-Hand "Africa":</strong> Need a massive 1970s Earth, Wind &amp; Fire horn stab or a 6-octave cinematic piano octave hit, but your left hand is busy playing synth bass? Turn the <strong>Octaver</strong> <code>ON</code> with <code>OCTAVES UP: 1</code> and <code>OCTAVES DOWN: 1</code>. Every single-note brass line you play with two fingers automatically fires across three octaves at once.<br /><br />
+										For Toto's "Africa," turn on <code>AFRICA: PART 1</code> (or <code>PLAY IN C SPLIT</code>), set <strong>Route Harmony To</strong> so the harmony voices feed your Marimba/Brass strip on Strip 4 while your main synth plays the lead on Strip 3, and set Strip 4's MIDI Channel (in the <code>CC</code> window) to <code>None (Routed Only)</code>. Suddenly you sound like four session players in 1982 using one right hand.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 10. SAMPLER -->
+							<section id="sampler">
+								<div class="container">
+									<h3>12. 8-Pad One-Shot &amp; Loop Sampler</h3>
+									<span class="image fit"><img src="sampler_splice_editor.png" alt="8-Pad Sampler and Waveform Splice Editor" /></span>
+									<p>Every strip includes a built-in <strong>8-Pad Sample Player</strong> (click <code>SAMPLER</code> on the strip). You don't need to load a 900 MB Kontakt instance just to fire a sound effect or a drum break:</p>
+									<ul>
+										<li><strong>Drag &amp; Drop WAVs:</strong> Drop any <code>.wav</code> file onto Pads 1 through 8.</li>
+										<li><strong>Per-Pad Controls:</strong> Each pad has its own <code>Volume</code> knob, MIDI CC bind for pad volume, <code>LOOP</code> toggle, <code>Pitch</code> offset (&plusmn;24 semitones), <code>Root</code> note, and <code>Key Map Range</code>.</li>
+										<li><strong>One-Click MIDI Learn (<code>L</code>):</strong> Click <code>L</code> on any pad and strike a key on your controller to assign that sample to a single key (or strike two keys to pitch-stretch it across a range).</li>
+										<li><strong>Waveform Splice Editor (Bottom):</strong> Click any pad row to view its audio waveform and drag the start/end handles to trim dead air off the front or back of the sample.</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Midnight Oil's "Beds Are Burning":</strong> You're in a cover band. You do Midnight Oil's "Beds Are Burning." The band is entrusting you and your whimsical sense of rhythm to play the massive percussion breaks going into Chorus 1 and Chorus 2.<br /><br />
+										Sample the record, drop the WAV into the pads, use the Waveform Splice Editor handles at the bottom to isolate each individual drum hit right on the transient, click <code>L</code> to map them to adjacent keys on your keyboard, and you'll be like a god.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 11. BREAK MUSIC -->
+							<section id="break-music">
+								<div class="container">
+									<h3>13. Strip 10: Dual-Deck Break Music &amp; Auto-DJ</h3>
+									<span class="image fit"><img src="break_music_player.png" alt="Break Music Dual-Deck DJ Player" /></span>
+									<p>Strip 10 is hardwired to Fanfare's <strong>Dual-Deck DJ &amp; Break Music Player</strong>. Click <code>MP3 / DJ</code> on Strip 10 (or switch to the <code>BREAK / DJ</code> tab on your Tablet HUD) to open it:</p>
+									<ul>
+										<li><strong>6 Preset Playlist Banks:</strong> Six instant buttons across the top (e.g., <em>Hits, Oldies, Dinner, Dance, Ballads, Break</em>). Left-click to load and play; right-click to assign a folder on your hard drive or rename the bank.</li>
+										<li><strong>Dual Decks (Deck A &amp; Deck B) + Equal-Power Crossfader:</strong> Load tracks into Deck A and Deck B, set non-destructive <code>SET IN</code> and <code>SET OUT</code> trim cues to skip long radio intros/outros, and crossfade manually or with one-click <code>&lt;&lt; FADE A</code> / <code>FADE B &gt;&gt;</code> buttons.</li>
+										<li><strong>Auto-DJ &amp; Beat-Sync:</strong> When <code>AUTO-DJ</code> is enabled, Fanfare automatically crossfades into the next track in your playlist when the current track reaches its Cue-Out point. Enable <code>BEAT-SYNC</code> and choose between <code>VINYL RESAMPLE</code> or <code>KEY-LOCK STRETCH</code> (SoundTouch pitch-locked time stretching) to match tempos during transitions.</li>
+										<li><strong>Smart Arrange:</strong> Click <code>SMART ARRANGE</code> to automatically sort your break playlist by <em>Smooth BPM Ramp</em>, <em>Minimal Tempo Step</em>, <em>Energy Wave</em>, or trim the playlist to fit an exact 30, 45, or 60-minute set break.</li>
+										<li><strong>YouTube 192k MP3 Grabber (<code>GRAB YT</code>):</strong> Someone in the wedding party requests a first-dance song you've never heard of five minutes before they walk in? Click <code>GRAB YT</code>, paste the YouTube URL, and Fanfare downloads and converts it to a 192 kbps MP3 right into your playlist.</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Surviving the 20-Minute Set Break Without Phone Notifications:</strong> If you plug your phone into the mixer for break music, three things are guaranteed to happen: a text message ding will blast through the PA at 110 dB, a YouTube ad for lawnmowers will play right after a ballad, or you'll walk to the bar and your Bluetooth will disconnect. With Strip 10, your break music runs inside Fanfare through its own broadcast leveler compressor, routed to FOH (and muted in your IEMs if you want peace and quiet), and you can skip tracks or adjust volume from your tablet across the room.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 12. SONG BUILDER -->
+							<section id="song-builder">
+								<div class="container">
+									<h3>14. The Song Builder</h3>
+									<p>Click the <strong><code>BUILD SONG</code></strong> button on the Stage Queue row to open the <strong>Song Builder</strong> overlay. It scans your saved <code>.orstrip</code> presets folder and presents them as a checklist:</p>
+									<ol>
+										<li>Check the boxes next to the Strips you want in your new Song (up to 10 strips).</li>
+										<li>Set the default volume <code>CC:</code> number for each checked strip (defaults to CC 7).</li>
+										<li>Type a <strong>Song Name</strong> (e.g., <code>Superstition</code> or <code>Rosanna</code>).</li>
+										<li>Optionally tick <strong>Pre-assign Consecutive MIDI Channels</strong> (assigns Ch 1, Ch 2, Ch 3... to each strip) and/or <strong>Clean Slate Load</strong>.</li>
+										<li>Click <strong><code>BUILD &amp; LOAD SONG</code></strong>. Fanfare writes the new <code>.json</code> Song file into your Songs library and loads it onto the mixer immediately, with all strips safely initialized muted so nothing blasts unexpectedly.</li>
+									</ol>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>The 30-Second Soundcheck Audible:</strong> The bandleader calls an audible at soundcheck: "Let's do that Stevie Wonder tune tonight." Instead of dragging plugins around one by one, click <code>BUILD SONG</code>, tick <code>Clavinet Wah</code>, <code>Moog Bass</code>, and <code>Rhodes Mk1</code>, name it <code>Stevie Clav</code>, and hit <code>BUILD &amp; LOAD SONG</code>. Actually managing to play like Stevie is not yet supported, but is slated for a future release.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 13. SCENES -->
+							<section id="scenes">
+								<div class="container">
+									<h3>15. Scenes (Instant Zero-Latency Snapshots)</h3>
+									<p>Row 4 of the header bar is your <strong>Scene Bar</strong> (<code>+ SCENE</code>, <code>SAVE SCENE</code>, <code>RENAME</code>, <code>DELETE</code>, followed by your Scene buttons). While a <strong>Song</strong> defines <em>which</em> VST plugins are loaded in your 10 strips, a <strong>Scene</strong> is an instantaneous snapshot of your mixer state <em>within</em> that Song:</p>
+									<ul>
+										<li>Strip Mute / Unmute states (and auto-collapse states when <code>STAGE COMPACT</code> is on)</li>
+										<li>FOH &amp; IEM fader levels, Aux sends, and Link toggles</li>
+										<li>Note Range splits &amp; Transpose settings</li>
+										<li>Strip DSP settings (EQ, Gate, Compressor, Reverb, Chorus, Musette)</li>
+										<li>Arpeggiator, Harmonizer, and Sampler states</li>
+									</ul>
+									<p>Whenever you click from Scene 1 to Scene 2, Fanfare automatically saves your current tweaks to Scene 1 before switching, or you can click <code>SAVE SCENE</code> at any time. Right-click any Scene button to <strong>Assign MIDI Trigger (Learn)...</strong> so a Program Change message from your keyboard footswitch or pad jumps straight to that Scene.</p>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Verse Piano &rarr; Chorus Synth Brass &rarr; Bridge Solo:</strong> Never load two separate Songs for the Verse and Chorus of the same tune. Put your Piano on Strip 2, your Synth Brass on Strip 3, and your Minimoog Lead on Strip 4 inside <em>one</em> Song. In <strong>Scene 1 ("VERSE")</strong>, unmute Strip 2 (Piano) and mute Strips 3 &amp; 4. Click <code>+ SCENE</code>, rename it <strong>"CHORUS"</strong>, and unmute Strip 3 (Brass). Click <code>+ SCENE</code>, rename it <strong>"SOLO"</strong>, and unmute Strip 4 (Moog). Because all three plugins are already sitting in RAM inside the same Song, switching between Verse, Chorus, and Solo takes <strong>0.0 milliseconds</strong> and never cuts off held reverb tails.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 14. STAGE QUEUE -->
+							<section id="stage-queue">
+								<div class="container">
+									<h3>16. Stage Queue &amp; Background Preloading</h3>
+									<p>Row 3 of the header bar contains 14 <strong>CORE SONG</strong> queue buttons alongside <code>SAVE SET</code>, <code>LOAD SET</code>, and <code>BUILD SONG</code>:</p>
+									<ul>
+										<li><strong>Assigning Songs:</strong> Drag any Song from the Library Sidebar onto a Queue button, or right-click a Queue button and choose <code>Assign Song File...</code>.</li>
+										<li><strong>Bright Green / Cyan Active Highlight:</strong> The Song currently live on stage.</li>
+										<li><strong>Pulsing Amber Dot:</strong> Fanfare's background thread is currently pre-building the VST plugins for this Song on your Efficiency CPU cores (true whenever <code>Auto: Fast Performance Cores Only</code> is selected in Chapter 21).</li>
+										<li><strong>Solid Green Ready Dot:</strong> The next Song's plugins are already built and warm in memory, ready for an instant swap when you click it or hit <code>Spacebar</code>.</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Zero Awkward Stage Silence Between Songs:</strong> Kontakt sample libraries and heavy analog modeling synths can take 6 to 10 seconds to load from disk. On stage, 8 seconds of dead silence feels like an eternity. When you load Song 1 from your Stage Queue, Fanfare immediately starts preloading Song 2 in the background while you're playing Song 1. By the time the drummer hits the final cymbal crash of Song 1, the status bar says <code>Next Ready: Song 2</code>. Hit the <code>Spacebar</code> and Song 2 snaps onto the console immediately.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 15. SETLISTS & LIBRARY -->
+							<section id="setlists">
+								<div class="container">
+									<h3>17. Setlists &amp; The Library Sidebar</h3>
+									<p>On the left side of the console (toggleable with the <code>&lt;&lt;</code> button), the <strong>Library Sidebar</strong> gives you four tabs:</p>
+									<ul>
+										<li><strong><code>SONGS</code>:</strong> Browse, search, favorite (star), organize into folders, and double-click to load any <code>.json</code> Song.</li>
+										<!-- VERIFY(extension): stale Oct-12 source writes setlists as "*.set" (default.set); this manual says ".orset". Confirm which extension the current build actually saves before publishing. -->
+											<li><strong><code>SETS</code>:</strong> Browse and double-click to load saved <code>.orset</code> Setlists.</li>
+										<li><strong><code>STRIPS</code>:</strong> Browse your <code>.orstrip</code> building blocks. Drag and drop any strip from this tab directly onto any of the 10 mixer strips to load it.</li>
+										<li><strong><code>SETLIST</code>:</strong> Reorder tonight's show, add the current Song, remove songs, or step through the setlist.</li>
+									</ul>
+								</div>
+							</section>
+
+						<!-- 16. GIG NOTEPAD -->
+							<section id="gig-notepad">
+								<div class="container">
+									<h3>18. Gig Notepad &amp; Stage Chord Badges</h3>
+									<p>Click <strong><code>NOTEPAD</code></strong> in the top bar (or press <code>Ctrl+N</code>) to open the <strong>Gig Notepad</strong>. Notes are saved directly inside the current Song's <code>.json</code> file and sync live over WebSockets to your Tablet Stage HUD:</p>
+									<ul>
+										<li><strong>Multiple Tabs per Song:</strong> Create tabs for <code>Chords</code>, <code>Lyrics</code>, or <code>Patch Cues</code> using the <code>+ TAB</code> and <code>TABS</code> buttons.</li>
+										<li><strong><code>LIVE LOCKED</code> vs Edit Mode:</strong> When <code>LIVE LOCKED</code> is active, the notepad renders your chart in high-contrast stage view and prevents accidental typing. Click <code>LIVE LOCKED</code> to unlock the editor and formatting toolbar.</li>
+										<li><strong>Automatic Chord Badges &amp; Color Tags:</strong> Wrap any chord in brackets like <code>[C#m7]</code>, <code>[F#7alt]</code>, or <code>[G/B]</code> and Fanfare renders it as a glowing blue <strong>Chord Badge</strong> pill. Use color buttons or tags like <code>[blue]Verse 1[/blue]</code>, <code>[green]Chorus[/green]</code>, <code>[yellow]Solo in E[/yellow]</code>, <code>[red]STOP ON 4![/red]</code>, or <code>**Bold**</code>.</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Remembering the Bridge Modulation You Only Play Twice a Year:</strong> You know 95% of the song by heart, except for that weird 5-bar bridge before the guitar solo that modulates up a minor third, and the fact that the singer always skips the third verse at weddings. Put <code>[red]WATCH SINGER - SKIPS VERSE 3![/red]</code> and <code>[Ebmaj7] [Ab13] [Dbmaj9]</code> in the Gig Notepad. Every time that Song loads, your chart appears automatically on both your laptop and your iPad/Android tablet sitting on your music stand.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 17. WEB REMOTE -->
+							<section id="web-remote">
+								<div class="container">
+									<h3>19. Tablet Stage HUD &amp; Wi-Fi SoftAP Hotspot</h3>
+									<p>Click <strong><code>REMOTE</code></strong> in the header bar to open the <strong>Stage Remote &amp; Wi-Fi Hotspot Controller</strong>. Fanfare embeds a high-speed HTTP + WebSocket server on port <code>8080</code> that turns any iPad, Android tablet, or phone into a zero-install touchscreen Stage Companion:</p>
+									<ul>
+										<li><strong>Left Column (Stage Wi-Fi SoftAP):</strong> Don't trust the venue's "Free_Bar_WiFi" router with 200 patrons streaming sports on it. Click <code>START STAGE HOTSPOT</code> to broadcast a direct, private Wi-Fi network straight from your laptop's Wi-Fi card, then scan the top QR code with your tablet camera to join it.</li>
+										<li><strong>Right Column (Tablet Stage Companion):</strong> Scan the bottom QR code (or open the displayed <code>http://...</code> URL) to launch the 5-tab Stage HUD in your tablet browser:
+											<ol>
+												<li><strong>STAGE HUD:</strong> Giant Prev/Next song buttons, setlist strip with green preload indicators, active instruments list, <strong>88-Key Visual Zone Map</strong>, quick chord chart preview, and live FOH/IEM VU meters.</li>
+												<li><strong>SONGS:</strong> Color-coded touch grid of your entire Song library with instant tag filtering (<code>PIANO</code>, <code>B3 ORGAN</code>, <code>SYNTH / PAD</code>, <code>BRASS / HORNS</code>, <code>FAVORITES</code>).</li>
+												<li><strong>GIG NOTEPAD:</strong> Full-screen live chord chart &amp; lyric viewer/editor.</li>
+												<li><strong>TOUCH MIXER:</strong> Multi-touch FOH, IEM, Mute, and Master faders.</li>
+												<li><strong>BREAK / DJ:</strong> Remote control for Strip 10's Dual-Deck DJ player, including the YouTube MP3 grabber.</li>
+											</ol>
+										</li>
+										<li><strong>USB Tethering Tip:</strong> Want wired, interference-free reliability without Wi-Fi? Plug a USB cable from your tablet to your laptop and enable <em>USB Tethering</em> on the tablet.</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Closing the Laptop Lid on Stage:</strong> Nobody looks cool staring into a glowing spreadsheet on a laptop stand in the middle of a funk gig. Park your laptop safely in your rack bag off to the side, Velcro a 10-inch tablet onto your top keyboard's music rest, and run the entire night (song switches, chord charts, fader rides, and break music) from the touchscreen HUD.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 18. SETTINGS -->
+							<section id="settings">
+								<div class="container">
+									<h3>20. Configuration, Bus Routing &amp; Stress Test</h3>
+									<p>Click the <strong>Gear Icon</strong> on the left of the header bar to open the <strong>Configuration</strong> modal:</p>
+									<ul>
+										<li><strong><code>THEME</code>:</strong> Switch UI themes (such as <em>Stage Black</em> for dark clubs or high-contrast modes for outdoor daytime festivals).</li>
+										<li><strong><code>AUDIO SETTINGS</code>:</strong> Select your ASIO driver, active input/output channels, sample rate (44.1 / 48 kHz), and buffer size, plus enable/disable MIDI input devices.</li>
+										<li><strong><code>ENGINE &amp; CPU TUNING</code>:</strong> Opens the hybrid CPU affinity and hardware interrupt shield settings (see Chapter 21).</li>
+										<li><strong><code>SCAN FOR PLUGINS</code>:</strong> Scans your system VST3 directories for newly installed plugins.</li>
+										<li><strong><code>BUS ROUTING</code>:</strong> Choose which physical stereo outputs on your audio interface carry the <strong>FOH Master Bus</strong> (Outputs <code>1+2</code>, <code>3+4</code>, <code>5+6</code>, or <code>7+8</code>), which carry the <strong>IEM Master Bus</strong>, and set your Global Default MIDI Channel (<code>Omni</code> or <code>Ch 1..16</code>).</li>
+										<li><strong><code>RESET AUDIO</code>:</strong> Manually closes and re-opens the audio driver and refreshes USB MIDI ports.</li>
+										<li><strong><code>RUN STRESS TEST</code>:</strong> Torture-tests your rig by firing rapid scene changes and heavy synthetic DSP load so you can verify your buffer size at home instead of finding out during the guitar solo on Saturday night.</li>
+									</ul>
+								</div>
+							</section>
+
+						<!-- 19. ENGINE TUNING -->
+							<section id="engine-tuning">
+								<div class="container">
+									<h3>21. Engine &amp; CPU Core Optimization</h3>
+									<p>Modern Windows laptops (especially 12th-14th Gen Intel &amp; Core Ultra) have a habit of sabotaging live audio even when your CPU meter says 12%. Fanfare's <strong>Engine &amp; CPU Optimization</strong> screen gives you four plain-English switches that tame the Windows kernel:</p>
+									<ol>
+										<li><strong>CPU Core Assignment (<code>Auto: Fast Performance Cores Only</code> vs <code>Use All Cores</code>):</strong> On hybrid CPUs, pins real-time audio and DSP worker threads exclusively to fast Performance cores (P-cores), while steering UI graphics, disk streaming, and background Song preloading onto Efficiency cores (E-cores) so a background song load never causes an audio click.</li>
+										<li><strong>Shelter CPU 0 (Hardware Interrupt Shield):</strong> Windows routes almost all motherboard hardware interrupts (USB controllers, Wi-Fi adapters, battery ACPI sensors) to CPU Core 0. Enabling <em>Shelter CPU 0</em> evacuates Fanfare's real-time audio threads off Core 0 so a Wi-Fi or battery polling spike never interrupts an audio buffer.</li>
+										<li><strong>Prevent Windows 11 Power Throttling (EcoQoS):</strong> Stops Windows 11 from secretly putting your audio threads into "Efficiency Mode" and cutting your CPU clock speed in half between songs.</li>
+										<li><strong>DSP Processing Pipeline (<code>Parallel Multi-Threading</code> vs <code>Sequential Inline</code>):</strong> Parallel mode distributes active strips across multiple physical P-cores simultaneously using lock-free work-sharing; Sequential mode processes strips one after another on a single thread.</li>
+									</ol>
+
+									<blockquote>
+										<span class="use-case-label">Golden Stage Rule</span><br />
+										<strong>Always Plug In Your AC Power Brick:</strong> When a Windows laptop runs on battery power, the motherboard's embedded controller aggressively throttles CPU clock speeds and puts USB hubs to sleep, no matter what software settings you enable. Fanfare will warn you if it detects battery operation at startup. Always plug into AC mains power on stage!
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 20. RESOURCE INSPECTOR -->
+							<section id="resource-inspector">
+								<div class="container">
+									<h3>22. Per-Strip Resource &amp; DSP Inspector</h3>
+									<span class="image fit"><img src="active_vst_windows.png" alt="Active VST3 plugins and performance monitoring" /></span>
+									<p>Click the <strong><code>CPU: %</code></strong> or <strong><code>RAM: MB</code></strong> readout in the top telemetry bar at any time to open the <strong>Fanfare Resource &amp; DSP Inspector</strong>. It displays four live memory/CPU summary cards across the top (<em>Process RAM Working Set</em>, <em>Virtual Commit Charge</em>, <em>Total Real-Time DSP Load</em>, and <em>Free System RAM</em>) and a live per-strip table showing exactly how much real-time DSP CPU percentage each strip and Aux Return is consuming.</p>
+									<p>One quirk worth knowing before it alarms you: <em>Total Real-Time DSP Load</em> is the sum of every strip's individual load, and because strips are processed in parallel it can legitimately exceed 100%. The header <code>CPU</code> readout is the number that actually predicts dropouts.</p>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Finding the Culprit Plugin Before the Downbeat:</strong> Your CPU meter suddenly jumps to 65% and you have eight strips loaded. Instead of guessing which plugin is eating your processor alive, click <code>CPU:</code> in the top bar. You'll immediately see that Strip 2 (Rhodes) is using 1.8% CPU, Strip 3 (B3) is using 3.2% CPU, and Strip 6 has a boutique synthesizer with "Ultra 16x Oversampling" turned on eating 48% CPU by itself. Mute Strip 6 or switch its oversampling to 2x, and your CPU drops right back to 10%.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 21. COMMUNITY & ROLL YOUR OWN -->
+							<section id="community">
+								<div class="container">
+									<h3>23. Comments, Feature Ideas &amp; Rolling Your Own</h3>
+									<p>Got a stage war story, a bug report, or an idea for a feature that would save your bacon on a Saturday night? Jump into the conversation on our <a href="https://github.com/openrig-host/openrig/discussions" target="_blank" rel="noopener"><strong>GitHub Discussions</strong></a> page and let us know what you're playing and what you need.</p>
+									<blockquote>
+										<span class="use-case-label">The Roll-Your-Own Approach</span><br />
+										<strong>Hack It to Fit Your Rig with Google Antigravity:</strong> Because Fanfare is 100% open-source C++ and JUCE, you don't have to wait around wishing a commercial software company would add a button for your specific keyboard or band setup.<br /><br />
+										Clone the repository, drop the source code and required dependencies into <strong>Google Antigravity</strong>, and tell the agent what you want changed. Whether you need a custom harmonizer scale for a single 80s cover tune, a specialized MIDI controller handshake, or a custom stage display, you can build your own personalized fork in an afternoon.
+									</blockquote>
+									<ul class="actions">
+										<li><a href="https://github.com/openrig-host/openrig/discussions" target="_blank" rel="noopener" class="button primary icon solid fa-comments">Join GitHub Discussions</a></li>
+										<li><a href="https://github.com/openrig-host/openrig" target="_blank" rel="noopener" class="button icon brands fa-github">Get the Source Code</a></li>
+									</ul>
+								</div>
+							</section>
+
+					</div>
+
+				<!-- Footer -->
+					<section id="footer">
+						<div class="container">
+							<ul class="copyright">
+								<li>&copy; Fanfare v1.3.1</li><li><a href="index.html">Open Tablet Stage HUD</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
+							</ul>
+						</div>
+					</section>
+
+			</div>
+
+		<!-- Lightbox -->
+			<div id="lightbox" class="lightbox" onclick="closeLightbox()">
+				<img class="lightbox-content" id="lightbox-img" alt="Enlarged screenshot" />
+			</div>
+
+		<!-- Scripts -->
+			<script src="assets-readonly/js/jquery.min.js"></script>
+			<script src="assets-readonly/js/jquery.scrollex.min.js"></script>
+			<script src="assets-readonly/js/jquery.scrolly.min.js"></script>
+			<script src="assets-readonly/js/browser.min.js"></script>
+			<script src="assets-readonly/js/breakpoints.min.js"></script>
+			<script src="assets-readonly/js/util.js"></script>
+			<script src="assets-readonly/js/main.js"></script>
+			<script>
+				// Live filter for chapters & sidebar links
+				(function() {
+					const filterInput = document.getElementById('nav-filter');
+					const navItems = Array.from(document.querySelectorAll('#nav ul li'));
+					const sections = Array.from(document.querySelectorAll('#main > section'));
+					if (!filterInput) return;
+
+					filterInput.addEventListener('input', () => {
+						const q = filterInput.value.trim().toLowerCase();
+						sections.forEach(sec => {
+							const match = !q || sec.innerText.toLowerCase().includes(q);
+							sec.style.display = match ? '' : 'none';
+						});
+						navItems.forEach(li => {
+							const a = li.querySelector('a');
+							const targetId = a ? a.getAttribute('href').replace('#', '') : '';
+							const targetSec = document.getElementById(targetId);
+							const match = !q || (a && a.innerText.toLowerCase().includes(q)) || (targetSec && targetSec.style.display !== 'none');
+							li.style.display = match ? '' : 'none';
+						});
+					});
+				})();
+
+				// Click-to-zoom lightbox on screenshots
+				const lightbox = document.getElementById('lightbox');
+				const lightboxImg = document.getElementById('lightbox-img');
+				document.querySelectorAll('.image.fit img, .image.right img').forEach(img => {
+					img.addEventListener('click', () => {
+						lightbox.style.display = 'block';
+						lightboxImg.src = img.src;
+					});
+				});
+				function closeLightbox() {
+					lightbox.style.display = 'none';
+				}
+				document.addEventListener('keydown', (e) => {
+					if (e.key === 'Escape') closeLightbox();
+				});
+			</script>
+
+	</body>
+</html>

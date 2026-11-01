@@ -1,4 +1,5 @@
 #include "StageRemoteModalOverlay.h"
+#include "../HelpLauncher.h"
 #include "../Theme.h"
 
 namespace OpenRig {
@@ -8,6 +9,8 @@ StageRemoteModalOverlay::StageRemoteModalOverlay(StageHotspotController& hotspot
     setOpaque(false);
 
     addAndMakeVisible(closeBtn);
+    Fanfare::styleHelpButton(helpBtn, "#web-remote", "HAAALP! Open the Tablet Stage HUD & Wi-Fi Hotspot section of the User's Manual");
+    addAndMakeVisible(helpBtn);
     closeBtn.onClick = [this]() {
         if (onClose) onClose();
     };
@@ -212,6 +215,7 @@ void StageRemoteModalOverlay::resized() {
 
     auto titleArea = dialogArea.removeFromTop(44);
     closeBtn.setBounds(titleArea.removeFromRight(80).reduced(8, 8));
+    helpBtn.setBounds(titleArea.removeFromRight(86).reduced(4, 8));
 
     auto bottomArea = dialogArea.removeFromBottom(40);
     usbInfoLabel.setBounds(bottomArea.reduced(16, 8));

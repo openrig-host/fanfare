@@ -36,6 +36,7 @@ private:
   juce::TextButton audioSettingsBtn, engineTuningBtn, scanPluginsBtn, busRoutingBtn,
       resetAudioBtn, aboutBtn, stressTestBtn;
   juce::TextButton closeBtn{"X"};
+  juce::TextButton helpBtn{"HAAALP!"};
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ConfigModalOverlay)
 };

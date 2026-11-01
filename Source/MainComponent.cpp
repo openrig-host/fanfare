@@ -5,6 +5,7 @@
 #endif
 
 #include "CCMappingComponent.h"
+#include "HelpLauncher.h"
 #include "MainComponent.h"
 #include "NoteRangeComponent.h"
 #include "RackSlotComponent.h"
@@ -277,7 +278,7 @@ MainComponent::MainComponent() {
       if (file.existsAsFile()) {
         Fanfare::SetlistManager::getInstance().addSetup(file);
       } else {
-        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon, "Setlist", "Please save the current rig first before adding it to the setlist.");
+        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon, "Setlist", "Please save the current song first before adding it to the setlist.");
       }
     };
     slp->onLoadSetupRequested = [this](const juce::File &file, int row) {
@@ -356,6 +357,9 @@ MainComponent::~MainComponent() {
     auto midiInputs = juce::MidiInput::getAvailableDevices();
   for (auto &input : midiInputs)
     deviceManager.removeMidiInputDeviceCallback(input.identifier, this); }
+  for (const auto &id : activeMidiInputIds)
+    deviceManager.setMidiInputDeviceEnabled(id, false);
+  deviceManager.removeMidiInputDeviceCallback({}, this);
   deviceManager.removeMidiInputDeviceCallback({}, this);
 
   deviceManager.removeAudioCallback(this);
@@ -532,8 +536,11 @@ void MainComponent::setupSlotComponents() {
       juce::PopupMenu menu;
       menu.addSectionHeader("Select Plugin for Chain " +
                             juce::String(chainIndex + 1));
-      for (int p = 0; p < engine.getNumAvailablePlugins(); ++p) {
-        menu.addItem(p + 1, engine.getAvailablePluginName(p));
+      for (int p = 0; p < engine.getNumAvailablePlugins(); ++p) menu.addItem(p + 1, engine.getAvailablePluginName(p));
+      if (false) {
+      for (int p = 0; p < engine.getNumAvailablePlugins(); ++p) menu.addItem(p + 1, engine.getAvailablePluginName(p));
+      menu.addSeparator();
+      menu.addItem(-1, "(No Plugin)");
       }
       menu.addSeparator();
       menu.addItem(-2, "Send MIDI OUT...", slot != nullptr && !slot->isChainSlotMidiOut(chainIndex));
@@ -729,8 +736,8 @@ void MainComponent::setupSlotComponents() {
           } else {
               juce::AlertWindow::showOkCancelBox(
                   juce::MessageBoxIconType::QuestionIcon,
-                  "Overwrite Channel?",
-                  "This channel already has plugins loaded. Do you want to overwrite it with the selected preset?",
+                  "Overwrite Strip?",
+                  "This strip already has plugins loaded. Do you want to overwrite it with the selected strip?",
                   "Overwrite",
                   "Cancel",
                   nullptr,
@@ -804,8 +811,10 @@ void MainComponent::setupSlotComponents() {
 
     comp->onShowPluginMenu = [this, i, slot, comp](int chainIndex) {
       juce::PopupMenu menu;
-      for (int p = 0; p < engine.getNumAvailablePlugins(); ++p)
-        menu.addItem(p + 1, engine.getAvailablePluginName(p));
+      if (false) { int dummy = 0; (void)dummy; }
+      for (int p = 0; p < engine.getNumAvailablePlugins(); ++p) menu.addItem(p + 1, engine.getAvailablePluginName(p));
+      menu.addSeparator();
+      menu.addItem(-1, "(No Plugin)");
 
       menu.showMenuAsync(juce::PopupMenu::Options(),
                          [this, i, slot, comp, chainIndex](int result) {
@@ -821,7 +830,16 @@ void MainComponent::setupSlotComponents() {
                                    juce::ignoreUnused(s, e);
                                    loadingOverlay.reset();
                                    comp->repaint();
+                                   comp->repaint();
                                  });
+                                 if (false) {
+                           }
+                           } else if (result == -1) {
+                             if (auto *oldInstance = slot->getPluginInstance(chainIndex))
+                               closePluginWindowForInstance(oldInstance);
+                             juce::ScopedLock sl(engine.getCallbackLock());
+                             slot->setPluginInChain(chainIndex, nullptr);
+                             comp->repaint();
                            }
                          });
     };
@@ -917,7 +935,7 @@ void MainComponent::setupHeaderButtons() {
   // Exit button
   addAndMakeVisible(exitBtn);
   exitBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::panel));
-  exitBtn.setTooltip("Quit OpenRig");
+  exitBtn.setTooltip("Quit Fanfare");
   exitBtn.onClick = [] { juce::JUCEApplication::quit(); };
 
   // Audio Settings button
@@ -1033,7 +1051,7 @@ void MainComponent::setupHeaderButtons() {
   saveBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::ok));
   saveBtn.onClick = [this] {
     auto chooser = std::make_shared<juce::FileChooser>(
-        "Save Rig Configuration",
+        "Save Song Configuration",
         Fanfare::RigLibrary::getSongsDirectory(),
         "*.json");
 
@@ -1062,7 +1080,7 @@ void MainComponent::setupHeaderButtons() {
                     ThemeManager::get(Theme::Role::warn));
   loadBtn.onClick = [this] {
     auto chooser = std::make_shared<juce::FileChooser>(
-        "Load Rig Configuration",
+        "Load Song Configuration",
         Fanfare::RigLibrary::getSongsDirectory(),
         "*.json");
 
@@ -1072,13 +1090,13 @@ void MainComponent::setupHeaderButtons() {
                             auto file = fc.getResult();
                             if (file.existsAsFile())
                               loadRigAsync(file);
-                          });
+                         });
   };
 
   // Gig Notepad & Stage Notes button
   addAndMakeVisible(gigNotepadBtn);
   gigNotepadBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
-  gigNotepadBtn.setTooltip("Open Gig Notepad & Stage Notes for Current Setup (Ctrl+N)");
+  gigNotepadBtn.setTooltip("Open Gig Notepad & Stage Notes for Current Song (Ctrl+N)");
   gigNotepadBtn.onClick = [this] { showGigNotepadWindow(); };
 
   // Web Remote HUD button
@@ -1086,6 +1104,8 @@ void MainComponent::setupHeaderButtons() {
   webRemoteBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
   webRemoteBtn.setTooltip("Open Web Remote HUD Settings & Tablet Connection URL");
   webRemoteBtn.onClick = [this] { showWebRemoteDialog(); };
+  Fanfare::styleHelpButton(mainHelpBtn, "#main-mixer", "HAAALP! Open the Fanfare User's Manual");
+  addAndMakeVisible(mainHelpBtn);
 
   // Prev / Next Setlist buttons
   addAndMakeVisible(prevSetlistBtn);
@@ -1123,6 +1143,9 @@ void MainComponent::setupHeaderButtons() {
   ramLabel.setTooltip("Click to view Per-VST Memory & Resource Inspector");
   ramLabel.addMouseListener(this, false);
 
+  addAndMakeVisible(latencyLabel);
+  latencyLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+  latencyLabel.setTooltip("Round-trip audio interface latency (Input + Output)");
   addAndMakeVisible(xrunsLabel);
   xrunsLabel.setFont(juce::FontOptions(12.0f, juce::Font::bold));
   xrunsLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::ok));
@@ -1136,7 +1159,7 @@ void MainComponent::setupHeaderButtons() {
 
   addAndMakeVisible(freshBuildToggle);
   freshBuildToggle.setColour(juce::ToggleButton::textColourId, ThemeManager::get(Theme::Role::accent));
-  freshBuildToggle.setTooltip("Clean Slate: When enabled, loading this setup unloads all prior plugins first and builds from the ground up.");
+  freshBuildToggle.setTooltip("Clean Slate: When enabled, loading this song unloads all prior plugins first and builds from the ground up.");
   freshBuildToggle.onClick = [this] {
     bool isFresh = freshBuildToggle.getToggleState();
     engine.setCurrentRigFreshBuild(isFresh);
@@ -1285,7 +1308,7 @@ void MainComponent::setupSetupButtons() {
   deleteSceneBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::danger));
 
   addSceneBtn.onClick = [this] {
-    engine.createNewScene("NEW PRESET");
+    engine.createNewScene("SCENE " + juce::String(engine.getNumScenes() + 1));
     refreshSceneButtons();
   };
 
@@ -1384,10 +1407,10 @@ void MainComponent::refreshSceneButtons() {
       juce::PopupMenu menu;
       juce::File assigned(sceneSetupFilePaths.size() > sceneIdx ? sceneSetupFilePaths[sceneIdx] : "");
 
-      menu.addSectionHeader("PRESET / SCENE " + juce::String(sceneIdx + 1));
-      menu.addItem(1, "Assign Setup File...");
+      menu.addSectionHeader("SCENE " + juce::String(sceneIdx + 1));
+      menu.addItem(1, "Assign Song File...");
       if (assigned.existsAsFile()) {
-        menu.addItem(2, "Clear Setup Assignment");
+        menu.addItem(2, "Clear Song Assignment");
       }
       menu.addSeparator();
 
@@ -1408,7 +1431,7 @@ void MainComponent::refreshSceneButtons() {
         [this, sceneIdx](int result) {
           if (result == 1) {
             auto fileChooser = std::make_shared<juce::FileChooser>(
-              "Select Setup File...", Fanfare::RigLibrary::getSongsDirectory(), "*.json");
+              "Select Song File...", Fanfare::RigLibrary::getSongsDirectory(), "*.json");
             fileChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
               [this, sceneIdx, fileChooser](const juce::FileChooser& fc) {
                 auto file = fc.getResult();
@@ -1487,7 +1510,7 @@ void MainComponent::setupMasterSection() {
     bool fohHas = !engine.getMasterPluginName(true, i).isEmpty();
     fohFxBtns[i].getProperties().set("isPluginSlot", true);
     fohFxBtns[i].getProperties().set("hasPlugin", fohHas);
-    fohFxBtns[i].setButtonText(fohHas ? engine.getMasterPluginName(true, i) : "[EMPTY]");
+    fohFxBtns[i].setButtonText(fohHas ? engine.getMasterPluginName(true, i) : ("FOH " + juce::String(i + 1)));
     fohFxBtns[i].onClick = [this, i] { showMasterPluginMenu(true, i); };
 
     addAndMakeVisible(fohEditGuiBtns[i]);
@@ -1498,7 +1521,7 @@ void MainComponent::setupMasterSection() {
     bool iemHas = !engine.getMasterPluginName(false, i).isEmpty();
     iemFxBtns[i].getProperties().set("isPluginSlot", true);
     iemFxBtns[i].getProperties().set("hasPlugin", iemHas);
-    iemFxBtns[i].setButtonText(iemHas ? engine.getMasterPluginName(false, i) : "[EMPTY]");
+    iemFxBtns[i].setButtonText(iemHas ? engine.getMasterPluginName(false, i) : ("IEM " + juce::String(i + 1)));
     iemFxBtns[i].onClick = [this, i] { showMasterPluginMenu(false, i); };
 
     addAndMakeVisible(iemEditGuiBtns[i]);
@@ -2544,6 +2567,7 @@ void MainComponent::resized() {
   loadBtn.setBounds(controlBar.removeFromRight(85).reduced(4));
   webRemoteBtn.setBounds(controlBar.removeFromRight(75).reduced(4));
   gigNotepadBtn.setBounds(controlBar.removeFromRight(75).reduced(4));
+  mainHelpBtn.setBounds(controlBar.removeFromRight(72).reduced(4));
 
   // Center: Telemetry + Clock packed together
   auto centerBar = controlBar.reduced(4, 2);
@@ -2703,7 +2727,7 @@ void MainComponent::resized() {
   if (samplerOverlay)
     samplerOverlay->centreWithSize(720, 600);
   if (mp3Overlay)
-    mp3Overlay->centreWithSize(680, 520);
+    mp3Overlay->centreWithSize(780, 580);
   if (setupBuilderOverlay)
     setupBuilderOverlay->centreWithSize(400, 480);
   if (resourceInspectorOverlay)
@@ -2775,7 +2799,7 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
   if (!transitioner || transitioner->isBusy()) {
     juce::AlertWindow::showMessageBoxAsync(
         juce::MessageBoxIconType::InfoIcon, "Transition Busy",
-        "A rig transition is currently in progress. Please wait.");
+        "A song transition is currently in progress. Please wait.");
     return;
   }
 
@@ -2812,7 +2836,7 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
                     refreshSceneButtons();
                     // Active-queue highlighting is driven by updatePreloadStatus()
                     // via the SetlistManager change broadcaster (setActiveIndex).
-midiMonitorLabel.setText("RIG: " + message,
+midiMonitorLabel.setText("SONG: " + message,
                                              juce::dontSendNotification);
 
                     if (!failed.empty()) {
@@ -2836,8 +2860,8 @@ midiMonitorLabel.setText("RIG: " + message,
                 } else {
                     // Rollback-by-construction: current rig is untouched.
                     juce::AlertWindow::showMessageBoxAsync(
-                        juce::MessageBoxIconType::WarningIcon, "Rig Load Failed",
-                        message + "\n\nThe current rig is unchanged.");
+                        juce::MessageBoxIconType::WarningIcon, "Song Load Failed",
+                        message + "\n\nThe current song is unchanged.");
                     LOG_ERROR("Failed to load rig: " + message + " file: " +
                               fileName);
                 }
@@ -2850,7 +2874,7 @@ void MainComponent::assignJsonToButton(int buttonIndex) {
   auto setupsDir = Fanfare::RigLibrary::getSongsDirectory();
   setupsDir.createDirectory();
 
-  auto chooser = std::make_shared<juce::FileChooser>("Select JSON Rig File",
+  auto chooser = std::make_shared<juce::FileChooser>("Select JSON Song File",
                                                      setupsDir, "*.json");
 
   chooser->launchAsync(
@@ -3010,7 +3034,7 @@ void MainComponent::timerCallback() {
                                                  : fohName);
 
     auto iemName = engine.getMasterPluginName(false, i);
-    iemFxBtns[i].setButtonText(iemName.isEmpty() ? "EARS " + juce::String(i + 1)
+    iemFxBtns[i].setButtonText(iemName.isEmpty() ? "IEM " + juce::String(i + 1)
                                                  : iemName);
   }
 
@@ -3066,7 +3090,7 @@ void MainComponent::showMasterPluginMenu(bool isFoh, int chainIndex) {
               bool hasPlugin = !name.isEmpty();
               btn.getProperties().set("isPluginSlot", true);
               btn.getProperties().set("hasPlugin", hasPlugin);
-              btn.setButtonText(hasPlugin ? name : "[EMPTY]");
+              btn.setButtonText(hasPlugin ? name : ((isFoh ? "FOH " : "IEM ") + juce::String(chainIndex + 1)));
             }
           });
     } else if (result == -1) {
@@ -3074,7 +3098,7 @@ void MainComponent::showMasterPluginMenu(bool isFoh, int chainIndex) {
         auto &btn = isFoh ? fohFxBtns[chainIndex] : iemFxBtns[chainIndex];
         btn.getProperties().set("isPluginSlot", true);
         btn.getProperties().set("hasPlugin", false);
-        btn.setButtonText("[EMPTY]");
+        btn.setButtonText((isFoh ? "FOH " : "IEM ") + juce::String(chainIndex + 1));
       });
     }
   });
@@ -3262,9 +3286,9 @@ void MainComponent::showMissingPluginsWarning(const std::vector<Fanfare::RigBuil
           slotName = s->getName();
       }
       if (slotName.isNotEmpty() && !slotName.startsWithIgnoreCase("Slot "))
-        info.location = slotName + " (Slot " + juce::String(slotIdx + 1) + ")";
+        info.location = slotName + " (Strip " + juce::String(slotIdx + 1) + ")";
       else
-        info.location = "Slot " + juce::String(slotIdx + 1);
+        info.location = "Strip " + juce::String(slotIdx + 1);
     } else if (fe.key.startsWith("A:")) {
       int auxIdx = fe.key.fromFirstOccurrenceOf("A:", false, false)
                          .upToFirstOccurrenceOf(":", false, false)
@@ -3352,7 +3376,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
     showGigNotepadWindow();
     return true;
   }
-  else if (key.isKeyCode ('P') || key.isKeyCode ('p')) {
+  else if (!key.getModifiers().isCommandDown() && !key.getModifiers().isAltDown() && (key.isKeyCode ('P') || key.isKeyCode ('p'))) {
     engine.triggerPanic();
     return true;
   }

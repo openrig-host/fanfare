@@ -75,7 +75,7 @@ public:
         auto subArea = inner.removeFromTop(18.0f);
         g.setColour(ThemeManager::get(Theme::Role::textDim));
         g.setFont(juce::Font(juce::FontOptions(13.0f)));
-        g.drawText("This setup calls for plugins not installed on this machine:", subArea, juce::Justification::left, true);
+        g.drawText("This song calls for plugins not installed on this machine:", subArea, juce::Justification::left, true);
 
         inner.removeFromTop(4.0f);
 

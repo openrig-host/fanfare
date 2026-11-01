@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#07090d">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>OpenRig Stage Companion</title>
+  <title>Fanfare Stage Companion</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!-- Offline / Connection Status Banner -->
   <div id="connectionBanner" class="connection-banner disconnected">
     <span class="status-dot"></span>
-    <span id="connectionText">DISCONNECTED &mdash; RECONNECTING TO OPENRIG...</span>
+    <span id="connectionText">DISCONNECTED &mdash; RECONNECTING TO FANFARE...</span>
   </div>
 
   <!-- Master Stage Frame: Main Area + Right Vertical Meter Sidebar -->
@@ -26,7 +26,7 @@
       <header class="stage-header">
         <div class="header-left">
           <div class="app-brand">
-            <span class="brand-title">OPENRIG</span>
+            <span class="brand-title">FANFARE</span>
             <span class="brand-badge">STAGE HUD</span>
           </div>
           <div class="telemetry-pills">
@@ -37,6 +37,7 @@
         </div>
 
         <div class="header-right">
+          <a href="/manual.html#web-remote" target="_blank" class="btn btn-fullscreen" style="background:#ffb300;color:#111;font-weight:bold;text-decoration:none;padding:6px 10px;border-radius:4px;" title="Open the Fanfare User's Manual">HAAALP!</a>
           <button id="fullscreenBtn" class="btn btn-fullscreen" title="Toggle Fullscreen">FULLSCREEN</button>
           <button id="panicBtn" class="btn btn-panic" title="Panic: All Notes Off / Silence Audio">PANIC KILL</button>
         </div>
@@ -73,7 +74,7 @@
                   <span class="preload-status-dot" id="preloadDot" title="Preload Status"></span>
                 </div>
               </div>
-              <h1 class="current-song-title" id="currentSongTitle">DEFAULT RIG</h1>
+              <h1 class="current-song-title" id="currentSongTitle">DEFAULT SONG</h1>
             </div>
 
             <button id="hudNextBtn" class="btn btn-song-nav btn-next" title="Next Song in Setlist">
@@ -285,7 +286,7 @@
           <span id="clockDisplay">00:00:00</span>
         </div>
         <div class="footer-right">
-          <span class="host-pill">OpenRig v1.0.0</span>
+          <span class="host-pill">Fanfare v1.3.1</span>
         </div>
       </footer>
 

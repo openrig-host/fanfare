@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "FanfareEngine.h"
+#include "HelpLauncher.h"
 #include "ThemeManager.h"
 
 class StageLiveNotesViewer : public juce::Component {
@@ -198,7 +199,7 @@ public:
         if (rawText.trim().isEmpty()) {
             g.setColour(juce::Colour(0xff8b949e));
             g.setFont(juce::FontOptions(fontSize > 0 ? fontSize : 20.0f));
-            g.drawText("No notes or chord charts for this setup. Switch to EDIT MODE to type or import notes.",
+            g.drawText("No notes or chord charts for this song. Switch to EDIT MODE to type or import notes.",
                        getLocalBounds().reduced(20), juce::Justification::centredTop, true);
             return;
         }
@@ -298,6 +299,8 @@ public:
             updateLiveEditModeState();
         };
         addAndMakeVisible(liveModeBtn);
+        Fanfare::styleHelpButton(helpBtn, "#gig-notepad", "HAAALP! Open the Gig Notepad & Chord Charts section of the User's Manual");
+        addAndMakeVisible(helpBtn);
 
         // Font Zoom Out (-)
         zoomOutBtn.setButtonText("A-");
@@ -824,6 +827,8 @@ public:
         manageTabsBtn.setBounds(topRow.removeFromRight(65));
         topRow.removeFromRight(4);
         addTabBtn.setBounds(topRow.removeFromRight(55));
+        topRow.removeFromRight(4);
+        helpBtn.setBounds(topRow.removeFromRight(74));
 
         area.removeFromTop(8); // Space between toolbar and tabs/format row
 
@@ -873,6 +878,7 @@ private:
     juce::TextButton importBtn;
     juce::TextButton addTabBtn;
     juce::TextButton manageTabsBtn;
+    juce::TextButton helpBtn{"HAAALP!"};
 
     // Format buttons
     juce::TextButton btnBold;

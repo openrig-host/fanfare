@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "RackSlot.h"
 #include "BoutiqueLookAndFeel.h"
+#include "HelpLauncher.h"
 #include "ThemeManager.h"
 #include "IMidiNoteLearner.h"
 
@@ -48,6 +49,8 @@ public:
       repaint();
     };
     addAndMakeVisible(resetButton);
+    Fanfare::styleHelpButton(helpButton, "#note-range", "HAAALP! Open the Note Range & Keyboard Split section of the User's Manual");
+    addAndMakeVisible(helpButton);
   }
 
   ~NoteRangeComponent() override { stopTimer(); }
@@ -58,6 +61,7 @@ public:
     learnButton.setBounds(buttonArea.removeFromLeft(80));
     buttonArea.removeFromLeft(10);
     resetButton.setBounds(buttonArea.removeFromLeft(80));
+    helpButton.setBounds(buttonArea.removeFromRight(76));
   }
 
   void paint(juce::Graphics &g) override {
@@ -137,6 +141,7 @@ private:
 
   juce::TextButton learnButton;
   juce::TextButton resetButton;
+  juce::TextButton helpButton{"HAAALP!"};
 
   bool learning = false;
   int learnedLow = -1;

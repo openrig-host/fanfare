@@ -29,6 +29,7 @@ private:
     int port = 8080;
 
     juce::TextButton closeBtn{"CLOSE"};
+    juce::TextButton helpBtn{"HAAALP!"};
     
     // Wi-Fi Section
     juce::Label wifiTitleLabel;

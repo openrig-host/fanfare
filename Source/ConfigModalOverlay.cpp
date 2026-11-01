@@ -1,4 +1,5 @@
 #include "ConfigModalOverlay.h"
+#include "HelpLauncher.h"
 #include "ThemeManager.h"
 #include "Version.h"
 
@@ -68,6 +69,8 @@ ConfigModalOverlay::ConfigModalOverlay(Actions a) : actions(std::move(a)) {
       actions.onClose();
   };
   addAndMakeVisible(closeBtn);
+  Fanfare::styleHelpButton(helpBtn, "#settings", "HAAALP! Open the Configuration & Settings section of the User's Manual");
+  addAndMakeVisible(helpBtn);
 
   refreshInfo();
   updateStressTestButtonState();
@@ -98,7 +101,8 @@ void ConfigModalOverlay::paint(juce::Graphics &g) {
 void ConfigModalOverlay::resized() {
   auto area = getLocalBounds().reduced(14);
   auto top = area.removeFromTop(30);
-  titleLabel.setBounds(top.removeFromLeft(top.getWidth() - 40));
+  titleLabel.setBounds(top.removeFromLeft(top.getWidth() - 115));
+  helpBtn.setBounds(top.removeFromLeft(74).reduced(2, 2));
   closeBtn.setBounds(top.removeFromRight(30));
 
   infoLabel.setBounds(area.removeFromTop(70).reduced(2));

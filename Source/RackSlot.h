@@ -229,7 +229,7 @@ public:
                 }
               } else if (msg.isController()) {
                 int ccNum = msg.getControllerNumber();
-                if (isCCAllowed(ccNum)) {
+                if (isCCAllowed(ccNum) || ccNum == 120 || ccNum == 121 || ccNum == 123) {
                   midiOutChain[i].addEvent(
                       juce::MidiMessage::controllerEvent(outCh, ccNum, msg.getControllerValue()),
                       metadata.samplePosition);

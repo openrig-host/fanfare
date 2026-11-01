@@ -3,6 +3,7 @@
 #include "MidiLearnBus.h"
 #include "RackSlot.h"
 #include <JuceHeader.h>
+#include "HelpLauncher.h"
 #include "ThemeManager.h"
 
 /**
@@ -46,6 +47,8 @@ public:
   CCMappingComponent(RackSlot &s, int autoArmLearn = 0) : slot(s) {
     // --- Fader CC row ---
     addAndMakeVisible(fohLabel);
+    Fanfare::styleHelpButton(helpBtn, "#cc-assignments", "HAAALP! Open the CC Assignments & Inverse Drawbar section of the User's Manual");
+    addAndMakeVisible(helpBtn);
     fohLabel.setText("FOH CC:", juce::dontSendNotification);
     addAndMakeVisible(fohCCEditor);
     fohCCEditor.setText(juce::String(slot.getFohCC()));
@@ -927,6 +930,7 @@ public:
 
   void resized() override {
     auto r = getLocalBounds().reduced(10);
+    helpBtn.setBounds(getWidth() - 88, 10, 74, 24);
     r.removeFromTop(40);
 
     // Fader row
@@ -983,14 +987,11 @@ public:
     addRow.removeFromRight(4);
     togBtn.setBounds(addRow.removeFromRight(36));
     addRow.removeFromRight(6);
-    maxLabel.setBounds(addRow.removeFromRight(30));
-    maxEditor.setBounds(addRow.removeFromRight(44));
+    maxEditor.setBounds(addRow.removeFromRight(44)); maxLabel.setBounds(addRow.removeFromRight(30));
     addRow.removeFromRight(6);
-    minLabel.setBounds(addRow.removeFromRight(30));
-    minEditor.setBounds(addRow.removeFromRight(44));
+    minEditor.setBounds(addRow.removeFromRight(44)); minLabel.setBounds(addRow.removeFromRight(30));
     addRow.removeFromRight(6);
-    ccLabel.setBounds(addRow.removeFromRight(34));
-    ccEditor.setBounds(addRow.removeFromRight(36));
+    ccEditor.setBounds(addRow.removeFromRight(36)); ccLabel.setBounds(addRow.removeFromRight(34));
     addRow.removeFromRight(6);
     paramSelector.setBounds(addRow.removeFromRight(130));
     addRow.removeFromRight(6);
@@ -1045,7 +1046,7 @@ private:
       swapBCombo;
   juce::TextButton fohLearnBtn, iemLearnBtn, muteLearnBtn, swapLearnBtn,
       learnBtn, mapBtn, selLearnBtn, delBtn, passBtn, ck88PresetBtn, invBtn,
-      togBtn, selInvBtn, selTogBtn, quickLearnBtn;
+      togBtn, selInvBtn, selTogBtn, quickLearnBtn, helpBtn;
   juce::ListBox mappingList;
 
   struct MappingItem {

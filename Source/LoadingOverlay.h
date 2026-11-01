@@ -47,7 +47,7 @@ public:
     g.setColour(juce::Colours::white);
     g.setFont(mainFont);
     auto textArea = box.reduced(20);
-    g.drawText(title.isEmpty() ? "ARMING STAGE RIG..." : title, textArea.removeFromTop(50),
+    g.drawText(title.isEmpty() ? "ARMING STAGE SONG..." : title, textArea.removeFromTop(50),
                juce::Justification::centred, false);
 
     // Subtitle

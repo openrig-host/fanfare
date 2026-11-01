@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "FanfareEngine.h"
+#include "HelpLauncher.h"
 #include "ThemeManager.h"
 
 class ResourceInspectorModal : public juce::Component,
@@ -13,7 +14,7 @@ public:
     {
         setOpaque(true);
 
-        titleLabel.setText("OPENRIG RESOURCE & DSP INSPECTOR", juce::dontSendNotification);
+        titleLabel.setText("FANFARE RESOURCE & DSP INSPECTOR", juce::dontSendNotification);
         titleLabel.setFont(juce::FontOptions(16.0f, juce::Font::bold));
         titleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
         addAndMakeVisible(titleLabel);
@@ -24,6 +25,8 @@ public:
             if (closeCallback) closeCallback();
         };
         addAndMakeVisible(closeBtn);
+        Fanfare::styleHelpButton(helpBtn, "#resource-inspector", "HAAALP! Open the Resource & DSP Inspector section of the User's Manual");
+        addAndMakeVisible(helpBtn);
 
         refreshBtn.setButtonText("REFRESH STATS");
         refreshBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
@@ -125,7 +128,7 @@ public:
 
         // 0. Process Core Row
         RowData coreRow;
-        coreRow.componentName = "OpenRig Process Core";
+        coreRow.componentName = "Fanfare Process Core";
         coreRow.pluginName = "JUCE Host Engine";
         coreRow.cpuUsage = totalEngineDsp;
         coreRow.hasCpu = true;
@@ -201,7 +204,7 @@ public:
         if (bytes >= 1024 * 1024 * 1024)
             return juce::String((double)bytes / (1024.0 * 1024.0 * 1024.0), 2) + " GB";
         if (bytes >= 1024 * 1024)
-            return juce::String((double)bytes / (1024.0 * 1024.0 * 1024.0), 1) + " MB";
+            return juce::String((double)bytes / (1024.0 * 1024.0), 1) + " MB";
         if (bytes >= 1024)
             return juce::String(bytes / 1024) + " KB";
         return juce::String(bytes) + " B";
@@ -261,6 +264,7 @@ public:
 
     void resized() override {
         closeBtn.setBounds(getWidth() - 35, 10, 25, 25);
+        helpBtn.setBounds(getWidth() - 115, 10, 74, 25);
         titleLabel.setBounds(15, 10, getWidth() - 150, 25);
 
         int topY = 125;
@@ -275,6 +279,7 @@ private:
     juce::Label titleLabel;
     juce::Label infoLabel;
     juce::TextButton closeBtn;
+    juce::TextButton helpBtn{"HAAALP!"};
     juce::TextButton refreshBtn;
     juce::TableListBox table;
 

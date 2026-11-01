@@ -5,7 +5,7 @@ namespace Fanfare {
 
 QueueButtonComponent::QueueButtonComponent(int index)
     : juce::Button("QueueButton_" + juce::String(index)), slotIndex(index) {
-    setTooltip(slotIndex == 0 ? "CORE SETUP (Default stage rig)" : "Stage Queue Slot " + juce::String(slotIndex));
+    setTooltip(slotIndex == 0 ? "CORE SONG (Default stage song)" : "Stage Queue Slot " + juce::String(slotIndex));
 }
 
 void QueueButtonComponent::setAssignedFile(const juce::File& file) {
@@ -55,8 +55,8 @@ void QueueButtonComponent::itemDropped(const SourceDetails& dragSourceDetails) {
 void QueueButtonComponent::mouseDown(const juce::MouseEvent& e) {
     if (e.mods.isPopupMenu()) {
         juce::PopupMenu menu;
-        menu.addSectionHeader(slotIndex == 0 ? "CORE SETUP SLOT" : "QUEUE SLOT " + juce::String(slotIndex));
-        menu.addItem(1, "Assign Setup File...");
+        menu.addSectionHeader(slotIndex == 0 ? "CORE SONG SLOT" : "QUEUE SLOT " + juce::String(slotIndex));
+        menu.addItem(1, "Assign Song File...");
         if (assignedFile.existsAsFile()) {
             menu.addItem(2, "Clear Slot");
         }
@@ -113,7 +113,7 @@ void QueueButtonComponent::paintButton(juce::Graphics& g, bool shouldDrawButtonA
     g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
     if (isCore) {
         g.setColour(juce::Colour(0xFF00E5FF));
-        g.drawText("CORE SETUP", tagArea, juce::Justification::centredLeft, true);
+        g.drawText("CORE SONG", tagArea, juce::Justification::centredLeft, true);
     } else {
         g.setColour(juce::Colour(0xFF8E8E93));
         g.drawText("NEXT " + juce::String(slotIndex), tagArea, juce::Justification::centredLeft, true);
@@ -136,7 +136,7 @@ void QueueButtonComponent::paintButton(juce::Graphics& g, bool shouldDrawButtonA
     if (assignedFile.existsAsFile()) {
         title = assignedFile.getFileNameWithoutExtension();
     } else if (isCore) {
-        title = "CORE SETUP";
+        title = "CORE SONG";
     } else {
         title = "[ Drag Song Here ]";
     }

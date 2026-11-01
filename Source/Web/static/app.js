@@ -34,7 +34,7 @@
   let pingIntervalId = null;
 
   let currentStatus = {
-    activePreset: "DEFAULT RIG",
+    activePreset: "DEFAULT SONG",
     setlist: [],
     activeSetlistIndex: 0,
     isPreloaded: false,
@@ -150,7 +150,7 @@
     ws.onopen = () => {
       wsConnected = true;
       if (banner) banner.className = 'connection-banner connected';
-      if (connectionText) connectionText.innerText = 'CONNECTED TO OPENRIG';
+      if (connectionText) connectionText.innerText = 'CONNECTED TO FANFARE';
       if (latencyIndicator) latencyIndicator.innerText = 'WS: CONNECTED';
       
       sendWsMessage({ type: 'get_status' });
@@ -186,7 +186,7 @@
   function handleDisconnect() {
     wsConnected = false;
     if (banner) banner.className = 'connection-banner disconnected';
-    if (connectionText) connectionText.innerText = 'DISCONNECTED — RECONNECTING TO OPENRIG...';
+    if (connectionText) connectionText.innerText = 'DISCONNECTED — RECONNECTING TO FANFARE...';
     if (latencyIndicator) latencyIndicator.innerText = 'WS: OFFLINE';
     if (pingIntervalId) {
       clearInterval(pingIntervalId);
@@ -253,7 +253,7 @@
 
     // 1. Current Song Hero Title
     if (currentSongTitle) {
-      currentSongTitle.innerText = currentStatus.activePreset || "DEFAULT RIG";
+      currentSongTitle.innerText = currentStatus.activePreset || "DEFAULT SONG";
     }
 
     if (cpuVal) cpuVal.innerText = `${Math.round(currentStatus.cpuLoad || 0)}%`;
@@ -270,7 +270,7 @@
       if (setlist.length > 0) {
         songPosBadge.innerText = `SONG ${activeIdx + 1} OF ${setlist.length}`;
       } else {
-        songPosBadge.innerText = `SINGLE RIG`;
+        songPosBadge.innerText = `SINGLE SONG`;
       }
     }
 
@@ -375,7 +375,7 @@
     setlistFastStrip.innerHTML = '';
 
     if (setlist.length === 0) {
-      setlistFastStrip.innerHTML = '<div style="color: var(--text-dim); font-size: 11px; padding: 4px;">No setlist loaded. Load a setlist in OpenRig.</div>';
+      setlistFastStrip.innerHTML = '<div style="color: var(--text-dim); font-size: 11px; padding: 4px;">No setlist loaded. Load a setlist in Fanfare.</div>';
       return;
     }
 

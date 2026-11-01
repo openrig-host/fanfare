@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "SimpleArpeggiator.h"
 #include "OctaveHarmonizer.h"
+#include "HelpLauncher.h"
 #include "ThemeManager.h"
 #include "RackSlot.h"
 
@@ -97,7 +98,7 @@ public:
             if (s == ownSlotIndex)
                 continue; // never route a slot to itself
             harmonyTargetCombo.addItem(
-                slotNames[s] + "  (Slot " + juce::String(s + 1) + ")", s + 2);
+                slotNames[s] + "  (Strip " + juce::String(s + 1) + ")", s + 2);
         }
         int desiredId = harmonizer.harmonyTargetSlot.load() + 2;
         harmonyTargetCombo.setSelectedId(
@@ -112,6 +113,8 @@ public:
         closeBtn.setButtonText("X");
         closeBtn.onClick = [this] { if (closeCallback) closeCallback(); };
         addAndMakeVisible(closeBtn);
+        Fanfare::styleHelpButton(helpBtn, "#midi-effects", "HAAALP! Open the MIDI Effects & Harmonizer section of the User's Manual");
+        addAndMakeVisible(helpBtn);
         setSize(620, 410);
     }
 
@@ -240,7 +243,8 @@ public:
     void resized() override {
         auto area = getLocalBounds().reduced(12);
         auto top = area.removeFromTop(30);
-        titleLabel.setBounds(top.removeFromLeft(top.getWidth() - 40));
+        titleLabel.setBounds(top.removeFromLeft(top.getWidth() - 115));
+        helpBtn.setBounds(top.removeFromLeft(74).reduced(2, 2));
         closeBtn.setBounds(top.removeFromRight(30));
 
         area.removeFromTop(6);
@@ -317,6 +321,7 @@ private:
 
     juce::Label titleLabel;
     juce::TextButton closeBtn{"X"};
+    juce::TextButton helpBtn{"HAAALP!"};
 
     juce::Label transposeHeader, transposeValue;
     juce::Slider transposeSlider;

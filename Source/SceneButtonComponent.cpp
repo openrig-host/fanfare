@@ -5,7 +5,7 @@ namespace Fanfare {
 
 SceneButtonComponent::SceneButtonComponent(int index, const juce::String& name)
     : juce::Button("SceneButton_" + juce::String(index)), sceneIndex(index), defaultName(name) {
-    setTooltip("Scene / Quick Preset " + juce::String(index + 1) + " (Drag & Drop setup .json file here)");
+    setTooltip("Scene " + juce::String(index + 1) + " (Right-click to assign MIDI trigger or link a Song .json file)");
 }
 
 void SceneButtonComponent::setAssignedFile(const juce::File& file) {

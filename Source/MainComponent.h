@@ -96,10 +96,11 @@ private:
   juce::TextButton scanButton{"SCAN FOR PLUGINS"};
   juce::TextButton audioSettingsBtn{"AUDIO SETTINGS"};
   juce::TextButton busRoutingBtn{"BUS ROUTING"};
-  juce::TextButton saveBtn{"SAVE RIG"};
-  juce::TextButton loadBtn{"LOAD RIG"};
+  juce::TextButton saveBtn{"SAVE SONG"};
+  juce::TextButton loadBtn{"LOAD SONG"};
   juce::TextButton gigNotepadBtn{"NOTEPAD"};
   juce::TextButton webRemoteBtn{"REMOTE"};
+  juce::TextButton mainHelpBtn{"HAAALP!"};
   juce::TextButton prevSetlistBtn{"<<"};
   juce::TextButton nextSetlistBtn{">>"};
   juce::TextButton panicBtn{"PANIC"};
@@ -165,7 +166,7 @@ private:
   juce::String setupFilePaths[numSetupButtons];
   juce::TextButton saveSetBtn{"SAVE SET"};
   juce::TextButton loadSetBtn{"LOAD SET"};
-  juce::TextButton setupBuilderBtn{"BUILD SETUP"};
+  juce::TextButton setupBuilderBtn{"BUILD SONG"};
 
   // Scene (Preset) management buttons
   juce::TextButton addSceneBtn{"+ SCENE"};
@@ -260,7 +261,7 @@ private:
   juce::CriticalSection glitchLogLock;
   void flushGlitchLog();
 
-  juce::Label setupNameLabel{"setupNameLabel", "No rig loaded"};
+  juce::Label setupNameLabel{"setupNameLabel", "No song loaded"};
   juce::File currentRigFile;
   juce::ToggleButton freshBuildToggle{"CLEAN SLATE"};
   juce::ToggleButton autoCollapseToggle{"STAGE COMPACT"};

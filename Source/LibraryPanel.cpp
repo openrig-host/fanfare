@@ -82,7 +82,7 @@ void LibraryList::toggleFolderCollapsed(const juce::String &cat) {
 
 void LibraryList::createNewFolder() {
   auto *aw = new juce::AlertWindow("New Category Folder",
-                                   "Enter a folder name to group setups/songs:",
+                                   "Enter a folder name to group songs/strips:",
                                    juce::MessageBoxIconType::InfoIcon);
   aw->addTextEditor("folderName", "", "Folder Name:");
   aw->addButton("Create", 1, juce::KeyPress(juce::KeyPress::returnKey));
@@ -319,7 +319,7 @@ void LibraryList::listBoxItemClicked(int row, const juce::MouseEvent &e) {
           } else {
             juce::AlertWindow::showMessageBoxAsync(
                 juce::MessageBoxIconType::WarningIcon, "Folder Not Empty",
-                "Please delete or move all setups out of this folder before deleting it.");
+                "Please delete or move all items out of this folder before deleting it.");
           }
         }
       });
@@ -457,7 +457,7 @@ LibraryPanel::LibraryPanel() {
 
   addAndMakeVisible(newFolderBtn);
   newFolderBtn.setButtonText("+ Folder");
-  newFolderBtn.setTooltip("Create a new category folder for setups/songs");
+  newFolderBtn.setTooltip("Create a new category folder for songs/strips");
   newFolderBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF26292E));
   newFolderBtn.setColour(juce::TextButton::textColourOffId, juce::Colour(0xFF00E5FF));
   newFolderBtn.onClick = [this] {

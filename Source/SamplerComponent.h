@@ -4,6 +4,7 @@
 #include "RackSlot.h"
 #include "BoutiqueLookAndFeel.h"
 #include "WaveformSpliceEditor.h"
+#include "HelpLauncher.h"
 #include "ThemeManager.h"
 
 class SamplerSlotRow : public juce::Component,
@@ -418,6 +419,8 @@ public:
         closeBtn.onClick = [this] { if (closeCallback) closeCallback(); };
         closeBtn.setColour(juce::TextButton::buttonColourId, juce::Colours::black.withAlpha(0.2f));
         addAndMakeVisible(closeBtn);
+        Fanfare::styleHelpButton(helpBtn, "#sampler", "HAAALP! Open the 8-Pad Sampler section of the User's Manual");
+        addAndMakeVisible(helpBtn);
 
         fileHeader.setText("Sample Audio File", juce::dontSendNotification);
         fileHeader.setFont(juce::FontOptions(11.0f));
@@ -493,6 +496,7 @@ public:
         
         auto topArea = bounds.removeFromTop(35);
         closeBtn.setBounds(topArea.removeFromRight(35).reduced(2));
+        helpBtn.setBounds(topArea.removeFromRight(76).reduced(2));
         enableBtn.setBounds(topArea.removeFromRight(120).reduced(2));
         titleLabel.setBounds(topArea.reduced(2));
         
@@ -572,6 +576,7 @@ private:
     juce::Label titleLabel;
     juce::TextButton enableBtn;
     juce::TextButton closeBtn{"X"};
+    juce::TextButton helpBtn{"HAAALP!"};
 
     juce::Label learnHeader, fileHeader, volHeader, pitchHeader, rootHeader, rangeHeader;
 

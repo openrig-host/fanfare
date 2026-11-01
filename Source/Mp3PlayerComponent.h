@@ -34,7 +34,7 @@ public:
         setWantsKeyboardFocus(true);
 
         // Header Title & Close
-        titleLabel.setText("DJ PLAYLIST & DUAL-DECK PLAYER - Slot 11", juce::dontSendNotification);
+        titleLabel.setText("DJ PLAYLIST & DUAL-DECK PLAYER - Strip 10", juce::dontSendNotification);
         titleLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
         titleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
         addAndMakeVisible(titleLabel);
@@ -45,6 +45,8 @@ public:
             if (closeCallback) closeCallback();
         };
         addAndMakeVisible(closeBtn);
+        Fanfare::styleHelpButton(helpBtn, "#break-music", "HAAALP! Open the Break Music & Dual-Deck DJ section of the User's Manual");
+        addAndMakeVisible(helpBtn);
 
         // 1. Preset Playlist Banks (1..6)
         for (int i = 0; i < 6; ++i) {
@@ -974,6 +976,8 @@ public:
         // Header Row (Title & Close)
         auto header = area.removeFromTop(26);
         closeBtn.setBounds(header.removeFromRight(26));
+        header.removeFromRight(4);
+        helpBtn.setBounds(header.removeFromRight(74).reduced(0, 1));
         titleLabel.setBounds(header);
 
         area.removeFromTop(6);
@@ -1413,6 +1417,7 @@ public:
 
     juce::Label titleLabel;
     juce::TextButton closeBtn;
+    juce::TextButton helpBtn{"HAAALP!"};
     std::vector<std::unique_ptr<BankButton>> bankButtons;
 
     // Deck A Components

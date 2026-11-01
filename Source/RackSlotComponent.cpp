@@ -377,7 +377,7 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addAndMakeVisible(bypassButton);
   bypassButton.setButtonText("MUTE");
-  bypassButton.setTooltip("Mute Channel: Instantly cuts all audio output for this track. Hold to learn a mute CC.");
+  bypassButton.setTooltip("Mute Strip: Instantly cuts all audio output for this strip. Hold to learn a mute CC.");
   bypassButton.setClickingTogglesState(true);
   bypassButton.setColour(juce::TextButton::buttonOnColourId,
                          ThemeManager::get(Theme::Role::danger));
@@ -1214,7 +1214,7 @@ void RackSlotComponent::showButtonHelpPopup(juce::Component *src) {
               "Restricts this channel strip to a specific key range on your "
               "controller. Notes outside the range are ignored.") ||
         match(customizeButton, "Dynamics Section (DYN)",
-              "Opens the channel strip processor: Noise Gate, 3-band EQ, "
+              "Opens the channel strip processor: Noise Gate, 10-band EQ, "
               "Compressor, and Aux Send routing for spatial mixing.") ||
         match(arpButton, "MIDI FX (Arpeggiator)",
               "Opens the built-in arpeggiator and harmonizer controls for "
@@ -1224,7 +1224,7 @@ void RackSlotComponent::showButtonHelpPopup(juce::Component *src) {
               "trigger audio samples across the keyboard.") ||
         match(mp3Button, "MP3 Playlist",
               "Opens the MP3 playlist engine for between-set music playback.") ||
-        match(bypassButton, "Mute Channel",
+        match(bypassButton, "Mute Strip",
               "Instantly cuts all audio output for this track. Click again "
               "to restore. Hold to learn a mute CC.") ||
         match(fohRoutingBtn, "FOH Send",
@@ -1265,7 +1265,7 @@ const juce::Array<juce::Colour> &RackSlotComponent::getPalette() {
 
 void RackSlotComponent::showColorPalette() {
   juce::PopupMenu menu;
-  menu.addSectionHeader("Channel Color");
+  menu.addSectionHeader("Strip Color");
   const auto &pal = getPalette();
   int id = 1;
   for (auto &c : pal) {
@@ -1287,8 +1287,8 @@ void RackSlotComponent::showColorPalette() {
 
 void RackSlotComponent::showRenameDialog() {
   auto *alertWindow = new juce::AlertWindow(
-      "Rename Channel",
-      "Enter a new name for this channel:", juce::MessageBoxIconType::NoIcon);
+      "Rename Strip",
+      "Enter a new name for this strip:", juce::MessageBoxIconType::NoIcon);
   alertWindow->addTextEditor("name", slot.getName(), "Name:");
   alertWindow->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
   alertWindow->addButton("Cancel", 0,
@@ -1474,7 +1474,7 @@ juce::String RackSlotComponent::getActiveNoteRangeString() const {
   }
 
   if (activeLow == 0 && activeHigh == 127)
-    return "C-2 - G8 (Full)";
+    return "C-1 - G9 (Full)";
 
   return midiNoteName(activeLow) + " - " + midiNoteName(activeHigh);
 }
@@ -1487,6 +1487,8 @@ void RackSlotComponent::updateOutputSelector() {
   outputSelector.addSeparator();
   if (auto *rootMenu = outputSelector.getRootMenu())
     rootMenu->addSectionHeader("Direct Hardware Outs");
+  outputSelector.addItem("Direct: Out 1+2 (Stereo)", 200 + 2);
+  outputSelector.addItem("Direct: Out 3+4 (Stereo)", 202 + 2);
   outputSelector.addItem("Direct: Out 5 (Mono)", 104 + 2);
   outputSelector.addItem("Direct: Out 6 (Mono)", 105 + 2);
   outputSelector.addItem("Direct: Out 7 (Mono)", 106 + 2);
@@ -1505,10 +1507,10 @@ void RackSlotComponent::updateOutputSelector() {
       if (!headerAdded) {
         outputSelector.addSeparator();
         if (auto *rootMenu = outputSelector.getRootMenu())
-          rootMenu->addSectionHeader("Subgroup to Slot");
+          rootMenu->addSectionHeader("Subgroup to Strip");
         headerAdded = true;
       }
-      juce::String name = "Slot " + juce::String(i + 1);
+      juce::String name = "Strip " + juce::String(i + 1);
       if (getSlotName) {
         juce::String customName = getSlotName(i);
         if (customName.isNotEmpty()) {

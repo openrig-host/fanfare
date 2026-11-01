@@ -13,7 +13,7 @@
 //   // -> broadcasts change; listeners repaint.
 //
 // Persistence: the selected theme id is stored in
-//   %APPDATA%/OpenRig/settings/theme.json
+//   %APPDATA%/Fanfare/settings/theme.json
 
 class ThemeManager : public juce::ChangeBroadcaster {
 public:
@@ -63,6 +63,12 @@ public:
     // Loads saved theme id from settings. Call once at startup.
     void loadFromSettings() {
         auto f = settingsFile();
+        if (!f.existsAsFile()) {
+            auto leg = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                           .getChildFile("OpenRig/settings/theme.json");
+            if (leg.existsAsFile())
+                f = leg;
+        }
         if (f.existsAsFile()) {
             auto parsed = juce::JSON::parse(f);
             if (auto* obj = parsed.getDynamicObject()) {
@@ -99,7 +105,7 @@ private:
 
     static juce::File settingsFile() {
         return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-            .getChildFile("OpenRig/settings/theme.json");
+            .getChildFile("Fanfare/settings/theme.json");
     }
 
     int currentIndex = 0; // Stage Black by default

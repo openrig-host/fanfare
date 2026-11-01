@@ -803,7 +803,7 @@ juce::var WebServer::buildStatusJson() {
     obj->setProperty("ok", true);
     
     auto& sm = Fanfare::SetlistManager::getInstance();
-    juce::String activeName = sm.getActiveFile().existsAsFile() ? sm.getActiveFile().getFileNameWithoutExtension() : "DEFAULT RIG";
+    juce::String activeName = sm.getActiveFile().existsAsFile() ? sm.getActiveFile().getFileNameWithoutExtension() : "DEFAULT SONG";
     obj->setProperty("activePreset", activeName);
     obj->setProperty("activeScene", engine.getCurrentSceneIndex());
     obj->setProperty("numScenes", engine.getNumScenes());
@@ -1087,6 +1087,8 @@ juce::var WebServer::buildMp3Json() {
 
 bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relativePath) {
     juce::String cleanPath = relativePath.trim();
+    if (cleanPath.containsChar('?')) cleanPath = cleanPath.upToFirstOccurrenceOf("?", false, false);
+    if (cleanPath.containsChar('#')) cleanPath = cleanPath.upToFirstOccurrenceOf("#", false, false);
     if (cleanPath == "/" || cleanPath.isEmpty()) {
         cleanPath = "/index.html";
     }
@@ -1094,7 +1096,10 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
     // Try multiple possible disk locations for development and installed modes
     juce::Array<juce::File> candidateDirs;
     auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+    candidateDirs.add(exeDir);
     candidateDirs.add(exeDir.getChildFile("Web/static"));
+    candidateDirs.add(exeDir.getChildFile("docs"));
+    candidateDirs.add(juce::File("C:/davecore/docs"));
     candidateDirs.add(exeDir.getChildFile("static"));
     candidateDirs.add(exeDir.getChildFile("Source/Web/static"));
     candidateDirs.add(exeDir.getParentDirectory().getChildFile("Web/static"));
@@ -1140,6 +1145,10 @@ juce::String WebServer::getMimeType(const juce::String& filePath) {
     if (filePath.endsWithIgnoreCase(".json")) return "application/json; charset=utf-8";
     if (filePath.endsWithIgnoreCase(".png")) return "image/png";
     if (filePath.endsWithIgnoreCase(".svg")) return "image/svg+xml";
+    if (filePath.endsWithIgnoreCase(".woff2")) return "font/woff2";
+    if (filePath.endsWithIgnoreCase(".woff")) return "font/woff";
+    if (filePath.endsWithIgnoreCase(".ttf")) return "font/ttf";
+    if (filePath.endsWithIgnoreCase(".jpg") || filePath.endsWithIgnoreCase(".jpeg")) return "image/jpeg";
     return "text/plain";
 }
 

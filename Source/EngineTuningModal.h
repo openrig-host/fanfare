@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "HelpLauncher.h"
 #include "ThemeManager.h"
 #include "FanfareEngine.h"
 
@@ -36,6 +37,8 @@ public:
             if (closeCallback) closeCallback();
         };
         addAndMakeVisible(closeBtn);
+        Fanfare::styleHelpButton(helpBtn, "#engine-tuning", "HAAALP! Open the Engine & CPU Optimization section of the User's Manual");
+        addAndMakeVisible(helpBtn);
 
         // Viewport for clean scrolling on smaller laptop displays
         addAndMakeVisible(viewport);
@@ -71,6 +74,8 @@ public:
         auto bounds = getLocalBounds().reduced(16, 12);
         auto topRow = bounds.removeFromTop(32);
         closeBtn.setBounds(topRow.removeFromRight(30).withHeight(26));
+        topRow.removeFromRight(6);
+        helpBtn.setBounds(topRow.removeFromRight(74).withHeight(26));
         titleLabel.setBounds(topRow);
 
         applyBtn.setBounds(bounds.removeFromBottom(36).reduced(40, 0));
@@ -290,6 +295,7 @@ private:
 
     juce::Label titleLabel;
     juce::TextButton closeBtn{"X"};
+    juce::TextButton helpBtn{"HAAALP!"};
     juce::TextButton applyBtn;
 
     juce::Viewport viewport;

@@ -282,7 +282,8 @@ public:
                     curProg = juce::jmin(1.0f, curProg + xfadeStep);
                     crossfadeProgress.store(curProg);
                     if (curProg >= 1.0f) {
-                        isCrossfading.store(false);
+                        manualCrossfadePos.store(-1.0f);
+        isCrossfading.store(false);
                         deckA.transportSource.stop();
                         deckA.isPlaying.store(false);
                         deckA.gain.store(0.0f);
@@ -292,7 +293,8 @@ public:
                     curProg = juce::jmax(0.0f, curProg - xfadeStep);
                     crossfadeProgress.store(curProg);
                     if (curProg <= 0.0f) {
-                        isCrossfading.store(false);
+                        manualCrossfadePos.store(-1.0f);
+        isCrossfading.store(false);
                         deckB.transportSource.stop();
                         deckB.isPlaying.store(false);
                         deckB.gain.store(0.0f);
@@ -440,7 +442,8 @@ public:
             loadTrackIntoDeck(0, track.file, track);
             crossfadeProgress.store(0.0f);
             activeDeckIndex.store(0);
-            isCrossfading.store(false);
+            manualCrossfadePos.store(-1.0f);
+        isCrossfading.store(false);
             if (startPlaying) {
                 deckA.transportSource.start();
                 deckA.isPlaying.store(true);
@@ -471,7 +474,8 @@ public:
                     isCrossfading.store(true);
                 } else {
                     // Instant cut
-                    isCrossfading.store(false);
+                    manualCrossfadePos.store(-1.0f);
+        isCrossfading.store(false);
                     crossfadeProgress.store((targetDeckIdx == 0) ? 0.0f : 1.0f);
                     outgoingDeck.transportSource.stop();
                     outgoingDeck.isPlaying.store(false);
@@ -806,7 +810,8 @@ public:
 
         float dur = (customDuration > 0.0f) ? customDuration : crossfadeDurationSec.load();
         if (dur <= 0.05f) {
-            isCrossfading.store(false);
+            manualCrossfadePos.store(-1.0f);
+        isCrossfading.store(false);
             crossfadeProgress.store((targetDeckId == 0) ? 0.0f : 1.0f);
             activeDeckIndex.store(targetDeckId);
             target.isPlaying.store(true);

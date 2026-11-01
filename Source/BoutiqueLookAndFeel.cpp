@@ -263,7 +263,7 @@ void BoutiqueLookAndFeel::drawButtonText(juce::Graphics &g, juce::TextButton &bu
 
   float fontSize = 11.0f;
   auto text = button.getButtonText();
-  if (text == "LOAD RIG" || text == "SAVE RIG") {
+  if (text == "LOAD SONG" || text == "SAVE SONG" || text == "LOAD RIG" || text == "SAVE RIG") {
     fontSize = 24.0f;
   } else {
     int w = button.getWidth();
