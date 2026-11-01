@@ -654,8 +654,11 @@ public:
     if (tempFile.replaceWithText(
             juce::JSON::toString(juce::var(pluginNodes)))) {
       tempFile.moveFileTo(file);
+      hasSavedPluginList = true;
     }
   }
+
+  bool hasEverScannedPlugins() const { return hasSavedPluginList; }
 
   void loadPluginList() {
     juce::File file =
@@ -672,13 +675,21 @@ public:
           availablePlugins.push_back({v.getProperty("name", "").toString(),
                                       v.getProperty("path", "").toString()});
         }
+        hasSavedPluginList = true;
         return; // Success
       }
     }
 
-    // If file doesn't exist or is invalid, use hardcoded defaults which are
-    // already in availablePlugins (initialized in the member declaration)
-    // but let's ensure they are sorted.
+    hasSavedPluginList = false;
+    // First-run state: filter out any hardcoded default paths that aren't
+    // actually installed on this machine so new users don't see dead entries.
+    availablePlugins.erase(
+        std::remove_if(availablePlugins.begin(), availablePlugins.end(),
+                       [](const PluginInfo &p) {
+                         return !juce::File(p.path).exists();
+                       }),
+        availablePlugins.end());
+
     std::sort(availablePlugins.begin(), availablePlugins.end(),
               [](const PluginInfo &a, const PluginInfo &b) {
                 return a.name.compareIgnoreCase(b.name) < 0;
@@ -3087,6 +3098,7 @@ private:
   juce::KnownPluginList knownPluginList;
 
   std::atomic<bool> panicTriggered{false};
+  bool hasSavedPluginList = false;
 
   double currentSampleRate = 44100.0;
   int currentBlockSize = 512;

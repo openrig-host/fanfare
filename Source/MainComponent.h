@@ -77,6 +77,7 @@ public:
   void loadAuxLogoPreference();
   void saveAuxLogoPreference() const;
   void showAboutDialog();
+  void showQuickStartDialog(bool isFirstRunPrompt = false);
   void showConfigOverlay();
   void setActiveMidiNoteLearner(juce::Component* learner) { activeMidiNoteLearner = learner; }
   double getCpuUsage() { return deviceManager.getCpuUsage() * 100.0; }
@@ -100,6 +101,7 @@ private:
   juce::TextButton loadBtn{"LOAD SONG"};
   juce::TextButton gigNotepadBtn{"NOTEPAD"};
   juce::TextButton webRemoteBtn{"REMOTE"};
+  juce::TextButton quickStartBtn{"?"};
   juce::TextButton mainHelpBtn{"HAAALP!"};
   juce::TextButton prevSetlistBtn{"<<"};
   juce::TextButton nextSetlistBtn{">>"};

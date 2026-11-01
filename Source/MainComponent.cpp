@@ -334,6 +334,16 @@ MainComponent::MainComponent() {
   LOG_INFO("OpenRig initialized successfully");
   setWantsKeyboardFocus (true);
   addKeyListener (this);
+
+  // First-run detection: if Fanfare has never scanned/saved a VST3 plugin list
+  // on this machine, pop up the Quick Start guide offering to scan the VST3 folder now.
+  if (!engine.hasEverScannedPlugins()) {
+    juce::Timer::callAfterDelay(650, [safeThis = juce::Component::SafePointer<MainComponent>(this)]() {
+      if (safeThis != nullptr && !safeThis->engine.hasEverScannedPlugins()) {
+        safeThis->showQuickStartDialog(true);
+      }
+    });
+  }
 }
 
 MainComponent::~MainComponent() {
@@ -536,11 +546,11 @@ void MainComponent::setupSlotComponents() {
       juce::PopupMenu menu;
       menu.addSectionHeader("Select Plugin for Chain " +
                             juce::String(chainIndex + 1));
-      for (int p = 0; p < engine.getNumAvailablePlugins(); ++p) menu.addItem(p + 1, engine.getAvailablePluginName(p));
-      if (false) {
-      for (int p = 0; p < engine.getNumAvailablePlugins(); ++p) menu.addItem(p + 1, engine.getAvailablePluginName(p));
-      menu.addSeparator();
-      menu.addItem(-1, "(No Plugin)");
+      if (engine.getNumAvailablePlugins() == 0) {
+        menu.addItem(-3, "Scan for VST3 Plugins...");
+      } else {
+        for (int p = 0; p < engine.getNumAvailablePlugins(); ++p)
+          menu.addItem(p + 1, engine.getAvailablePluginName(p));
       }
       menu.addSeparator();
       menu.addItem(-2, "Send MIDI OUT...", slot != nullptr && !slot->isChainSlotMidiOut(chainIndex));
@@ -548,6 +558,11 @@ void MainComponent::setupSlotComponents() {
 
       menu.showMenuAsync(juce::PopupMenu::Options(), [this, i, slot, comp,
                                                       chainIndex](int result) {
+        if (result == -3) {
+          if (scanButton.onClick)
+            scanButton.onClick();
+          return;
+        }
         if (result == -2) {
           showSlotMidiOutDialog(i, chainIndex);
           return;
@@ -1104,6 +1119,15 @@ void MainComponent::setupHeaderButtons() {
   webRemoteBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::raised));
   webRemoteBtn.setTooltip("Open Web Remote HUD Settings & Tablet Connection URL");
   webRemoteBtn.onClick = [this] { showWebRemoteDialog(); };
+
+  // Quick-Start [?] First Steps button
+  addAndMakeVisible(quickStartBtn);
+  quickStartBtn.setButtonText("?");
+  quickStartBtn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::accent));
+  quickStartBtn.setColour(juce::TextButton::textColourOffId, juce::Colours::black);
+  quickStartBtn.setTooltip("First Steps: Quick-Start Checklist & VST3 Plugin Scan");
+  quickStartBtn.onClick = [this] { showQuickStartDialog(false); };
+
   Fanfare::styleHelpButton(mainHelpBtn, "#main-mixer", "HAAALP! Open the Fanfare User's Manual");
   addAndMakeVisible(mainHelpBtn);
 
@@ -2270,6 +2294,49 @@ void MainComponent::showAboutDialog() {
       }));
 }
 
+void MainComponent::showQuickStartDialog(bool isFirstRunPrompt) {
+  juce::String title = isFirstRunPrompt
+      ? "Welcome to Fanfare! (First-Run Setup)"
+      : "First Steps: Quick-Start Guide";
+
+  juce::String body;
+  if (isFirstRunPrompt) {
+    body << "It looks like this is your first time running Fanfare on this computer.\n\n"
+         << "Would you like Fanfare to scan your main VST3 folder now?\n"
+         << "(" << FanfareConstants::getVst3Directory().getFullPathName() << ")\n\n";
+  }
+
+  body << "GETTING SOUND IN TWO STEPS:\n\n"
+       << "1. Scan for VST3s in Settings\n"
+       << "   Click the Gear icon (top-left) -> SCAN FOR PLUGINS (or click 'Scan VST3 Folder Now' below) so Fanfare registers your installed instruments & effects. You can also choose your ASIO audio driver & MIDI keyboard in AUDIO SETTINGS.\n\n"
+       << "2. Add a VST to a Strip Slot\n"
+       << "   On any channel strip (start with Strip 2: Keyboard), click one of the 3 plugin slots (Slot 1, 2, or 3) to load an instrument, and click [E] to open its editor window.\n\n"
+       << "Tip: Need help on any screen? Click the red HAAALP! button to jump straight to that chapter of the Stage Survival Manual.";
+
+  auto *w = new juce::AlertWindow(title, body, juce::MessageBoxIconType::InfoIcon);
+  w->addButton("Scan VST3 Folder Now", 1, juce::KeyPress(juce::KeyPress::returnKey));
+  w->addButton("Audio & MIDI Settings", 2);
+  w->addButton("Close", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+  juce::Component::SafePointer<juce::AlertWindow> safeW(w);
+  juce::Component::SafePointer<MainComponent> safeThis(this);
+  w->enterModalState(
+      true,
+      juce::ModalCallbackFunction::create([safeW, safeThis](int result) {
+        if (safeW != nullptr)
+          delete safeW.getComponent();
+        if (safeThis == nullptr)
+          return;
+        if (result == 1) {
+          if (safeThis->scanButton.onClick)
+            safeThis->scanButton.onClick();
+        } else if (result == 2) {
+          if (safeThis->audioSettingsBtn.onClick)
+            safeThis->audioSettingsBtn.onClick();
+        }
+      }));
+}
+
 void MainComponent::showSlotMidiOutDialog(int slotIdx, int chainIdx) {
   auto *slot = engine.getSlot(slotIdx);
   if (slot == nullptr)
@@ -2568,6 +2635,7 @@ void MainComponent::resized() {
   webRemoteBtn.setBounds(controlBar.removeFromRight(75).reduced(4));
   gigNotepadBtn.setBounds(controlBar.removeFromRight(75).reduced(4));
   mainHelpBtn.setBounds(controlBar.removeFromRight(72).reduced(4));
+  quickStartBtn.setBounds(controlBar.removeFromRight(36).reduced(4));
 
   // Center: Telemetry + Clock packed together
   auto centerBar = controlBar.reduced(4, 2);
@@ -3157,15 +3225,13 @@ void MainComponent::loadRigFromFile(const juce::File &file, int targetSetlistInd
 
 void MainComponent::showScanResultsDialog(const FanfareEngine::ScanResults &results) {
   // Display plugin scanner results
-  juce::String msg = "Scan complete.\n\n";
-  msg += "Plugins found: " + juce::String(results.newPlugins.size()) + "\n";
-  msg += "Failed: " + juce::String(results.missingPlugins.size()) + "\n\n";
-  
+  juce::String msg = "VST3 Scan Complete!\n\n";
+  msg += "Total Available VST3s: " + juce::String(engine.getNumAvailablePlugins()) + "\n";
+  msg += "Newly Added: " + juce::String(results.newPlugins.size()) + "\n";
   if (!results.missingPlugins.empty()) {
-    msg += "Failed plugins list:\n";
-    for (auto &p : results.missingPlugins)
-      msg += "- " + p.name + "\n";
+    msg += "Removed (no longer on disk): " + juce::String(results.missingPlugins.size()) + "\n";
   }
+  msg += "\nNext step: Click any Strip Slot (1, 2, or 3) to load a VST3 instrument!";
   
   juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
                                          "Plugin Scan Results", msg);
