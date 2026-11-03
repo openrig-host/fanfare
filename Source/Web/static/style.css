@@ -300,6 +300,14 @@ html, body {
 }
 .pill span { color: var(--accent-green-bright); font-weight: 600; }
 #xrunPill span { color: var(--accent-amber); }
+.thermal-pill {
+  background: #D63B32;
+  color: #FFFFFF;
+  border-color: #FF7A70;
+  font-weight: 700;
+  box-shadow: 0 0 8px rgba(214, 59, 50, 0.45);
+}
+.thermal-pill.hidden { display: none; }
 .wake-lock-pill { color: var(--accent-green-bright); }
 
 .header-right .btn { height: 28px; }

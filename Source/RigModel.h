@@ -46,9 +46,13 @@ struct ChannelStripSettings {
     bool gateEnabled = false;
     float gateThreshold = -40.0f;
     bool eqEnabled = false;
+    bool eqCurveMode = false;
     float hpfFreq = 20.0f;
     float lowShelfGain = 0.0f;
     float highShelfGain = 0.0f;
+    float eqVolGain = 0.0f;
+    float eqMasterGain = 0.0f;
+    float eqBands[10] = {};
     bool compEnabled = false;
     float compAmount = 0.0f;
     bool chorusEnabled = false;
@@ -129,6 +133,7 @@ struct SongSlot {
     int swapA = -1;
     int swapB = -1;
     int midiChannelOverride = -1; // -1 means use global default
+    int outputTarget = -1;        // -1 = FOH/IEM buses, 0..N = subgroup, >=100 = direct hardware out
 
     ChannelStripSettings strip;
     std::vector<CCMapping> ccMappings;

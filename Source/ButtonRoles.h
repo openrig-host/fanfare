@@ -38,7 +38,8 @@ inline void paintOverlayScrimAndPanel(juce::Graphics& g,
                                       juce::Rectangle<int> fullBounds,
                                       juce::Rectangle<int> panelBounds,
                                       const juce::String& engravedTitle = {},
-                                      int headerHeight = 38) {
+                                      int headerHeight = 38,
+                                      bool drawOuterBezel = true) {
     if (panelBounds != fullBounds) {
         g.setColour(ThemeManager::get(Theme::Role::scrim));
         g.fillRect(fullBounds);
@@ -47,25 +48,29 @@ inline void paintOverlayScrimAndPanel(juce::Graphics& g,
     auto pf = panelBounds.toFloat();
     const bool isDark = ThemeManager::getInstance().active().dark;
 
-    // Drop shadow
-    g.setColour(juce::Colours::black.withAlpha(isDark ? 0.50f : 0.24f));
-    g.fillRoundedRectangle(pf.translated(0.0f, 3.0f), 4.0f);
+    // Drop shadow (visible whenever panelBounds sits inside a larger scrim)
+    if (panelBounds != fullBounds) {
+        g.setColour(juce::Colours::black.withAlpha(isDark ? 0.65f : 0.36f));
+        g.fillRoundedRectangle(pf.translated(0.0f, 5.0f).expanded(2.0f), 6.0f);
+    }
 
     // Main charcoal/paper panel face
     g.setColour(ThemeManager::get(Theme::Role::panel));
-    g.fillRoundedRectangle(pf, 3.0f);
+    g.fillRoundedRectangle(pf, 4.0f);
 
     // Sunken header strip
     if (headerHeight > 0) {
-        auto headerRect = panelBounds.withHeight(headerHeight).toFloat();
+        const float inset = drawOuterBezel ? 3.5f : 1.0f;
+        auto headerRect = panelBounds.withHeight(headerHeight).toFloat().reduced(inset, 0.0f);
+        headerRect.removeFromTop(drawOuterBezel ? 3.5f : 1.0f);
         g.setColour(ThemeManager::get(Theme::Role::sunken));
-        g.fillRoundedRectangle(headerRect, 3.0f);
-        g.fillRect(headerRect.withTrimmedTop(3.0f));
+        g.fillRect(headerRect);
 
-        // Hairline divider under header
-        g.setColour(ThemeManager::get(Theme::Role::hairlineStrong));
-        g.drawHorizontalLine(panelBounds.getY() + headerHeight - 1,
-                             pf.getX() + 1.0f, pf.getRight() - 1.0f);
+        // Strong divider under header
+        g.setColour(isDark ? juce::Colour(0xFF0A0A0A)
+                           : ThemeManager::get(Theme::Role::borderStrong));
+        g.fillRect(pf.getX() + inset, (float)(panelBounds.getY() + headerHeight - 1),
+                   pf.getWidth() - inset * 2.0f, 1.5f);
 
         if (engravedTitle.isNotEmpty()) {
             g.setColour(ThemeManager::get(Theme::Role::text));
@@ -79,12 +84,19 @@ inline void paintOverlayScrimAndPanel(juce::Graphics& g,
         }
     }
 
-    // Top bevel highlight + outer hairline border
-    g.setColour(ThemeManager::get(Theme::Role::bevelHi));
-    g.drawHorizontalLine(panelBounds.getY() + 1, pf.getX() + 2.0f, pf.getRight() - 2.0f);
+    if (drawOuterBezel) {
+        // Subtle inner contrast rim so the black bezel also pops cleanly in Dark mode
+        g.setColour(isDark ? juce::Colours::white.withAlpha(0.18f)
+                           : juce::Colours::white.withAlpha(0.75f));
+        g.drawRoundedRectangle(pf.reduced(4.5f), 2.5f, 1.0f);
 
-    g.setColour(ThemeManager::get(Theme::Role::borderStrong));
-    g.drawRoundedRectangle(pf.reduced(0.5f), 3.0f, 1.0f);
+        // Bold 4px solid black outer frame so floating cards never blend into the rack
+        g.setColour(juce::Colour(0xFF0A0A0A));
+        g.drawRoundedRectangle(pf.reduced(2.0f), 4.0f, 4.0f);
+    } else {
+        g.setColour(ThemeManager::get(Theme::Role::borderStrong));
+        g.drawRoundedRectangle(pf.reduced(0.5f), 3.0f, 1.0f);
+    }
 }
 
 inline void paintRecessedWell(juce::Graphics& g, juce::Rectangle<float> bounds, float radius = 2.5f) {

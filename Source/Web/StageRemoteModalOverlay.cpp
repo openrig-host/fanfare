@@ -54,15 +54,18 @@ StageRemoteModalOverlay::StageRemoteModalOverlay(StageHotspotController& hotspot
     addAndMakeVisible(hotspotToggleBtn);
     Fanfare::setButtonRole(hotspotToggleBtn, Fanfare::ButtonRole::Primary);
     hotspotToggleBtn.onClick = [this]() {
+        juce::Component::SafePointer<StageRemoteModalOverlay> safeThis(this);
         if (hotspotController.isActive()) {
             hotspotToggleBtn.setEnabled(false);
-            hotspotController.stopHotspot([this](bool, juce::String) {
-                hotspotToggleBtn.setEnabled(true);
+            hotspotController.stopHotspot([safeThis](bool, juce::String) {
+                if (safeThis != nullptr)
+                    safeThis->hotspotToggleBtn.setEnabled(true);
             });
         } else {
             hotspotToggleBtn.setEnabled(false);
-            hotspotController.startHotspot(ssidEditor.getText(), passEditor.getText(), [this](bool, juce::String) {
-                hotspotToggleBtn.setEnabled(true);
+            hotspotController.startHotspot(ssidEditor.getText(), passEditor.getText(), [safeThis](bool, juce::String) {
+                if (safeThis != nullptr)
+                    safeThis->hotspotToggleBtn.setEnabled(true);
             });
         }
     };

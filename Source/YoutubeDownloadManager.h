@@ -75,11 +75,16 @@ public:
                         auto out = p.readAllProcessOutput().trim();
                         p.waitForProcessToFinish(6000);
                         if (out.isNotEmpty()) {
-                            auto tokens = juce::StringArray::fromTokens(out, "|||", "");
-                            if (tokens.size() > 0 && tokens[0].trim().isNotEmpty()) {
-                                info.title = tokens[0].trim();
-                                if (tokens.size() > 1) info.duration = tokens[1].trim();
-                                if (tokens.size() > 2) info.uploader = tokens[2].trim();
+                            auto firstLine = out.upToFirstOccurrenceOf("\n", false, false).trim();
+                            auto titlePart = firstLine.upToFirstOccurrenceOf("|||", false, false).trim();
+                            if (titlePart.isNotEmpty()) {
+                                info.title = titlePart;
+                                if (firstLine.contains("|||")) {
+                                    auto rest = firstLine.fromFirstOccurrenceOf("|||", false, false);
+                                    info.duration = rest.upToFirstOccurrenceOf("|||", false, false).trim();
+                                    if (rest.contains("|||"))
+                                        info.uploader = rest.fromFirstOccurrenceOf("|||", false, false).trim();
+                                }
                                 info.success = true;
                             }
                         }

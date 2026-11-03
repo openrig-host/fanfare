@@ -46,6 +46,7 @@ public:
 
   Kind kind;
   juce::File learningFile;
+  std::atomic<bool> learningActive{false};
 
 private:
   juce::File directory;

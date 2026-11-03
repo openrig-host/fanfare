@@ -88,7 +88,7 @@ It's not a DAW. It's an instrument.
 ### DSP and Effects
 ![Channel Strip DSP](docs/channel_strip_dsp.png)
 
-- **Channel strip on every slot.** Noise gate, EQ, compressor, chorus, and convolution reverb.
+- **Channel strip on every slot.** Noise gate, 10-band Graphic EQ with **Independent** and **Curve-Link** (proportional neighbor contour) modes, compressor with live gain-reduction meter, stereo/ping-pong/mono/tape delay with Tap Tempo, chorus, reverb, per-strip **IEM Trim**, and convolution IR loader with **6 built-in synthesized acoustic spaces & tube cab** (plus custom `.wav` loading).
 - **Musette detuner.** Accordion-style MM (2-reed) and MMM (3-reed) detuning that keeps the attack dry, plus **"TEMU Musette"**, a deliberately cheap, wildly out-of-tune setting for when the song needs it.
 - **Direct hardware outs.** Send a slot straight to an interface output (for example, Out 5 on a UMC1820) while keeping its FOH and IEM sends independent.
 - **Sampler with waveform editor.** Load a WAV and trim it to the sample.
@@ -98,9 +98,9 @@ It's not a DAW. It's an instrument.
 - **Master FX.** Reverb, EQ, and compression on the main buses.
 
 ### Between Sets
-- **Dual-deck break music player.** BPM display, gain, cue trimming, and playlist arranging.
-- **YouTube grab.** Paste a link and the MP3 lands in your playlist.
-- **Music library.** Built-in SQLite database with CSV, JSON, and M3U export.
+- **Dual-deck in-RAM break music player.** Six instant playlist banks, automatic BPM & downbeat detection, non-destructive In/Out cue trimming, Auto-DJ & Beat-Sync crossfades (`Vinyl Clean` or `Key-Lock`), Smart BPM Arrange, and a built-in **Broadcast Auto-Leveler (`LEVEL: ON`)** with live gain-reduction metering so track volumes stay consistent across your break set.
+- **YouTube grab.** Paste a link and a 192 kbps MP3 lands right in your playlist.
+- **Music library.** Built-in SQLite database with CSV, JSON, Extended M3U (with cue points), and `.db` snapshot export.
 - **Gig notepad.** Notes for each show, right next to the rig.
 - **Web remote.** Control it from a phone or tablet on the same network.
 
@@ -120,7 +120,7 @@ It's not a DAW. It's an instrument.
 - **CPU Core 0 Interrupt Shielding.** Keeps real-time audio off Core 0, where Windows and laptop firmware dump Wi-Fi, USB hub, ACPI, and battery-polling driver interrupts (DPCs).
 - **Clean Priority Tiering Without MMCSS Storms.** Runs the host in `Above Normal` priority class (and automatically restores it if an ASIO driver elevates the process) so internal plugin background threads stay safely below Priority-15 DSP helpers and Priority-24 ASIO without triggering Windows MMCSS 80% CPU throttling.
 - **In-App Engine & CPU Tuning Panel.** Open `Settings` and click `ENGINE & CPU TUNING` for plain-English controls covering Hybrid P-Core pinning, Core 0 shielding, Windows 11 EcoQoS blocking, Parallel vs. Sequential processing, and an AC power stage advisory so players on Intel Hybrid, AMD Ryzen, or older CPUs can dial in their machine.
-- **One-Click XRUNS Telemetry.** False-positive counter spikes during audio driver startup and active song swaps are suppressed. Click `XRUNS:` in the top bar anytime to zero the counter and inspect `audio_underrun_log.txt`.
+- **One-Click XRUNS Telemetry, Thermal Guard & Milestone Update Check (v1.41).** False-positive counter spikes during audio driver startup and active song swaps are suppressed; click `XRUNS:` in the top bar anytime to zero the counter and inspect `audio_underrun_log.txt`. A background **CPU Thermal & Firmware Throttle Monitor** alerts you if stage heat or power caps clamp clock speeds, and a quiet one-shot **GitHub Milestone Update Checker** notifies you in the header only on major/minor releases (e.g. `v1.5` or `v2.0`) while failing silently offline.
 
 ### Where your data lives
 Everything is under `%APPDATA%/Fanfare/`:

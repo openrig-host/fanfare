@@ -44,6 +44,8 @@ public:
     float coeff = (targetGain < currentGain) ? releaseCoeff : attackCoeff;
 
     currentGain += (targetGain - currentGain) * coeff;
+    if (currentGain < 1.0e-15f)
+      currentGain = 0.0f;
 
     return input * currentGain;
   }
@@ -442,8 +444,12 @@ public:
     // Damping LPF + gentle 65 Hz HPF in feedback path so repeats stay musical
     lpStateL += (delL - lpStateL) * lpCoeff;
     lpStateR += (delR - lpStateR) * lpCoeff;
+    if (std::abs(lpStateL) < 1.0e-15f) lpStateL = 0.0f;
+    if (std::abs(lpStateR) < 1.0e-15f) lpStateR = 0.0f;
     hpStateL += (lpStateL - hpStateL) * hpCoeff;
     hpStateR += (lpStateR - hpStateR) * hpCoeff;
+    if (std::abs(hpStateL) < 1.0e-15f) hpStateL = 0.0f;
+    if (std::abs(hpStateR) < 1.0e-15f) hpStateR = 0.0f;
     float filtL = lpStateL - hpStateL;
     float filtR = lpStateR - hpStateR;
 
@@ -540,34 +546,123 @@ private:
 };
 
 // ==============================================================================
-// CONVOLUTION REVERB (IR loader)
-// Impulse-response reverb / cab sim via juce::dsp::Convolution. loadIR() is
-// wait-free-safe from the message thread while processBlock() runs on the
-// audio thread (Convolution swaps the IR atomically when ready).
+// CONVOLUTION REVERB (IR loader + Physically Synthesized Acoustic Presets)
+// Impulse-response reverb / cab sim via juce::dsp::Convolution. Loading WAVs or
+// built-in synthesized presets is wait-free-safe from the message thread while
+// processBlock() runs on the audio thread.
 // ==============================================================================
 class ConvolutionReverb {
 public:
+  struct BuiltinPreset {
+    const char *id;
+    const char *menuLabel;
+    const char *displayName;
+  };
+
+  static constexpr int kNumBuiltinPresets = 6;
+
+  static const BuiltinPreset *getBuiltinPresets() {
+    static const BuiltinPreset kPresets[kNumBuiltinPresets] = {
+        {"builtin://wood_room", "Room: Studio Wood Room (0.55s)",
+         "Built-In: Studio Wood Room"},
+        {"builtin://warm_chamber", "Room: Warm Studio Chamber (1.05s)",
+         "Built-In: Warm Studio Chamber"},
+        {"builtin://concert_hall", "Hall: Symphony Concert Hall (2.1s)",
+         "Built-In: Symphony Concert Hall"},
+        {"builtin://cathedral", "Hall: Stone Sanctuary (3.0s)",
+         "Built-In: Stone Sanctuary"},
+        {"builtin://vintage_plate", "Plate: Vintage Studio Plate (1.5s)",
+         "Built-In: Vintage Studio Plate"},
+        {"builtin://warm_cab_2x12", "Cab: 2x12 Warm Tube Cab",
+         "Built-In: 2x12 Warm Tube Cab"},
+    };
+    return kPresets;
+  }
+
+  static bool isBuiltinPath(const juce::String &pathOrId) {
+    return pathOrId.startsWith("builtin://");
+  }
+
+  static int findBuiltinPresetIndex(const juce::String &pathOrId) {
+    const auto *presets = getBuiltinPresets();
+    for (int i = 0; i < kNumBuiltinPresets; ++i) {
+      if (pathOrId == presets[i].id)
+        return i;
+    }
+    return -1;
+  }
+
   void prepare(double sampleRate, int maxBlockSize) {
-    sr = sampleRate;
+    const double safeSr = (sampleRate > 8000.0) ? sampleRate : 48000.0;
+    sr = safeSr;
     blockSize = juce::jmax(maxBlockSize, 8192);
     wetBuffer.setSize(2, blockSize, false, false, true);
     juce::dsp::ProcessSpec spec;
     spec.sampleRate = sr;
-    spec.maximumBlockSize = (juce::uint32) blockSize;
+    spec.maximumBlockSize = (juce::uint32)blockSize;
     spec.numChannels = 2;
     convolution.prepare(spec);
+
+    // Regenerate active built-in IR natively if sample rate changed
+    if (hasIR && isBuiltinPath(loadedPath) &&
+        std::abs(synthesizedSr - sr) > 1.0) {
+      loadBuiltinPreset(loadedPath, true);
+    }
+  }
+
+  // Unified loader accepting either "builtin://<id>" or a filesystem .wav path.
+  bool loadPathOrPreset(const juce::String &pathOrId) {
+    if (pathOrId.isEmpty())
+      return false;
+    if (isBuiltinPath(pathOrId))
+      return loadBuiltinPreset(pathOrId, false);
+    return loadIR(juce::File(pathOrId));
+  }
+
+  bool loadPresetByIndex(int presetIdx) {
+    if (presetIdx < 0 || presetIdx >= kNumBuiltinPresets)
+      return false;
+    return loadBuiltinPreset(getBuiltinPresets()[presetIdx].id, false);
   }
 
   // Loads an IR (.wav). Only reloads if the path changed. Message-thread only.
   bool loadIR(const juce::File &f) {
-    if (!f.existsAsFile()) return false;
-    if (f.getFullPathName() == loadedPath && hasIR) return true;
+    if (!f.existsAsFile())
+      return false;
+    if (f.getFullPathName() == loadedPath && hasIR)
+      return true;
     convolution.loadImpulseResponse(f,
-        juce::dsp::Convolution::Stereo::yes,
-        juce::dsp::Convolution::Trim::yes,
-        0,
-        juce::dsp::Convolution::Normalise::yes);
+                                    juce::dsp::Convolution::Stereo::yes,
+                                    juce::dsp::Convolution::Trim::yes,
+                                    0,
+                                    juce::dsp::Convolution::Normalise::yes);
     loadedPath = f.getFullPathName();
+    synthesizedSr = 0.0;
+    hasIR = true;
+    return true;
+  }
+
+  bool loadBuiltinPreset(const juce::String &presetId, bool forceReload = false) {
+    const int idx = findBuiltinPresetIndex(presetId);
+    if (idx < 0)
+      return false;
+    const double targetSr = (sr > 8000.0) ? sr : 48000.0;
+    if (!forceReload && hasIR && loadedPath == presetId &&
+        std::abs(synthesizedSr - targetSr) <= 1.0) {
+      return true;
+    }
+
+    juce::AudioBuffer<float> irBuf = synthesizePresetBuffer(idx, targetSr);
+    if (irBuf.getNumSamples() <= 0)
+      return false;
+
+    convolution.loadImpulseResponse(std::move(irBuf),
+                                    targetSr,
+                                    juce::dsp::Convolution::Stereo::yes,
+                                    juce::dsp::Convolution::Trim::no,
+                                    juce::dsp::Convolution::Normalise::no);
+    loadedPath = presetId;
+    synthesizedSr = targetSr;
     hasIR = true;
     return true;
   }
@@ -575,15 +670,26 @@ public:
   bool hasIrLoaded() const { return hasIR; }
   const juce::String &getLoadedPath() const { return loadedPath; }
 
+  juce::String getDisplayName() const {
+    if (loadedPath.isEmpty())
+      return "(no IR loaded)";
+    const int idx = findBuiltinPresetIndex(loadedPath);
+    if (idx >= 0)
+      return getBuiltinPresets()[idx].displayName;
+    return juce::File(loadedPath).getFileName();
+  }
+
   void processBlock(juce::AudioBuffer<float> &buffer, bool enabled, float mix) {
     if (!enabled || !hasIR || mix <= 0.001f)
       return;
     const int n = juce::jmin(buffer.getNumSamples(), wetBuffer.getNumSamples());
     const int chans = buffer.getNumChannels();
-    if (n <= 0) return;
+    if (n <= 0)
+      return;
     for (int c = 0; c < 2; ++c)
       wetBuffer.copyFrom(c, 0, buffer, juce::jmin(c, chans - 1), 0, n);
-    juce::dsp::AudioBlock<float> wetBlock = juce::dsp::AudioBlock<float>(wetBuffer).getSubBlock(0, (size_t)n);
+    juce::dsp::AudioBlock<float> wetBlock =
+        juce::dsp::AudioBlock<float>(wetBuffer).getSubBlock(0, (size_t)n);
     juce::dsp::ProcessContextReplacing<float> ctx(wetBlock);
     convolution.process(ctx);
     const float w = mix, d = 1.0f - mix;
@@ -600,10 +706,450 @@ public:
     wetBuffer.clear();
   }
 
+  void clear() {
+    loadedPath.clear();
+    synthesizedSr = 0.0;
+    hasIR = false;
+    reset();
+  }
+
 private:
+  // Fast deterministic PRNG so synthesized stereo spaces never drift between loads.
+  struct FastRng {
+    juce::uint64 state;
+    explicit FastRng(juce::uint64 seed) : state(seed ? seed : 0x9E3779B97F4A7C15ULL) {}
+    juce::uint64 nextU64() {
+      juce::uint64 x = (state += 0x9E3779B97F4A7C15ULL);
+      x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
+      x = (x ^ (x >> 27)) * 0x94D049BB133111EBULL;
+      return x ^ (x >> 31);
+    }
+    float nextFloat01() {
+      return (float)((nextU64() >> 40) * (1.0 / 16777216.0));
+    }
+    float nextBipolar() { return nextFloat01() * 2.0f - 1.0f; }
+  };
+
+  struct OfflineBiquad {
+    float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
+    static OfflineBiquad makeHPF(double sampleRate, float freqHz, float q) {
+      OfflineBiquad f;
+      const float w0 = 2.0f * PI * juce::jlimit(10.0f, (float)(sampleRate * 0.45), freqHz) / (float)sampleRate;
+      const float cs = std::cos(w0), sn = std::sin(w0);
+      const float alpha = sn / (2.0f * q);
+      const float a0 = 1.0f + alpha;
+      f.b0 = ((1.0f + cs) * 0.5f) / a0;
+      f.b1 = (-(1.0f + cs)) / a0;
+      f.b2 = ((1.0f + cs) * 0.5f) / a0;
+      f.a1 = (-2.0f * cs) / a0;
+      f.a2 = (1.0f - alpha) / a0;
+      return f;
+    }
+    static OfflineBiquad makeLPF(double sampleRate, float freqHz, float q) {
+      OfflineBiquad f;
+      const float w0 = 2.0f * PI * juce::jlimit(40.0f, (float)(sampleRate * 0.47), freqHz) / (float)sampleRate;
+      const float cs = std::cos(w0), sn = std::sin(w0);
+      const float alpha = sn / (2.0f * q);
+      const float a0 = 1.0f + alpha;
+      f.b0 = ((1.0f - cs) * 0.5f) / a0;
+      f.b1 = (1.0f - cs) / a0;
+      f.b2 = ((1.0f - cs) * 0.5f) / a0;
+      f.a1 = (-2.0f * cs) / a0;
+      f.a2 = (1.0f - alpha) / a0;
+      return f;
+    }
+    static OfflineBiquad makePeak(double sampleRate, float freqHz, float q, float gainDb) {
+      OfflineBiquad f;
+      const float A = std::pow(10.0f, gainDb / 40.0f);
+      const float w0 = 2.0f * PI * juce::jlimit(20.0f, (float)(sampleRate * 0.46), freqHz) / (float)sampleRate;
+      const float cs = std::cos(w0), sn = std::sin(w0);
+      const float alpha = sn / (2.0f * q);
+      const float a0 = 1.0f + alpha / A;
+      f.b0 = (1.0f + alpha * A) / a0;
+      f.b1 = (-2.0f * cs) / a0;
+      f.b2 = (1.0f - alpha * A) / a0;
+      f.a1 = (-2.0f * cs) / a0;
+      f.a2 = (1.0f - alpha / A) / a0;
+      return f;
+    }
+    void process(float *samples, int numSamples) const {
+      float z1 = 0.0f, z2 = 0.0f;
+      for (int i = 0; i < numSamples; ++i) {
+        const float x = samples[i];
+        const float y = b0 * x + z1;
+        z1 = b1 * x - a1 * y + z2;
+        z2 = b2 * x - a2 * y;
+        samples[i] = y;
+      }
+    }
+  };
+
+  struct SpaceSpec {
+    float lx, ly, lz;
+    float wallReflect;
+    float rt60Low, rt60Mid, rt60High;
+    float preDelaySec;
+    float bloomSec;
+    float hpfHz;
+    float airLpfHz;
+    float erGain;
+    float tailGain;
+    float targetNorm;
+    juce::uint64 seed;
+  };
+
+  static void normalizeSampleRateInvariant(juce::AudioBuffer<float> &buf,
+                                           double sampleRate,
+                                           float targetNorm) {
+    const int n = buf.getNumSamples();
+    if (n <= 0)
+      return;
+    double maxSumSq = 0.0;
+    for (int c = 0; c < buf.getNumChannels(); ++c) {
+      const float *p = buf.getReadPointer(c);
+      double sumSq = 0.0;
+      for (int i = 0; i < n; ++i)
+        sumSq += (double)p[i] * (double)p[i];
+      if (sumSq > maxSumSq)
+        maxSumSq = sumSq;
+    }
+    // Scale energy relative to 48 kHz so perceived loudness stays identical at 44.1 / 48 / 96 kHz
+    const double scaledRms = std::sqrt(maxSumSq * (48000.0 / sampleRate));
+    if (scaledRms > 1.0e-9) {
+      const float gain = (float)((double)targetNorm / scaledRms);
+      buf.applyGain(gain);
+    }
+  }
+
+  static void addSoftenedTap(float *dst, int numSamples, double samplePos,
+                             float amp, int spreadSamples) {
+    const int center = (int)std::floor(samplePos);
+    const float frac = (float)(samplePos - (double)center);
+    if (spreadSamples <= 1) {
+      if (center >= 0 && center < numSamples)
+        dst[center] += amp * (1.0f - frac);
+      if (center + 1 >= 0 && center + 1 < numSamples)
+        dst[center + 1] += amp * frac;
+      return;
+    }
+    // Raised-cosine micro-kernel softens high-order wall reflections naturally
+    float weightSum = 0.0f;
+    const int half = spreadSamples;
+    for (int k = -half; k <= half; ++k) {
+      const float u = ((float)k - frac) / (float)(half + 1);
+      if (std::abs(u) < 1.0f)
+        weightSum += 0.5f * (1.0f + std::cos(PI * u));
+    }
+    if (weightSum <= 1.0e-6f)
+      return;
+    const float scale = amp / weightSum;
+    for (int k = -half; k <= half; ++k) {
+      const int idx = center + k;
+      if (idx < 0 || idx >= numSamples)
+        continue;
+      const float u = ((float)k - frac) / (float)(half + 1);
+      if (std::abs(u) < 1.0f)
+        dst[idx] += scale * 0.5f * (1.0f + std::cos(PI * u));
+    }
+  }
+
+  static juce::AudioBuffer<float> synthesizeSpace(const SpaceSpec &sp,
+                                                  double sampleRate) {
+    const double totalSec = juce::jmax((double)sp.rt60Low, (double)sp.rt60Mid) * 1.12 +
+                            (double)sp.preDelaySec + 0.05;
+    const int numSamples = juce::jmax(256, (int)std::ceil(totalSec * sampleRate));
+    juce::AudioBuffer<float> buf(2, numSamples);
+    buf.clear();
+
+    float *left = buf.getWritePointer(0);
+    float *right = buf.getWritePointer(1);
+
+    // 1. 3D Shoebox Image-Source Early Reflections (asymmetric source & ORTF pair)
+    const float rx = sp.lx * 0.41f, ry = sp.ly * 0.31f, rz = juce::jmin(1.55f, sp.lz * 0.46f);
+    const float sx = sp.lx * 0.64f, sy = sp.ly * 0.72f, sz = juce::jmin(1.42f, sp.lz * 0.42f);
+    const float ddx0 = sx - rx, ddy0 = sy - ry, ddz0 = sz - rz;
+    const float directDist = std::sqrt(ddx0 * ddx0 + ddy0 * ddy0 + ddz0 * ddz0);
+
+    FastRng erRng(sp.seed ^ 0xA5A5F0F012345678ULL);
+    for (int nx = -4; nx <= 4; ++nx) {
+      const float ix = (nx & 1) ? ((float)(nx + 1) * sp.lx - sx) : ((float)nx * sp.lx + sx);
+      for (int ny = -4; ny <= 4; ++ny) {
+        const float iy = (ny & 1) ? ((float)(ny + 1) * sp.ly - sy) : ((float)ny * sp.ly + sy);
+        for (int nz = -3; nz <= 3; ++nz) {
+          if (nx == 0 && ny == 0 && nz == 0)
+            continue;
+          const int order = std::abs(nx) + std::abs(ny) + std::abs(nz);
+          if (order > 5)
+            continue;
+
+          const float iz = (nz & 1) ? ((float)(nz + 1) * sp.lz - sz) : ((float)nz * sp.lz + sz);
+          const float dx = ix - rx, dy = iy - ry, dz = iz - rz;
+          const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+          const double relSec = (double)sp.preDelaySec +
+                                (double)juce::jmax(0.0f, dist - directDist) / 343.0 +
+                                (double)(erRng.nextBipolar() * 0.00035f);
+
+          const float horiz = std::sqrt(dx * dx + dy * dy + 1.0e-6f);
+          const float sinTheta = juce::jlimit(-1.0f, 1.0f, dx / horiz);
+          const float cosTheta = dy / horiz;
+
+          // ORTF stereo capsule spacing (+/- 0.25 ms ITD + cardioid ILD)
+          const double itdSec = 0.00025 * (double)sinTheta;
+          const float cardL = 0.55f + 0.45f * (-0.82f * sinTheta + 0.57f * cosTheta);
+          const float cardR = 0.55f + 0.45f * (0.82f * sinTheta + 0.57f * cosTheta);
+
+          const float polarity = ((order & 1) == 0) ? -1.0f : 1.0f;
+          const float atten = (directDist / juce::jmax(dist, 1.0f)) *
+                              std::pow(sp.wallReflect, (float)order) * sp.erGain * polarity;
+
+          const int spread = juce::jlimit(1, 8, (order - 1) * (int)std::round(sampleRate / 44100.0));
+          addSoftenedTap(left, numSamples, (relSec - itdSec) * sampleRate, atten * cardL, spread);
+          addSoftenedTap(right, numSamples, (relSec + itdSec) * sampleRate, atten * cardR, spread);
+        }
+      }
+    }
+
+    // 2. Decorrelated True-Stereo 3-Band Velvet-Noise Diffuse Tail
+    const float gLow = 1.0f - std::exp(-2.0f * PI * 260.0f / (float)sampleRate);
+    const float gMidHi = 1.0f - std::exp(-2.0f * PI * 2800.0f / (float)sampleRate);
+    const float kLn1000 = 6.9077553f; // ln(10^3) for -60 dB RT60 decay
+
+    for (int ch = 0; ch < 2; ++ch) {
+      float *out = buf.getWritePointer(ch);
+      FastRng rng(sp.seed + (juce::uint64)(ch * 0x517CC1B727220A95ULL + 17ULL));
+
+      int nextPulse = (int)(sp.preDelaySec * sampleRate);
+      float lp260 = 0.0f;
+      float lp2800 = 0.0f;
+      float airState = 0.0f;
+
+      for (int i = nextPulse; i < numSamples; ++i) {
+        const float t = (float)((double)i / sampleRate) - sp.preDelaySec;
+        if (t < 0.0f)
+          continue;
+
+        float excite = 0.0f;
+        if (i >= nextPulse) {
+          // Smoothly ramp velvet pulse density from 2000/s to 4400/s as echo density builds
+          const float density = 2000.0f + 2400.0f * (1.0f - std::exp(-t / 0.08f));
+          const float avgGrid = juce::jmax(2.0f, (float)sampleRate / density);
+          const int step = juce::jmax(1, (int)std::round(avgGrid * (0.45f + 1.10f * rng.nextFloat01())));
+          const float sign = (rng.nextU64() & 1ULL) ? 1.0f : -1.0f;
+          excite = sign * (0.65f + 0.35f * rng.nextFloat01());
+          nextPulse = i + step;
+        }
+
+        // Phase-coherent 3-band crossover (low + mid + high == excite)
+        lp260 += gLow * (excite - lp260);
+        lp2800 += gMidHi * (excite - lp2800);
+        const float bandLow = lp260;
+        const float bandHigh = excite - lp2800;
+        const float bandMid = excite - bandLow - bandHigh;
+
+        const float envLow = std::exp(-kLn1000 * t / sp.rt60Low);
+        const float envMid = std::exp(-kLn1000 * t / sp.rt60Mid);
+        const float envHigh = std::exp(-kLn1000 * t / sp.rt60High);
+        const float bloom = 1.0f - std::exp(-t / juce::jmax(0.002f, sp.bloomSec));
+
+        const float wetSample =
+            sp.tailGain * bloom * (bandLow * envLow + bandMid * envMid + bandHigh * envHigh);
+
+        // Progressive distance air absorption along late tail
+        const float dynCutoff =
+            juce::jmax(1400.0f, sp.airLpfHz * std::exp(-0.45f * t / sp.rt60Mid));
+        const float gAir =
+            1.0f - std::exp(-2.0f * PI * juce::jmin(dynCutoff, (float)(sampleRate * 0.44)) /
+                            (float)sampleRate);
+        airState += gAir * (wetSample - airState);
+        out[i] += airState;
+      }
+
+      // Clean sub-bass rumble HPF and gentle top-end polish
+      OfflineBiquad::makeHPF(sampleRate, sp.hpfHz, 0.707f).process(out, numSamples);
+      OfflineBiquad::makeLPF(sampleRate, sp.airLpfHz, 0.707f).process(out, numSamples);
+
+      // 25 ms cosine fade-out at buffer end so tail terminates silently
+      const int fadeSamples = juce::jmin(numSamples / 4, (int)(0.025 * sampleRate));
+      for (int k = 0; k < fadeSamples; ++k) {
+        const float w = 0.5f * (1.0f - std::cos(PI * (float)k / (float)fadeSamples));
+        out[numSamples - 1 - k] *= w;
+      }
+    }
+
+    normalizeSampleRateInvariant(buf, sampleRate, sp.targetNorm);
+    return buf;
+  }
+
+  static void runOfflineAllpass(float *samples, int numSamples, int delaySamples,
+                                float feedback) {
+    if (delaySamples <= 0 || numSamples <= 0)
+      return;
+    std::vector<float> line((size_t)delaySamples, 0.0f);
+    int idx = 0;
+    for (int i = 0; i < numSamples; ++i) {
+      const float delayed = line[(size_t)idx];
+      const float x = samples[i];
+      const float v = x - feedback * delayed;
+      samples[i] = delayed + feedback * v;
+      line[(size_t)idx] = v;
+      if (++idx >= delaySamples)
+        idx = 0;
+    }
+  }
+
+  static juce::AudioBuffer<float> synthesizePlate(double sampleRate) {
+    const int numSamples = (int)std::ceil(1.75 * sampleRate);
+    juce::AudioBuffer<float> buf(2, numSamples);
+    buf.clear();
+
+    const int preDelay = (int)std::round(0.004 * sampleRate); // 4 ms studio plate onset
+    const float gLow = 1.0f - std::exp(-2.0f * PI * 300.0f / (float)sampleRate);
+    const float gMidHi = 1.0f - std::exp(-2.0f * PI * 3400.0f / (float)sampleRate);
+    const float kLn1000 = 6.9077553f;
+
+    const double apMs[2][4] = {
+        {1.37, 2.63, 4.19, 6.77},
+        {1.51, 2.89, 4.57, 7.13},
+    };
+
+    for (int ch = 0; ch < 2; ++ch) {
+      float *out = buf.getWritePointer(ch);
+      FastRng rng(0x504C415445313430ULL + (juce::uint64)(ch * 99991ULL));
+
+      // Initial tensioned-plate transient impulse + dense velvet bed
+      if (preDelay < numSamples)
+        out[preDelay] = (ch == 0 ? 0.55f : -0.52f);
+
+      int nextPulse = preDelay + 1;
+      float lpLow = 0.0f, lpHi = 0.0f;
+      for (int i = preDelay; i < numSamples; ++i) {
+        const float t = (float)((double)(i - preDelay) / sampleRate);
+        float excite = 0.0f;
+        if (i >= nextPulse) {
+          const float avgGrid = juce::jmax(2.0f, (float)(sampleRate / 5200.0));
+          const int step = juce::jmax(1, (int)std::round(avgGrid * (0.4f + 1.2f * rng.nextFloat01())));
+          excite = ((rng.nextU64() & 1ULL) ? 1.0f : -1.0f) * (0.7f + 0.3f * rng.nextFloat01());
+          nextPulse = i + step;
+        }
+        lpLow += gLow * (excite - lpLow);
+        lpHi += gMidHi * (excite - lpHi);
+        const float bLow = lpLow;
+        const float bHigh = excite - lpHi;
+        const float bMid = excite - bLow - bHigh;
+
+        const float envLow = std::exp(-kLn1000 * t / 1.22f);
+        const float envMid = std::exp(-kLn1000 * t / 1.50f);
+        const float envHigh = std::exp(-kLn1000 * t / 0.85f);
+        const float bloom = 1.0f - std::exp(-t / 0.0035f);
+        out[i] += bloom * (bLow * envLow + bMid * envMid + bHigh * envHigh);
+      }
+
+      // 4 cascaded short Schroeder allpasses create classic tensioned steel dispersion
+      for (int a = 0; a < 4; ++a) {
+        const int dSamp = juce::jmax(2, (int)std::round(apMs[ch][a] * 0.001 * sampleRate));
+        runOfflineAllpass(out, numSamples, dSamp, 0.62f);
+      }
+
+      OfflineBiquad::makeHPF(sampleRate, 115.0f, 0.75f).process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 3200.0f, 1.1f, 1.8f).process(out, numSamples);
+      OfflineBiquad::makeLPF(sampleRate, 10500.0f, 0.707f).process(out, numSamples);
+
+      const int fadeSamples = juce::jmin(numSamples / 4, (int)(0.025 * sampleRate));
+      for (int k = 0; k < fadeSamples; ++k) {
+        const float w = 0.5f * (1.0f - std::cos(PI * (float)k / (float)fadeSamples));
+        out[numSamples - 1 - k] *= w;
+      }
+    }
+
+    normalizeSampleRateInvariant(buf, sampleRate, 0.55f);
+    return buf;
+  }
+
+  static juce::AudioBuffer<float> synthesizeWarmCab2x12(double sampleRate) {
+    const int numSamples = juce::jmax(128, (int)std::ceil(0.065 * sampleRate)); // 65 ms cab + studio air
+    juce::AudioBuffer<float> buf(2, numSamples);
+    buf.clear();
+
+    for (int ch = 0; ch < 2; ++ch) {
+      float *out = buf.getWritePointer(ch);
+      const double micOffsetMs = (ch == 0) ? 0.0 : 0.11; // subtle dual-mic stereo width
+
+      // Dual 12-inch speaker cones + baffle diffraction + open-back rear bounce
+      addSoftenedTap(out, numSamples, (0.08 + micOffsetMs) * 0.001 * sampleRate,
+                     (ch == 0) ? 1.00f : 0.94f, 0);
+      addSoftenedTap(out, numSamples, (0.23 + micOffsetMs * 1.4) * 0.001 * sampleRate,
+                     (ch == 0) ? 0.44f : 0.52f, 1);
+      addSoftenedTap(out, numSamples, (0.52 + micOffsetMs) * 0.001 * sampleRate, -0.22f, 1);
+      addSoftenedTap(out, numSamples, (1.18 + micOffsetMs) * 0.001 * sampleRate, 0.15f, 1);
+      addSoftenedTap(out, numSamples, ((ch == 0 ? 3.25 : 3.48)) * 0.001 * sampleRate, -0.26f, 3);
+      addSoftenedTap(out, numSamples, ((ch == 0 ? 5.90 : 6.25)) * 0.001 * sampleRate, 0.09f, 4);
+
+      // Subtle tight tracking booth floor/wall reflections (-24 dB) for natural stereo feel
+      FastRng rng(0x32783132434142ULL + (juce::uint64)(ch * 7919ULL));
+      for (int r = 0; r < 14; ++r) {
+        const double tMs = 8.5 + (double)r * 2.6 + (double)rng.nextFloat01() * 1.4;
+        const float env = 0.045f * std::exp(-(float)tMs / 16.0f) *
+                          ((rng.nextU64() & 1ULL) ? 1.0f : -1.0f);
+        addSoftenedTap(out, numSamples, tMs * 0.001 * sampleRate, env, 3);
+      }
+
+      // 2x12 open-back speaker enclosure & paper-cone resonance cascade
+      OfflineBiquad::makeHPF(sampleRate, 82.0f, 0.88f).process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 118.0f, 1.55f, 4.5f).process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 420.0f, 1.30f, -4.0f).process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 1380.0f, 1.20f, 2.0f).process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 2450.0f, 1.55f, 3.8f).process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 4150.0f, 2.60f, -2.5f).process(out, numSamples);
+      OfflineBiquad::makeLPF(sampleRate, 4850.0f, 0.85f).process(out, numSamples);
+      OfflineBiquad::makeLPF(sampleRate, 5600.0f, 0.707f).process(out, numSamples);
+
+      const int fadeSamples = juce::jmin(numSamples / 3, (int)(0.012 * sampleRate));
+      for (int k = 0; k < fadeSamples; ++k) {
+        const float w = 0.5f * (1.0f - std::cos(PI * (float)k / (float)fadeSamples));
+        out[numSamples - 1 - k] *= w;
+      }
+    }
+
+    normalizeSampleRateInvariant(buf, sampleRate, 0.44f);
+    return buf;
+  }
+
+  static juce::AudioBuffer<float> synthesizePresetBuffer(int presetIdx,
+                                                         double sampleRate) {
+    switch (presetIdx) {
+    case 0: // Studio Wood Room (0.55s)
+      return synthesizeSpace(
+          {7.4f, 5.3f, 3.2f, 0.79f, 0.62f, 0.55f, 0.28f, 0.006f, 0.014f, 75.0f,
+           7800.0f, 0.34f, 0.22f, 0.55f, 0x574F4F44524F4F4DULL},
+          sampleRate);
+    case 1: // Warm Studio Chamber (1.05s)
+      return synthesizeSpace(
+          {9.8f, 6.9f, 3.9f, 0.84f, 1.15f, 1.05f, 0.48f, 0.011f, 0.024f, 85.0f,
+           6200.0f, 0.30f, 0.26f, 0.55f, 0x4348414D42455231ULL},
+          sampleRate);
+    case 2: // Symphony Concert Hall (2.1s)
+      return synthesizeSpace(
+          {24.5f, 16.8f, 12.2f, 0.89f, 2.35f, 2.10f, 0.92f, 0.018f, 0.046f,
+           80.0f, 7000.0f, 0.26f, 0.28f, 0.55f, 0x434F4E4348414C4CULL},
+          sampleRate);
+    case 3: // Stone Sanctuary (3.0s)
+      return synthesizeSpace(
+          {38.0f, 21.5f, 18.5f, 0.92f, 3.30f, 3.00f, 1.15f, 0.026f, 0.072f,
+           90.0f, 5800.0f, 0.22f, 0.30f, 0.54f, 0x434154484544524CULL},
+          sampleRate);
+    case 4: // Vintage Studio Plate (1.5s)
+      return synthesizePlate(sampleRate);
+    case 5: // 2x12 Warm Tube Cab
+      return synthesizeWarmCab2x12(sampleRate);
+    default:
+      return {};
+    }
+  }
+
   juce::dsp::Convolution convolution;
   juce::AudioBuffer<float> wetBuffer;
-  double sr = 44100.0;
+  double sr = 48000.0;
+  double synthesizedSr = 0.0;
   int blockSize = 512;
   bool hasIR = false;
   juce::String loadedPath;
@@ -629,6 +1175,7 @@ public:
   std::atomic<float> gateThreshold{-60.0f};
 
   std::atomic<bool> eqEnabled{false};
+  std::atomic<bool> eqCurveMode{false}; // false = Independent, true = Proportional Curve Link
   std::atomic<float> hpfFreq{20.0f};
   std::atomic<float> lowShelfGain{0.0f};
   std::atomic<float> highShelfGain{0.0f};

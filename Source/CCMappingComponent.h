@@ -46,6 +46,7 @@ public:
   using LearnBus = Fanfare::MidiLearnBus;
 
   CCMappingComponent(RackSlot &s, int autoArmLearn = 0) : slot(s) {
+    paramDetector.safeOwner = this;
     // --- Fader CC row ---
     addAndMakeVisible(fohLabel);
     Fanfare::styleHelpButton(helpBtn, "#cc-assignments", "HAAALP! Open the CC Assignments & Inverse Drawbar section of the User's Manual");
@@ -542,7 +543,8 @@ public:
     quickLearn.hasCC = false;
     quickLearn.hasParam = false;
 
-    // Attach parameter-change listeners to all plugins
+    // Attach parameter-change listeners to all plugins (ParamChangeDetector already dispatches via callAsync)
+    paramDetector.safeOwner = this;
     paramDetector.onParameterChanged = [this](juce::AudioProcessor *proc,
                                               int paramIdx) {
       if (!quickLearn.active)
@@ -557,11 +559,7 @@ public:
       if (chainIdx < 0)
         return;
 
-      juce::Component::SafePointer<CCMappingComponent> safe(this);
-      juce::MessageManager::callAsync([safe, chainIdx, paramIdx] {
-        if (safe)
-          safe->onParamWiggled(chainIdx, paramIdx);
-      });
+      onParamWiggled(chainIdx, paramIdx);
     };
 
     for (int i = 0; i < slot.getChainSize(); ++i) {
@@ -932,9 +930,10 @@ public:
   }
 
   void paint(juce::Graphics &g) override {
+    const bool inCallOut = (findParentComponentOfClass<juce::CallOutBox>() != nullptr);
     Fanfare::ModalFrame::paintOverlayScrimAndPanel(
         g, getLocalBounds(), getLocalBounds(),
-        "CC ASSIGNMENT MANAGER // " + slot.getName().toUpperCase(), 40);
+        "CC ASSIGNMENT MANAGER // " + slot.getName().toUpperCase(), 40, !inCallOut);
   }
 
   void resized() override {

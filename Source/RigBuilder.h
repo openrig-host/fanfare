@@ -128,7 +128,8 @@ public:
 
     static Result build(FanfareEngine &engine, const juce::var &rig,
                         std::function<void(const juce::String&)> onProgress = nullptr,
-                        bool isPreload = false) {
+                        bool isPreload = false,
+                        std::function<bool()> shouldAbort = nullptr) {
         Result r;
         if (!rig.isObject())
             return r; // nothing to build
@@ -271,18 +272,20 @@ public:
             BuildEntry e = entries[idx]; // per-worker copy
             Result *res = results[idx].get();
             workers.emplace_back([&engine, &snap, e, res, isPreload,
-                                  onProgress]() {
+                                  onProgress, shouldAbort]() {
                 engine.applyBackgroundThreadTuning();
+                if (shouldAbort && shouldAbort())
+                    return;
                 if (onProgress)
                     onProgress("Loading " + e.name + "...");
                 if (e.slotIdx >= 0)
                     buildOne(engine, e.pv, e.key, snap.slotChains,
                              snap.auxChains, e.slotIdx, e.chainIdx, e.label,
-                             *res, isPreload);
+                             *res, isPreload, shouldAbort);
                 else
                     buildMaster(engine, e.pv, e.isFoh, e.masterIdx,
                                 e.isFoh ? snap.fohChain : snap.iemChain,
-                                e.label, *res, isPreload);
+                                e.label, *res, isPreload, shouldAbort);
             });
         }
         for (auto &t : workers)
@@ -332,7 +335,10 @@ private:
                          const std::vector<juce::StringArray> &slotPaths,
                          const std::vector<juce::StringArray> &auxPaths,
                          int slotIdx, int chainIdx, const juce::String &label,
-                         Result &r, bool isPreload = false) {
+                         Result &r, bool isPreload = false,
+                         std::function<bool()> shouldAbort = nullptr) {
+        if (shouldAbort && shouldAbort())
+            return false;
         if (isPreload ? engine.hasPreloadedPlugin(key) : engine.stagingHasKey(key)) {
             logToFile("TRACE: buildOne " + label + " already staged/preloaded, skipping build.");
             return true;
@@ -450,19 +456,21 @@ private:
             // retry below, which is the proven cure. Without this the whole
             // rig load blocks on one plugin until the 600s timeout.
             int waitCount = 0;
-            while (!bctx->done.load() && waitCount < 600) {
+            while (!bctx->done.load() && waitCount < 600 && !(shouldAbort && shouldAbort())) {
                 juce::Thread::sleep(100);
                 waitCount++;
             }
 
-            bool timedOut = false;
-            (void)timedOut;
             if (!bctx->done.load()) {
                 bctx->abandoned.store(true);
                 if (!bctx->gateReleased.exchange(true))
                     Fanfare::releasePathBuildGate(gatePath);
-                logToFile("TRACE: buildOne " + label + " off-thread build stalled (60s) — abandoning worker, retrying on message thread...");
                 t.detach(); // the stuck worker destroys its instance when/if it returns
+                if (shouldAbort && shouldAbort()) {
+                    logToFile("TRACE: buildOne " + label + " aborted while building off-thread.");
+                    return false;
+                }
+                logToFile("TRACE: buildOne " + label + " off-thread build stalled (60s) - abandoning worker, retrying on message thread...");
                 ok = false;
                 err = "off-thread build stalled (60s)";
             } else {
@@ -477,28 +485,62 @@ private:
             }
         }
 
+        if (shouldAbort && shouldAbort())
+            return false;
+
         if (!ok) {
             logToFile("TRACE: buildOne " + label + " building/retrying on message thread...");
             struct BuildContext {
                 FanfareEngine* engine;
+                std::shared_ptr<std::atomic<bool>> engineAlive;
                 juce::var pluginVar;
                 std::unique_ptr<juce::AudioPluginInstance> inst;
                 juce::String err;
                 bool ok = false;
+                juce::WaitableEvent done;
+                std::atomic<bool> timedOut{false};
             };
             auto ctx = std::make_shared<BuildContext>();
             ctx->engine = &engine;
+            ctx->engineAlive = engine.getAliveToken();
             ctx->pluginVar = pv;
 
-            juce::WaitableEvent buildDone;
             juce::MessageManager::getInstance()->callAsync(
-                [ctx, &buildDone]() {
-                    ctx->ok = ctx->engine->buildPluginFromVar(ctx->pluginVar, ctx->inst, ctx->err) &&
-                              (bool)ctx->inst;
-                    buildDone.signal();
+                [ctx]() {
+                    std::unique_ptr<juce::AudioPluginInstance> tmpInst;
+                    juce::String tmpErr;
+                    bool tmpOk = false;
+                    if (!ctx->timedOut.load(std::memory_order_acquire) &&
+                        (!ctx->engineAlive || ctx->engineAlive->load(std::memory_order_acquire))) {
+                        tmpOk = ctx->engine->buildPluginFromVar(ctx->pluginVar, tmpInst, tmpErr) &&
+                                (bool)tmpInst;
+                    }
+                    if (!ctx->timedOut.load(std::memory_order_acquire)) {
+                        ctx->inst = std::move(tmpInst);
+                        ctx->err = tmpErr;
+                        ctx->ok = tmpOk;
+                    } else {
+                        tmpInst.reset();
+                    }
+                    ctx->done.signal();
                 });
 
-            if (!buildDone.wait(60000)) {
+            bool signaled = false;
+            for (int w = 0; w < 300; ++w) {
+                if (ctx->done.wait(200)) {
+                    signaled = true;
+                    break;
+                }
+                if (shouldAbort && shouldAbort())
+                    break;
+            }
+
+            if (!signaled) {
+                ctx->timedOut.store(true, std::memory_order_release);
+                if (shouldAbort && shouldAbort()) {
+                    logToFile("TRACE: buildOne aborted during message-thread wait: " + label);
+                    return false;
+                }
                 Fanfare::poisonPath(newPath);
                 logToFile("TRACE: buildOne timed out (60s) on message-thread build/retry: " + label);
                 r.ok = false;
@@ -529,7 +571,10 @@ private:
 
     static bool buildMaster(FanfareEngine &engine, const juce::var &pv, bool isFoh,
                             int chainIdx, const juce::StringArray &masterPaths,
-                            const juce::String &label, Result &r, bool isPreload = false) {
+                            const juce::String &label, Result &r, bool isPreload = false,
+                            std::function<bool()> shouldAbort = nullptr) {
+        if (shouldAbort && shouldAbort())
+            return false;
         juce::String key = FanfareEngine::stagingKeyFor(-1, chainIdx, isFoh);
         if (isPreload ? engine.hasPreloadedPlugin(key) : engine.stagingHasKey(key)) {
             logToFile("TRACE: buildMaster " + label + " already staged/preloaded, skipping build.");
@@ -624,9 +669,9 @@ private:
                 bctx->done.store(true);
             });
 
-            // Wait up to 60 seconds (see buildOne: stall → message-thread retry)
+            // Wait up to 60 seconds (see buildOne: stall -> message-thread retry)
             int waitCount = 0;
-            while (!bctx->done.load() && waitCount < 600) {
+            while (!bctx->done.load() && waitCount < 600 && !(shouldAbort && shouldAbort())) {
                 juce::Thread::sleep(100);
                 waitCount++;
             }
@@ -635,8 +680,12 @@ private:
                 bctx->abandoned.store(true);
                 if (!bctx->gateReleased.exchange(true))
                     Fanfare::releasePathBuildGate(gatePath);
-                logToFile("TRACE: buildMaster " + label + " off-thread build stalled (60s) — abandoning worker, retrying on message thread...");
                 t.detach(); // Allow thread to remain stuck in background
+                if (shouldAbort && shouldAbort()) {
+                    logToFile("TRACE: buildMaster " + label + " aborted while building off-thread.");
+                    return false;
+                }
+                logToFile("TRACE: buildMaster " + label + " off-thread build stalled (60s) - abandoning worker, retrying on message thread...");
                 ok = false;
                 err = "off-thread build stalled (60s)";
             } else {
@@ -651,28 +700,62 @@ private:
             }
         }
 
+        if (shouldAbort && shouldAbort())
+            return false;
+
         if (!ok) {
             logToFile("TRACE: buildMaster " + label + " building/retrying on message thread...");
             struct BuildContext {
                 FanfareEngine* engine;
+                std::shared_ptr<std::atomic<bool>> engineAlive;
                 juce::var pluginVar;
                 std::unique_ptr<juce::AudioPluginInstance> inst;
                 juce::String err;
                 bool ok = false;
+                juce::WaitableEvent done;
+                std::atomic<bool> timedOut{false};
             };
             auto ctx = std::make_shared<BuildContext>();
             ctx->engine = &engine;
+            ctx->engineAlive = engine.getAliveToken();
             ctx->pluginVar = pv;
 
-            juce::WaitableEvent buildDone;
             juce::MessageManager::getInstance()->callAsync(
-                [ctx, &buildDone]() {
-                    ctx->ok = ctx->engine->buildPluginFromVar(ctx->pluginVar, ctx->inst, ctx->err) &&
-                              (bool)ctx->inst;
-                    buildDone.signal();
+                [ctx]() {
+                    std::unique_ptr<juce::AudioPluginInstance> tmpInst;
+                    juce::String tmpErr;
+                    bool tmpOk = false;
+                    if (!ctx->timedOut.load(std::memory_order_acquire) &&
+                        (!ctx->engineAlive || ctx->engineAlive->load(std::memory_order_acquire))) {
+                        tmpOk = ctx->engine->buildPluginFromVar(ctx->pluginVar, tmpInst, tmpErr) &&
+                                (bool)tmpInst;
+                    }
+                    if (!ctx->timedOut.load(std::memory_order_acquire)) {
+                        ctx->inst = std::move(tmpInst);
+                        ctx->err = tmpErr;
+                        ctx->ok = tmpOk;
+                    } else {
+                        tmpInst.reset();
+                    }
+                    ctx->done.signal();
                 });
 
-            if (!buildDone.wait(60000)) {
+            bool signaled = false;
+            for (int w = 0; w < 300; ++w) {
+                if (ctx->done.wait(200)) {
+                    signaled = true;
+                    break;
+                }
+                if (shouldAbort && shouldAbort())
+                    break;
+            }
+
+            if (!signaled) {
+                ctx->timedOut.store(true, std::memory_order_release);
+                if (shouldAbort && shouldAbort()) {
+                    logToFile("TRACE: buildMaster aborted during message-thread wait: " + label);
+                    return false;
+                }
                 Fanfare::poisonPath(newPath);
                 logToFile("TRACE: buildMaster timed out (60s) on message-thread build/retry: " + label);
                 r.ok = false;

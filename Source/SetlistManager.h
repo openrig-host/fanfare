@@ -103,7 +103,8 @@ public:
             }
 
             // Build with isPreload = true so instances are stored in preloadedPlugins
-            auto buildResult = RigBuilder::build(*engine, loaded.rig, nullptr, true);
+            auto buildResult = RigBuilder::build(*engine, loaded.rig, nullptr, true,
+                [this]() { return threadShouldExit() || cancelFlag.load(); });
             if (threadShouldExit() || cancelFlag.load()) { isBuilding = false; continue; }
 
             if (!buildResult.ok)
@@ -182,78 +183,124 @@ public:
     }
 
     const juce::Array<juce::File>& getSetups() const { return setups; }
-    int getActiveIndex() const { return activeIndex; }
+    juce::Array<juce::File> getSetupsSnapshot() const {
+        const juce::ScopedLock sl(setupsLock);
+        return setups;
+    }
+    int getActiveIndex() const {
+        const juce::ScopedLock sl(setupsLock);
+        return activeIndex;
+    }
 
     void addSetup(const juce::File& file) {
         if (file.existsAsFile()) {
-            setups.add(file);
+            {
+                const juce::ScopedLock sl(setupsLock);
+                setups.add(file);
+            }
             sendChangeMessage();
             triggerPreloadOfNext();
         }
     }
 
     void removeSetup(int index) {
-        if (index >= 0 && index < setups.size()) {
-            setups.remove(index);
-            if (activeIndex >= setups.size())
-                activeIndex = setups.size() - 1;
+        bool changed = false;
+        {
+            const juce::ScopedLock sl(setupsLock);
+            if (index >= 0 && index < setups.size()) {
+                setups.remove(index);
+                if (index < activeIndex)
+                    --activeIndex;
+                if (activeIndex >= setups.size())
+                    activeIndex = setups.size() - 1;
+                changed = true;
+            }
+        }
+        if (changed) {
             sendChangeMessage();
             triggerPreloadOfNext();
         }
     }
 
     void clearSetlist() {
-        setups.clear();
-        activeIndex = -1;
-        currentSetlistFile = juce::File{};
+        {
+            const juce::ScopedLock sl(setupsLock);
+            setups.clear();
+            activeIndex = -1;
+            currentSetlistFile = juce::File{};
+        }
         if (engine != nullptr)
             engine->clearPreloadedCache();
         sendChangeMessage();
     }
 
     void moveSetupUp(int index) {
-        if (index > 0 && index < setups.size()) {
-            setups.swap(index, index - 1);
-            if (activeIndex == index)
-                activeIndex = index - 1;
-            else if (activeIndex == index - 1)
-                activeIndex = index;
+        bool changed = false;
+        {
+            const juce::ScopedLock sl(setupsLock);
+            if (index > 0 && index < setups.size()) {
+                setups.swap(index, index - 1);
+                if (activeIndex == index)
+                    activeIndex = index - 1;
+                else if (activeIndex == index - 1)
+                    activeIndex = index;
+                changed = true;
+            }
+        }
+        if (changed) {
             sendChangeMessage();
             triggerPreloadOfNext();
         }
     }
 
     void moveSetupDown(int index) {
-        if (index >= 0 && index < setups.size() - 1) {
-            setups.swap(index, index + 1);
-            if (activeIndex == index)
-                activeIndex = index + 1;
-            else if (activeIndex == index + 1)
-                activeIndex = index;
+        bool changed = false;
+        {
+            const juce::ScopedLock sl(setupsLock);
+            if (index >= 0 && index < setups.size() - 1) {
+                setups.swap(index, index + 1);
+                if (activeIndex == index)
+                    activeIndex = index + 1;
+                else if (activeIndex == index + 1)
+                    activeIndex = index;
+                changed = true;
+            }
+        }
+        if (changed) {
             sendChangeMessage();
             triggerPreloadOfNext();
         }
     }
 
     void setActiveIndex(int index) {
-        if (index >= 0 && index < setups.size()) {
-            activeIndex = index;
+        bool changed = false;
+        {
+            const juce::ScopedLock sl(setupsLock);
+            if (index >= 0 && index < setups.size()) {
+                activeIndex = index;
+                changed = true;
+            }
+        }
+        if (changed) {
             sendChangeMessage();
             triggerPreloadOfNext();
         }
     }
 
     juce::File getActiveFile() const {
+        const juce::ScopedLock sl(setupsLock);
         if (activeIndex >= 0 && activeIndex < setups.size())
             return setups[activeIndex];
         return {};
     }
 
     bool hasNext() const {
+        const juce::ScopedLock sl(setupsLock);
         return activeIndex >= 0 && activeIndex < setups.size() - 1;
     }
 
     bool hasPrev() const {
+        const juce::ScopedLock sl(setupsLock);
         return activeIndex > 0 && activeIndex < setups.size();
     }
 
@@ -262,12 +309,14 @@ public:
     }
 
     juce::File getPrevFile() const {
-        if (hasPrev())
+        const juce::ScopedLock sl(setupsLock);
+        if (activeIndex > 0 && activeIndex < setups.size())
             return setups[activeIndex - 1];
         return {};
     }
 
     juce::File getNextPreloadTarget() const {
+        const juce::ScopedLock sl(setupsLock);
         const int n = setups.size();
         if (n == 0)
             return {};
@@ -284,10 +333,13 @@ public:
 
     void setSlotSetup(int index, const juce::File& file) {
         if (index < 0) return;
-        while (setups.size() <= index) {
-            setups.add(juce::File{});
+        {
+            const juce::ScopedLock sl(setupsLock);
+            while (setups.size() <= index) {
+                setups.add(juce::File{});
+            }
+            setups.set(index, file);
         }
-        setups.set(index, file);
         sendChangeMessage();
         triggerPreloadOfNext();
     }
@@ -323,23 +375,25 @@ public:
 
         auto parsed = juce::JSON::parse(file);
         if (auto* obj = parsed.getDynamicObject()) {
-            setups.clear();
-            if (auto* arr = obj->getProperty("setups").getArray()) {
-                for (int i = 0; i < arr->size(); ++i) {
-                    juce::String name = arr->getReference(i).toString();
-                    juce::File setupFile = RigLibrary::getSongsDirectory().getChildFile(name);
-                    if (setupFile.existsAsFile()) {
-                        setups.add(setupFile);
-                    } else {
-                        setups.add(juce::File(name));
+            {
+                const juce::ScopedLock sl(setupsLock);
+                setups.clear();
+                if (auto* arr = obj->getProperty("setups").getArray()) {
+                    for (int i = 0; i < arr->size(); ++i) {
+                        juce::String name = arr->getReference(i).toString();
+                        juce::File setupFile = RigLibrary::getSongsDirectory().getChildFile(name);
+                        if (setupFile.existsAsFile()) {
+                            setups.add(setupFile);
+                        } else {
+                            setups.add(juce::File(name));
+                        }
                     }
                 }
+                activeIndex = obj->getProperty("activeIndex");
+                if (activeIndex >= setups.size())
+                    activeIndex = setups.size() - 1;
+                currentSetlistFile = file;
             }
-            activeIndex = obj->getProperty("activeIndex");
-            if (activeIndex >= setups.size())
-                activeIndex = setups.size() - 1;
-            
-            currentSetlistFile = file;
             sendChangeMessage();
             triggerPreloadOfNext();
             return true;
@@ -377,6 +431,7 @@ private:
 
     FanfareEngine* engine = nullptr;
     std::unique_ptr<SetlistPreloaderThread> preloaderThread;
+    mutable juce::CriticalSection setupsLock;
     juce::Array<juce::File> setups;
     int activeIndex = -1;
     juce::File currentSetlistFile;

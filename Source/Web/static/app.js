@@ -75,6 +75,7 @@
   const latencyIndicator = document.getElementById('latencyIndicator');
   const cpuVal = document.getElementById('cpuVal');
   const xrunVal = document.getElementById('xrunVal');
+  const thermalPill = document.getElementById('thermalPill');
   const wakeLockPill = document.getElementById('wakeLockPill');
 
   const songHeroCenter = document.getElementById('songHeroCenter');
@@ -199,7 +200,18 @@
   function sendWsMessage(obj) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(obj));
+      return true;
     }
+    return false;
+  }
+
+  function escapeHtml(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   // --- Message Handling ---
@@ -263,6 +275,13 @@
 
     if (cpuVal) cpuVal.innerText = `${Math.round(currentStatus.cpuLoad || 0)}%`;
     if (xrunVal) xrunVal.innerText = currentStatus.underruns || 0;
+    if (thermalPill) {
+      const thermOn = Boolean(currentStatus.thermalAlert);
+      thermalPill.classList.toggle('hidden', !thermOn);
+      if (thermOn && currentStatus.thermalText) {
+        thermalPill.innerText = currentStatus.thermalText;
+      }
+    }
 
     // 2. Setlist Position & Preload Glow
     const setlist = currentStatus.setlist || [];
@@ -405,12 +424,13 @@
       else if (isNextPreloaded) badgeText = 'READY';
       else if (isNextPreloading) badgeText = 'LOADING';
 
+      const safeSong = escapeHtml(song);
       chip.innerHTML = `
         <div class="queue-chip-top">
           <span class="queue-chip-num">#${idx + 1}</span>
           <span class="queue-chip-badge">${badgeText}</span>
         </div>
-        <div class="queue-chip-title" title="${song}">${song}</div>
+        <div class="queue-chip-title" title="${safeSong}">${safeSong}</div>
       `;
 
       chip.onclick = () => {
@@ -594,9 +614,11 @@
       btn.className = 'song-bubble-btn';
 
       const songName = song.name || 'Untitled';
-      const songNameLower = songName.toLowerCase();
-      const isActive = (songNameLower === activePresetName || activePresetName.includes(songNameLower));
+      const songNameLower = songName.trim().toLowerCase();
+      const isActive = (activePresetName.length > 0 && songNameLower === activePresetName);
       const accentColor = detectInstrumentColor(songName);
+      const safeSongName = escapeHtml(songName);
+      const safeCategory = escapeHtml(song.category || 'SONG');
 
       if (isActive) {
         btn.classList.add('active');
@@ -611,7 +633,7 @@
       let tagsHtml = '';
       soundTags.forEach(t => {
         const tStyle = SOUND_TAG_COLORS[t] || { bg: 'var(--bg-sunken)', border: 'var(--hairline-strong)', text: 'var(--text-dim)' };
-        tagsHtml += `<span class="sound-tag-chip" style="background-color: ${tStyle.bg}; border-color: ${tStyle.border}; color: ${tStyle.text}">${t}</span>`;
+        tagsHtml += `<span class="sound-tag-chip" style="background-color: ${tStyle.bg}; border-color: ${tStyle.border}; color: ${tStyle.text}">${escapeHtml(t)}</span>`;
       });
 
       btn.innerHTML = `
@@ -619,11 +641,11 @@
         
         <div class="bubble-info-col">
           <div class="bubble-meta-row">
-            <span class="bubble-cat-tag">${song.category || 'SONG'}</span>
+            <span class="bubble-cat-tag">${safeCategory}</span>
             <button class="bubble-fav-btn ${song.isFavorite ? 'is-fav' : ''}" title="Toggle Favorite">FAV</button>
           </div>
 
-          <div class="bubble-title" title="${songName}">${songName}</div>
+          <div class="bubble-title" title="${safeSongName}">${safeSongName}</div>
 
           <div class="bubble-tags-row">
             ${tagsHtml}
@@ -705,11 +727,12 @@
 
           const lowName = midiToNoteName(slot.lowNote !== undefined ? slot.lowNote : 0);
           const highName = midiToNoteName(slot.highNote !== undefined ? slot.highNote : 127);
+          const safeSlotName = escapeHtml(slot.name);
 
           card.innerHTML = `
             <div class="slot-card-left">
-              <span class="slot-card-title" title="${slot.name}">${i + 1}. ${slot.name}</span>
-              <span class="slot-range-tag">${lowName}&ndash;${highName}</span>
+              <span class="slot-card-title" title="${safeSlotName}">${i + 1}. ${safeSlotName}</span>
+              <span class="slot-range-tag">${lowName}-${highName}</span>
             </div>
             <div class="slot-card-controls">
               <button class="slot-mute-btn ${!slot.fohEnabled ? 'muted' : ''}" data-slot="${slot.index}" data-type="foh">
@@ -762,8 +785,8 @@
           zoneBar.style.border = `1px solid ${colorTheme.border}`;
 
           zoneBar.innerHTML = `
-            <span class="zone-title">${slot.name}</span>
-            <span class="zone-range-text">${lowName}&ndash;${highName}</span>
+            <span class="zone-title">${escapeHtml(slot.name)}</span>
+            <span class="zone-range-text">${lowName}-${highName}</span>
           `;
           keyboardZonesContainer.appendChild(zoneBar);
         });
@@ -789,6 +812,14 @@
     }
 
     if (cpuVal && meter.cpu !== undefined) cpuVal.innerText = `${Math.round(meter.cpu)}%`;
+    if (xrunVal && meter.underruns !== undefined) xrunVal.innerText = meter.underruns;
+    if (thermalPill && meter.thermalAlert !== undefined) {
+      const thermOn = Boolean(meter.thermalAlert);
+      thermalPill.classList.toggle('hidden', !thermOn);
+      if (thermOn && meter.thermalText) {
+        thermalPill.innerText = meter.thermalText;
+      }
+    }
   }
 
   // --- Stage Notes & Chord Markdown Parser ---
@@ -838,9 +869,28 @@
   // --- Notepad Handling ---
   function updateNotepad(data) {
     if (!data) return;
-    notepadData = { ...notepadData, ...data };
-    
-    if (notepadTabs) {
+    const prevTabs = notepadData.tabs || [];
+    const nextTabs = data.tabs || [];
+    const isTypingInNotepad = (!notepadData.isLiveLocked && document.activeElement === notepadTextarea);
+
+    // If the user is actively typing on this tablet, keep their local activeTabIndex and live textarea buffer
+    // so server broadcast echoes never jump the caret or rebuild buttons mid-word.
+    if (isTypingInNotepad) {
+      const localActive = notepadData.activeTabIndex;
+      const localText = notepadTextarea ? notepadTextarea.value : '';
+      notepadData = { ...notepadData, ...data, activeTabIndex: localActive };
+      if (notepadData.tabs && notepadData.tabs[localActive]) {
+        notepadData.tabs[localActive] = { ...notepadData.tabs[localActive], content: localText };
+      }
+    } else {
+      notepadData = { ...notepadData, ...data };
+    }
+
+    const tabsStructureChanged =
+      prevTabs.length !== nextTabs.length ||
+      prevTabs.some((t, i) => (t.title || '') !== ((nextTabs[i] && nextTabs[i].title) || ''));
+
+    if (notepadTabs && (tabsStructureChanged || notepadTabs.children.length === 0)) {
       notepadTabs.innerHTML = '';
       (notepadData.tabs || []).forEach((tab, idx) => {
         const btn = document.createElement('button');
@@ -848,17 +898,22 @@
         btn.innerText = tab.title || `Tab ${idx + 1}`;
         btn.onclick = () => {
           notepadData.activeTabIndex = idx;
-          renderNotepadContent();
+          Array.from(notepadTabs.children).forEach((b, bIdx) => b.classList.toggle('active', bIdx === idx));
+          renderNotepadContent(true);
           sendWsMessage({ type: 'set_notepad_tab', index: idx });
         };
         notepadTabs.appendChild(btn);
       });
+    } else if (notepadTabs) {
+      Array.from(notepadTabs.children).forEach((b, bIdx) => {
+        b.classList.toggle('active', bIdx === notepadData.activeTabIndex);
+      });
     }
 
-    renderNotepadContent();
+    renderNotepadContent(false);
   }
 
-  function renderNotepadContent() {
+  function renderNotepadContent(forceSyncTextarea = false) {
     const tabs = notepadData.tabs || [];
     const activeTab = tabs[notepadData.activeTabIndex];
     const content = activeTab ? activeTab.content : '';
@@ -887,7 +942,9 @@
       if (notepadLiveViewer) notepadLiveViewer.style.display = 'none';
       if (notepadTextarea) {
         notepadTextarea.style.display = 'block';
-        notepadTextarea.value = content;
+        if (forceSyncTextarea || document.activeElement !== notepadTextarea) {
+          notepadTextarea.value = content;
+        }
         notepadTextarea.style.fontSize = `${fontSize}px`;
         notepadTextarea.style.fontFamily = notepadData.isMonospace ? 'var(--font-family-mono)' : 'var(--font-family-ui)';
       }
@@ -921,24 +978,30 @@
       (mixerData.slots || []).forEach((slot) => {
         const strip = document.createElement('div');
         strip.className = 'channel-strip';
+        const safeSlotName = escapeHtml(slot.name);
+        const fohNorm = (slot.fohLevel !== undefined) ? slot.fohLevel : 0.8;
+        const iemOffsetVal = (slot.iemOffset !== undefined)
+          ? Number(slot.iemOffset)
+          : ((slot.iemLevel !== undefined) ? Number(slot.iemLevel) * 2.0 : 1.0);
+        const iemNorm = Math.max(0, Math.min(1, iemOffsetVal * 0.5));
         strip.innerHTML = `
-          <span class="strip-name" title="${slot.name}">${slot.name}</span>
+          <span class="strip-name" title="${safeSlotName}">${safeSlotName}</span>
           <div class="strip-faders-area">
             <div class="fader-column">
               <span class="fader-name">FOH</span>
               <div class="touch-fader-track" data-slot="${slot.index}" data-type="foh">
-                <div class="fader-fill" style="height: ${(slot.fohLevel || 0.8) * 100}%;"></div>
-                <div class="fader-handle" style="bottom: ${(slot.fohLevel || 0.8) * 100}%;"></div>
+                <div class="fader-fill" style="height: ${fohNorm * 100}%;"></div>
+                <div class="fader-handle" style="bottom: ${fohNorm * 100}%;"></div>
               </div>
-              <span class="fader-val">${Number(slot.fohLevel || 0.8).toFixed(2)}</span>
+              <span class="fader-val">${Number(fohNorm).toFixed(2)}</span>
             </div>
             <div class="fader-column">
               <span class="fader-name">IEM</span>
               <div class="touch-fader-track" data-slot="${slot.index}" data-type="iem">
-                <div class="fader-fill" style="height: ${(slot.iemLevel || 0.8) * 100}%;"></div>
-                <div class="fader-handle" style="bottom: ${(slot.iemLevel || 0.8) * 100}%;"></div>
+                <div class="fader-fill" style="height: ${iemNorm * 100}%;"></div>
+                <div class="fader-handle" style="bottom: ${iemNorm * 100}%;"></div>
               </div>
-              <span class="fader-val">${Number(slot.iemLevel || 0.8).toFixed(2)}</span>
+              <span class="fader-val">${iemOffsetVal.toFixed(2)}x</span>
             </div>
           </div>
           <div class="strip-btn-row">
@@ -986,7 +1049,7 @@
           const valLabel = track.parentElement.querySelector('.fader-val');
           if (fill) fill.style.height = `${normalized * 100}%`;
           if (handle) handle.style.bottom = `${normalized * 100}%`;
-          if (valLabel) valLabel.innerText = normalized.toFixed(2);
+          if (valLabel) valLabel.innerText = (channelType === 'iem') ? `${(normalized * 2.0).toFixed(2)}x` : normalized.toFixed(2);
         }
       };
 
@@ -1098,9 +1161,19 @@
       panicHoldTimer = setTimeout(() => {
         panicHoldTimer = null;
         panicBtn.classList.remove('holding');
-        sendWsMessage({ type: 'panic' });
-        panicBtn.classList.add('fired');
-        if (panicLabel) panicLabel.innerText = 'KILLED';
+        const sent = sendWsMessage({ type: 'panic' });
+        if (!sent) {
+          // Fallback to HTTP /api/panic if WS is mid-reconnect, and report honest status
+          fetch('/api/panic', { method: 'POST' }).then((res) => {
+            if (panicLabel) panicLabel.innerText = res.ok ? 'KILLED' : 'OFFLINE';
+          }).catch(() => {
+            if (panicLabel) panicLabel.innerText = 'OFFLINE';
+          });
+          if (panicLabel) panicLabel.innerText = 'OFFLINE';
+        } else {
+          panicBtn.classList.add('fired');
+          if (panicLabel) panicLabel.innerText = 'KILLED';
+        }
         if (navigator.vibrate) navigator.vibrate(90);
         setTimeout(() => {
           panicBtn.classList.remove('fired');
@@ -1116,14 +1189,16 @@
   // Dark / Bright front-panel theme toggle (persisted per tablet)
   const themeToggleBtn = document.getElementById('themeToggleBtn');
   function applyHudTheme(mode) {
-    document.documentElement.setAttribute('data-theme', mode);
-    if (themeToggleBtn) themeToggleBtn.innerText = (mode === 'bright') ? 'DARK' : 'BRIGHT';
+    const cleanMode = (mode === 'bright') ? 'bright' : 'dark';
+    document.documentElement.setAttribute('data-theme', cleanMode);
+    if (themeToggleBtn) themeToggleBtn.innerText = (cleanMode === 'bright') ? 'DARK' : 'BRIGHT';
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', (mode === 'bright') ? '#dddad2' : '#131619');
+    if (meta) meta.setAttribute('content', (cleanMode === 'bright') ? '#dddad2' : '#131619');
   }
   (function initHudTheme() {
     let saved = 'dark';
     try { saved = localStorage.getItem('fanfareHudTheme') || 'dark'; } catch (e) {}
+    saved = (saved === 'bright') ? 'bright' : 'dark';
     applyHudTheme(saved);
   })();
   if (themeToggleBtn) {
@@ -1137,22 +1212,22 @@
   // Notepad Controls
   if (fontDecBtn) fontDecBtn.onclick = () => {
     notepadData.fontSize = Math.max(12, (notepadData.fontSize || 20) - 2);
-    renderNotepadContent();
+    renderNotepadContent(false);
     sendWsMessage({ type: 'set_notepad_font_size', size: notepadData.fontSize });
   };
   if (fontIncBtn) fontIncBtn.onclick = () => {
     notepadData.fontSize = Math.min(48, (notepadData.fontSize || 20) + 2);
-    renderNotepadContent();
+    renderNotepadContent(false);
     sendWsMessage({ type: 'set_notepad_font_size', size: notepadData.fontSize });
   };
   if (monoToggleBtn) monoToggleBtn.onclick = () => {
     notepadData.isMonospace = !notepadData.isMonospace;
-    renderNotepadContent();
+    renderNotepadContent(false);
     sendWsMessage({ type: 'set_notepad_monospace', isMonospace: notepadData.isMonospace });
   };
   if (editLockBtn) editLockBtn.onclick = () => {
     notepadData.isLiveLocked = !notepadData.isLiveLocked;
-    renderNotepadContent();
+    renderNotepadContent(true);
   };
   if (notepadTextarea) notepadTextarea.oninput = () => {
     const tabs = notepadData.tabs || [];
@@ -1343,7 +1418,7 @@
         const durStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
         row.innerHTML = `
-          <span class="dj-track-name">${isPlaying ? '&#9658; ' : ''}${t.index + 1}. ${t.title}</span>
+          <span class="dj-track-name">${isPlaying ? '&#9658; ' : ''}${t.index + 1}. ${escapeHtml(t.title)}</span>
           <span class="dj-track-duration">${durStr}</span>
         `;
         row.onclick = () => {

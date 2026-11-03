@@ -7,7 +7,8 @@
 class OctaveHarmonizer {
 public:
     OctaveHarmonizer() {
-        std::fill(std::begin(refCount), std::end(refCount), 0);
+        std::fill(std::begin(localRefCount), std::end(localRefCount), 0);
+        std::fill(std::begin(routedRefCount), std::end(routedRefCount), 0);
     }
 
     void prepare(double /*sr*/) {}
@@ -27,16 +28,25 @@ public:
         // is active they are diverted to targetOutput (forwarded to another
         // slot); otherwise they stay local in output.
         bool hasRouteTarget = (harmonyTargetSlot.load() >= 0 && harmonyOutput != nullptr);
+        const bool routeChanged = (hasRouteTarget != prevHadRouteTarget);
+        prevHadRouteTarget = hasRouteTarget;
         juce::MidiBuffer& destinationBuffer = hasRouteTarget ? targetOutput : output;
+        int* harmRef = hasRouteTarget ? routedRefCount : localRefCount;
 
-        // --- Flush any stuck generated notes (mode change, enable toggle, panic) ---
-        if (needsFlush.exchange(false)) {
+        // --- Flush any stuck generated notes (mode change, route change, enable toggle, panic) ---
+        if (needsFlush.exchange(false) || routeChanged) {
             for (int note = 0; note < 128; ++note) {
-                if (refCount[note] > 0) {
-                    destinationBuffer.addEvent(juce::MidiMessage::noteOff(1, note), 0);
+                if (localRefCount[note] > 0) {
+                    output.addEvent(juce::MidiMessage::noteOff(1, note), 0);
+                }
+                if (routedRefCount[note] > 0) {
+                    if (harmonyOutput != nullptr)
+                        targetOutput.addEvent(juce::MidiMessage::noteOff(1, note), 0);
+                    output.addEvent(juce::MidiMessage::noteOff(1, note), 0);
                 }
             }
-            std::fill(std::begin(refCount), std::end(refCount), 0);
+            std::fill(std::begin(localRefCount), std::end(localRefCount), 0);
+            std::fill(std::begin(routedRefCount), std::end(routedRefCount), 0);
         }
 
         if (!enabled.load()) {
@@ -55,27 +65,27 @@ public:
 
         auto addLocalNote = [&](int genNote, int vel, int pos) {
             if (genNote >= 0 && genNote < 128) {
-                if (refCount[genNote] == 0) {
+                if (localRefCount[genNote] == 0) {
                     output.addEvent(juce::MidiMessage::noteOn(1, genNote, (juce::uint8)vel), pos);
                 }
-                refCount[genNote]++;
+                localRefCount[genNote]++;
             }
         };
 
         auto addHarmonyNote = [&](int genNote, int vel, int pos) {
             if (genNote >= 0 && genNote < 128) {
-                if (refCount[genNote] == 0) {
+                if (harmRef[genNote] == 0) {
                     destinationBuffer.addEvent(juce::MidiMessage::noteOn(1, genNote, (juce::uint8)vel), pos);
                 }
-                refCount[genNote]++;
+                harmRef[genNote]++;
             }
         };
 
         auto releaseLocalNote = [&](int genNote, int pos) {
             if (genNote >= 0 && genNote < 128) {
-                if (refCount[genNote] > 0) {
-                    refCount[genNote]--;
-                    if (refCount[genNote] == 0) {
+                if (localRefCount[genNote] > 0) {
+                    localRefCount[genNote]--;
+                    if (localRefCount[genNote] == 0) {
                         output.addEvent(juce::MidiMessage::noteOff(1, genNote), pos);
                     }
                 }
@@ -84,9 +94,9 @@ public:
 
         auto releaseHarmonyNote = [&](int genNote, int pos) {
             if (genNote >= 0 && genNote < 128) {
-                if (refCount[genNote] > 0) {
-                    refCount[genNote]--;
-                    if (refCount[genNote] == 0) {
+                if (harmRef[genNote] > 0) {
+                    harmRef[genNote]--;
+                    if (harmRef[genNote] == 0) {
                         destinationBuffer.addEvent(juce::MidiMessage::noteOff(1, genNote), pos);
                     }
                 }
@@ -196,5 +206,7 @@ public:
     std::atomic<bool> needsFlush{false};
 
 private:
-    int refCount[128];               // note -> active reference count
+    int localRefCount[128];          // note -> active reference count on local strip
+    int routedRefCount[128];         // note -> active reference count on routed target strip
+    bool prevHadRouteTarget = false;
 };

@@ -28,6 +28,8 @@
 #include "SceneButtonComponent.h"
 #include "RigTransitioner.h"
 #include "AnalogVuMeter.h"
+#include "ThermalMonitor.h"
+#include "UpdateChecker.h"
 #include "Web/OpenRigWebServer.h"
 #include "Web/StageHotspotController.h"
 #include "Web/StageRemoteModalOverlay.h"
@@ -79,9 +81,15 @@ public:
   void showAboutDialog();
   void showQuickStartDialog(bool isFirstRunPrompt = false);
   void showConfigOverlay();
-  void setActiveMidiNoteLearner(juce::Component* learner) { activeMidiNoteLearner = learner; }
+  void setActiveMidiNoteLearner(juce::Component* learner) {
+    activeMidiNoteLearner = learner;
+    hasMidiNoteLearner.store(learner != nullptr, std::memory_order_release);
+  }
   double getCpuUsage() { return deviceManager.getCpuUsage() * 100.0; }
-  int getAudioUnderruns() const { return audioUnderrunCount.load(); }
+  int getAudioUnderruns() const { return audioUnderrunCount.load() + engineStallCount.load(); }
+  bool isThermalWarningActive() const { return thermalMonitor.isWarningActive(); }
+  int getCpuTemperatureCelsius() const { return thermalMonitor.getTemperatureCelsius(); }
+  juce::String getThermalBadgeText() const { return thermalMonitor.getSnapshot().badgeText; }
   void loadRigFromFile(const juce::File &file, int targetSetlistIndex = -1);
   void updateStripCollapseStates();
   void refreshThemeDependentStyles();
@@ -104,6 +112,8 @@ private:
   juce::TextButton webRemoteBtn{"REMOTE"};
   juce::TextButton quickStartBtn{"?"};
   juce::TextButton mainHelpBtn{"HAAALP!"};
+  juce::TextButton updateBadgeBtn{"UPDATE"};
+  juce::String latestReleaseUrl;
   juce::TextButton prevSetlistBtn{"<<"};
   juce::TextButton nextSetlistBtn{">>"};
   juce::TextButton panicBtn{"PANIC"};
@@ -164,6 +174,19 @@ private:
   juce::int64 lastAudioRecoveryAttemptMs = 0;
   int audioRecoveryAttemptCount = 0;
   juce::StringArray activeMidiInputIds;
+  juce::StringArray lastEnumeratedMidiIds;
+  std::map<juce::String, int> midiOpenFailCounts;
+  std::map<juce::String, juce::int64> midiOpenRetryAfterMs;
+  juce::int64 lastTopologyUnquarantineMs = 0;
+  juce::int64 suppressHotplugChangeBroadcastUntilMs = 0;
+  int lastWinMmMidiInCount = -1;
+  std::atomic<bool> usbTopologyDirty{true};
+#ifdef _WIN32
+  void *usbNotifyHwnd = nullptr;
+  void *usbNotifyHandle = nullptr;
+  void startUsbDeviceWatcher();
+  void stopUsbDeviceWatcher();
+#endif
   juce::Component::SafePointer<juce::Component> activeAudioSelector;
 
   void stripLegacyDirectSoundDeviceType();
@@ -242,6 +265,7 @@ private:
 
   // Plugin window management
   void closePluginWindowForInstance(juce::AudioPluginInstance* instance);
+  void closePluginWindowsForSlot(RackSlot* slot);
   void closeOrphanedPluginWindows();
   void closeAllPluginWindows();
 
@@ -263,11 +287,14 @@ private:
   float masterFohL = 0.0f, masterFohR = 0.0f;
   float masterIemL = 0.0f, masterIemR = 0.0f;
 
-  // CPU/RAM/latency/underrun monitors
+  // CPU/RAM/latency/underrun/thermal monitors
   juce::Label cpuLabel{"cpuLabel", "CPU: 0%"};
   juce::Label ramLabel{"ramLabel", "RAM: 0%"};
   juce::Label latencyLabel{"latencyLabel", "LAT: --"};
   juce::Label xrunsLabel{"xrunsLabel", "XRUNS: 0"};
+  juce::Label thermalLabel{"thermalLabel", "THERMAL"};
+  ThermalMonitor thermalMonitor;
+  UpdateChecker updateChecker;
   std::atomic<int> audioUnderrunCount{0};
   std::atomic<int> engineStallCount{0}; // worker-stall silence blocks (engine-side pathway)
   std::atomic<juce::int64> lastAudioCallbackTicks{0};
@@ -357,8 +384,10 @@ private:
         t.isProgramChange = true;
         t.number = msg.getProgramChangeNumber();
         t.channel = msg.getChannel();
-        juce::MessageManager::callAsync([this, t]() {
-          if (libraryPanel) libraryPanel->assignLearnedTrigger(t);
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis, t]() {
+          if (safeThis != nullptr && safeThis->libraryPanel != nullptr)
+            safeThis->libraryPanel->assignLearnedTrigger(t);
         });
         return;
       }
@@ -367,26 +396,31 @@ private:
         t.isProgramChange = false;
         t.number = msg.getControllerNumber();
         t.channel = msg.getChannel();
-        juce::MessageManager::callAsync([this, t]() {
-          if (libraryPanel) libraryPanel->assignLearnedTrigger(t);
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis, t]() {
+          if (safeThis != nullptr && safeThis->libraryPanel != nullptr)
+            safeThis->libraryPanel->assignLearnedTrigger(t);
         });
         return;
       }
     }
 
-    // Scene MIDI trigger learn — intercept next PC if armed
-    if (msg.isProgramChange() && sceneMidiLearnArmed >= 0) {
+    // Scene MIDI trigger learn - intercept next PC if armed
+    const int armedScene = sceneMidiLearnArmed.load(std::memory_order_acquire);
+    if (msg.isProgramChange() && armedScene >= 0) {
       int learnedPC = msg.getProgramChangeNumber();
       int learnedCh = msg.getChannel();
-      int targetScene = sceneMidiLearnArmed;
-      juce::MessageManager::callAsync([this, targetScene, learnedPC, learnedCh]() {
-        engine.setSceneMidiTrigger(targetScene, learnedPC, learnedCh);
-        sceneMidiLearnArmed = -1;
-        if (sceneLearnAlert != nullptr) {
-          sceneLearnAlert->exitModalState(0);
-          sceneLearnAlert = nullptr;
+      sceneMidiLearnArmed.store(-1, std::memory_order_release);
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::MessageManager::callAsync([safeThis, armedScene, learnedPC, learnedCh]() {
+        if (safeThis == nullptr) return;
+        safeThis->engine.setSceneMidiTrigger(armedScene, learnedPC, learnedCh);
+        safeThis->sceneMidiLearnArmed.store(-1, std::memory_order_release);
+        if (safeThis->sceneLearnAlert != nullptr) {
+          safeThis->sceneLearnAlert->exitModalState(0);
+          safeThis->sceneLearnAlert = nullptr;
         }
-        refreshSceneButtons();
+        safeThis->refreshSceneButtons();
       });
       return;
     }
@@ -397,8 +431,10 @@ private:
       int channel = msg.getChannel();
       juce::String setupFile = SetupMidiTriggers::getInstance().findSetupForTrigger(true, pgNum, channel);
       if (setupFile.isNotEmpty()) {
-        juce::MessageManager::callAsync([this, setupFile]() {
-          loadRigFromFile(Fanfare::RigLibrary::getSongsDirectory().getChildFile(setupFile));
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis, setupFile]() {
+          if (safeThis != nullptr)
+            safeThis->loadRigFromFile(Fanfare::RigLibrary::getSongsDirectory().getChildFile(setupFile));
         });
         return;
       }
@@ -406,20 +442,24 @@ private:
       // Check if any scene has this PC assigned as a trigger
       int sceneByTrigger = engine.findSceneForProgram(pgNum, channel);
       if (sceneByTrigger >= 0) {
-        juce::MessageManager::callAsync([this, sceneByTrigger]() {
-          engine.saveCurrentStateToScene(engine.getCurrentSceneIndex());
-          engine.loadScene(sceneByTrigger);
-          refreshSceneButtons();
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis, sceneByTrigger]() {
+          if (safeThis == nullptr) return;
+          safeThis->engine.saveCurrentStateToScene(safeThis->engine.getCurrentSceneIndex());
+          safeThis->engine.loadScene(sceneByTrigger);
+          safeThis->refreshSceneButtons();
         });
         return;
       }
 
       // If it doesn't trigger a setup switch, use the PC number to select the scene index inside the current setup
-      juce::MessageManager::callAsync([this, pgNum]() {
-        engine.saveCurrentStateToScene(engine.getCurrentSceneIndex());
-        if (pgNum >= 0 && pgNum < engine.getNumScenes()) {
-          engine.loadScene(pgNum);
-          refreshSceneButtons();
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::MessageManager::callAsync([safeThis, pgNum]() {
+        if (safeThis == nullptr) return;
+        safeThis->engine.saveCurrentStateToScene(safeThis->engine.getCurrentSceneIndex());
+        if (pgNum >= 0 && pgNum < safeThis->engine.getNumScenes()) {
+          safeThis->engine.loadScene(pgNum);
+          safeThis->refreshSceneButtons();
         }
       });
       return;
@@ -428,8 +468,10 @@ private:
       int channel = msg.getChannel();
       juce::String setupFile = SetupMidiTriggers::getInstance().findSetupForTrigger(false, ccNum, channel);
       if (setupFile.isNotEmpty()) {
-        juce::MessageManager::callAsync([this, setupFile]() {
-          loadRigFromFile(Fanfare::RigLibrary::getSongsDirectory().getChildFile(setupFile));
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis, setupFile]() {
+          if (safeThis != nullptr)
+            safeThis->loadRigFromFile(Fanfare::RigLibrary::getSongsDirectory().getChildFile(setupFile));
         });
         return;
       }
@@ -450,8 +492,10 @@ private:
       int note = msg.getNoteNumber();
       if (note >= 36 && note < 36 + numSetupButtons) {
         int setupIdx = note - 36;
-        juce::MessageManager::callAsync([this, setupIdx]() {
-          loadRigFile(setupIdx);
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+        juce::MessageManager::callAsync([safeThis, setupIdx]() {
+          if (safeThis != nullptr)
+            safeThis->loadRigFile(setupIdx);
         });
       }
     }
@@ -459,23 +503,27 @@ private:
     midiCollector.addMessageToQueue(msg);
 
     // Route note-on to active sampler overlay for learning
-    if (msg.isNoteOn() && samplerOverlay != nullptr) {
+    if (msg.isNoteOn() && samplerOverlayOpen.load(std::memory_order_acquire)) {
       int noteNum = msg.getNoteNumber();
-      juce::MessageManager::callAsync([this, noteNum]() {
-        if (samplerOverlay)
-          samplerOverlay->handleMidiNote(noteNum);
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::MessageManager::callAsync([safeThis, noteNum]() {
+        if (safeThis != nullptr && safeThis->samplerOverlay != nullptr)
+          safeThis->samplerOverlay->handleMidiNote(noteNum);
       });
     }
 
     // Route note-on to any active learner (NoteRangeComponent or per-plugin config).
-    // The learner is captured by value as a SafePointer (weak ref) so the async
-    // no-ops if the CallOutBox was dismissed before the message thread runs.
-    if (msg.isNoteOn() && activeMidiNoteLearner != nullptr) {
+    // Guarded by atomic flag so normal playing never allocates an async message.
+    if (msg.isNoteOn() && msg.getVelocity() > 0 && hasMidiNoteLearner.load(std::memory_order_acquire)) {
       int noteNum = msg.getNoteNumber();
-      juce::MessageManager::callAsync([learner = activeMidiNoteLearner, noteNum]() {
-        if (learner) {
-          if (auto* l = dynamic_cast<IMidiNoteLearner*>(learner.getComponent()))
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::MessageManager::callAsync([safeThis, noteNum]() {
+        if (safeThis == nullptr) return;
+        if (safeThis->activeMidiNoteLearner != nullptr) {
+          if (auto* l = dynamic_cast<IMidiNoteLearner*>(safeThis->activeMidiNoteLearner.getComponent()))
             l->handleMidiNote(noteNum);
+        } else {
+          safeThis->hasMidiNoteLearner.store(false, std::memory_order_release);
         }
       });
     }
@@ -490,10 +538,12 @@ private:
   // or any Component implementing IMidiNoteLearner. Held as a generic SafePointer
   // because the CallOutBox owns/deletes the component and may dismiss at any time.
   juce::Component::SafePointer<juce::Component> activeMidiNoteLearner;
+  std::atomic<bool> hasMidiNoteLearner{false};
+  std::atomic<bool> samplerOverlayOpen{false};
 
   // Scene MIDI trigger learn state
-  int sceneMidiLearnArmed = -1;  // scene index being learned, -1 = not armed
-  juce::AlertWindow* sceneLearnAlert = nullptr;
+  std::atomic<int> sceneMidiLearnArmed{-1};  // scene index being learned, -1 = not armed
+  juce::Component::SafePointer<juce::AlertWindow> sceneLearnAlert;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

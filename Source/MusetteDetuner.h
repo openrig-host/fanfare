@@ -161,6 +161,8 @@ private:
         float out = b0 * in + s1;
         s1 = b1 * in - a1 * out + s2;
         s2 = b2 * in - a2 * out;
+        if (std::abs(s1) < 1.0e-15f) s1 = 0.0f;
+        if (std::abs(s2) < 1.0e-15f) s2 = 0.0f;
         if (std::abs(out) < 1.0e-15f)
             out = 0.0f; // anti-denormal flush
         return out;

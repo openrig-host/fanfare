@@ -151,6 +151,7 @@ public:
     midiOutputIndexById.clear();
   }
 
+  std::shared_ptr<std::atomic<bool>> getAliveToken() const { return engineAlive; }
   bool isRigTransitioning() const noexcept { return isApplyingRig.load(std::memory_order_relaxed); }
   juce::int64 getLastRigApplyEndTicks() const noexcept { return lastRigApplyEndTicks.load(std::memory_order_acquire); }
   bool isParallelProcessingEnabled() const noexcept { return parallelProcessingEnabled.load(std::memory_order_relaxed); }
@@ -160,6 +161,13 @@ public:
   void setShelteredAffinityMask(DWORD_PTR mask) noexcept {
     shelteredAffinityMask.store(mask, std::memory_order_release);
     dspTuningGen.fetch_add(1, std::memory_order_acq_rel);
+  }
+
+  void setDspWorkerAffinityMask(int workerIdx, DWORD_PTR mask) noexcept {
+    if (workerIdx >= 0 && workerIdx < kMaxDspHelpers) {
+      dspWorkerAffinityMasks[workerIdx].store(mask, std::memory_order_release);
+      dspTuningGen.fetch_add(1, std::memory_order_acq_rel);
+    }
   }
 
   DWORD_PTR getBackgroundAffinityMask() const noexcept { return backgroundAffinityMask.load(std::memory_order_relaxed); }
@@ -229,9 +237,14 @@ public:
         dsp.gateEnabled.store(st.gateEnabled);
         dsp.gateThreshold.store(st.gateThreshold);
         dsp.eqEnabled.store(st.eqEnabled);
+        dsp.eqCurveMode.store(st.eqCurveMode);
         dsp.hpfFreq.store(st.hpfFreq);
         dsp.lowShelfGain.store(st.lowShelfGain);
         dsp.highShelfGain.store(st.highShelfGain);
+        dsp.eqVolGain.store(st.eqVolGain);
+        dsp.eqMasterGain.store(st.eqMasterGain);
+        for (int b = 0; b < 10; ++b)
+          dsp.eqBands[b].store(st.eqBands[b]);
         dsp.compEnabled.store(st.compEnabled);
         dsp.compAmount.store(st.compAmount);
         dsp.chorusEnabled.store(st.chorusEnabled);
@@ -249,7 +262,7 @@ public:
         dsp.irEnabled.store(st.irEnabled);
         dsp.irMix.store(st.irMix);
         if (st.irPath.isNotEmpty())
-          dsp.getIRReverb().loadIR(juce::File(st.irPath));
+          dsp.getIRReverb().loadPathOrPreset(st.irPath);
 
         // Arpeggiator
         auto& arp = slot->getArpeggiator();
@@ -341,9 +354,14 @@ public:
         st.gateEnabled = dsp.gateEnabled.load();
         st.gateThreshold = dsp.gateThreshold.load();
         st.eqEnabled = dsp.eqEnabled.load();
+        st.eqCurveMode = dsp.eqCurveMode.load();
         st.hpfFreq = dsp.hpfFreq.load();
         st.lowShelfGain = dsp.lowShelfGain.load();
         st.highShelfGain = dsp.highShelfGain.load();
+        st.eqVolGain = dsp.eqVolGain.load();
+        st.eqMasterGain = dsp.eqMasterGain.load();
+        for (int b = 0; b < 10; ++b)
+          st.eqBands[b] = dsp.eqBands[b].load();
         st.compEnabled = dsp.compEnabled.load();
         st.compAmount = dsp.compAmount.load();
         st.chorusEnabled = dsp.chorusEnabled.load();
@@ -416,9 +434,14 @@ public:
       st.gateEnabled = dsp.gateEnabled.load();
       st.gateThreshold = dsp.gateThreshold.load();
       st.eqEnabled = dsp.eqEnabled.load();
+      st.eqCurveMode = dsp.eqCurveMode.load();
       st.hpfFreq = dsp.hpfFreq.load();
       st.lowShelfGain = dsp.lowShelfGain.load();
       st.highShelfGain = dsp.highShelfGain.load();
+      st.eqVolGain = dsp.eqVolGain.load();
+      st.eqMasterGain = dsp.eqMasterGain.load();
+      for (int b = 0; b < 10; ++b)
+        st.eqBands[b] = dsp.eqBands[b].load();
       st.compEnabled = dsp.compEnabled.load();
       st.compAmount = dsp.compAmount.load();
       st.chorusEnabled = dsp.chorusEnabled.load();
@@ -466,11 +489,15 @@ public:
     if (scenes.size() <= 1)
       return;
     if (index >= 0 && index < (int)scenes.size()) {
+      const bool deletedActive = (index == currentSceneIndex);
       scenes.erase(scenes.begin() + index);
-      if (currentSceneIndex >= (int)scenes.size()) {
+      if (index < currentSceneIndex) {
+        --currentSceneIndex;
+      } else if (currentSceneIndex >= (int)scenes.size()) {
         currentSceneIndex = (int)scenes.size() - 1;
       }
-      loadScene(currentSceneIndex);
+      if (deletedActive)
+        loadScene(currentSceneIndex);
     }
   }
 
@@ -908,6 +935,18 @@ public:
     const int maxHelpers = 0;
 #endif
 
+    // Guard BOTH sequential and parallel paths if an earlier block wedged a DSP helper:
+    // never touch scratchBuffers or invoke processBlock concurrently on an in-flight VST.
+    if (engineWedged.load(std::memory_order_acquire)) {
+      if (dspInFlightWorkers.load(std::memory_order_acquire) != 0) {
+        audioUnderrunFlag.store(true, std::memory_order_relaxed);
+        aux1Bus.clear();
+        aux2Bus.clear();
+        return;
+      }
+      engineWedged.store(false, std::memory_order_release);
+    }
+
     // Process sequentially inline directly on the audio thread if parallel is disabled,
     // no helper cores are assigned, or <= 1 non-target slot has active plugins.
     if (!parallelProcessingEnabled.load(std::memory_order_relaxed) ||
@@ -934,16 +973,6 @@ public:
       // zero allocations, zero juce::ThreadPool job->pool reuse races, and if a
       // helper wake is ever delayed by Windows, the Priority-24 ASIO thread
       // renders the remaining slots itself without stalling!
-      if (engineWedged.load(std::memory_order_acquire)) {
-        if (dspInFlightWorkers.load(std::memory_order_acquire) != 0) {
-          audioUnderrunFlag.store(true, std::memory_order_relaxed);
-          aux1Bus.clear();
-          aux2Bus.clear();
-          return;
-        }
-        engineWedged.store(false, std::memory_order_release);
-      }
-
       int numDspJobs = 0;
       for (int i = 0; i < numActiveSlots; ++i) {
         const bool isTgt = isSubgroupTgt[i];
@@ -983,10 +1012,17 @@ public:
 
       bool timedOut = false;
       if (dspInFlightWorkers.load(std::memory_order_seq_cst) != 0) {
-        constexpr long long kMaxSpins = 400000LL;
+        const double sr = (currentSampleRate > 0.0) ? currentSampleRate : 48000.0;
+        const double expectedBlockSec = (double)juce::jmax(32, numSamples) / sr;
+        const double maxWaitSec = juce::jlimit(0.012, 0.030, expectedBlockSec * 4.5);
+        const juce::int64 deadlineTicks =
+            juce::Time::getHighResolutionTicks() +
+            juce::Time::secondsToHighResolutionTicks(maxWaitSec);
         long long spinCount = 0;
         while (dspInFlightWorkers.load(std::memory_order_acquire) != 0) {
-          if (++spinCount >= kMaxSpins) {
+          ++spinCount;
+          if ((spinCount & 0x3F) == 0 &&
+              juce::Time::getHighResolutionTicks() >= deadlineTicks) {
             timedOut = true;
             break;
           }
@@ -995,7 +1031,7 @@ public:
 #elif defined(__arm__) || defined(__aarch64__)
           __yield();
 #endif
-          if ((spinCount & 0x3F) == 0) {
+          if ((spinCount & 0x3FF) == 0) {
 #ifdef _WIN32
             SwitchToThread();
 #else
@@ -1008,8 +1044,11 @@ public:
       if (timedOut) {
         engineWedged.store(true, std::memory_order_release);
         audioUnderrunFlag.store(true, std::memory_order_relaxed);
+        fohBus.clear();
+        iemBus.clear();
         aux1Bus.clear();
         aux2Bus.clear();
+        return;
       } else {
         // Step 1: Accumulate subgroup sends and IEM mixes
         aux1Bus.clear();
@@ -1157,6 +1196,39 @@ public:
       }
     }
 
+    // --- Pre-DAC Hearing & Hardware Protection (per-sample NaN / Inf scrub + peak) ---
+    auto sanitizeAndPeak = [](float *data, int n) noexcept -> float {
+      if (data == nullptr || n <= 0)
+        return 0.0f;
+      float peak = 0.0f;
+      for (int s = 0; s < n; ++s) {
+        float v = data[s];
+        if (!std::isfinite(v)) {
+          v = 0.0f;
+          data[s] = 0.0f;
+        } else if (v > 8.0f) {
+          v = 8.0f;
+          data[s] = 8.0f;
+        } else if (v < -8.0f) {
+          v = -8.0f;
+          data[s] = -8.0f;
+        }
+        const float av = std::abs(v);
+        if (av > peak)
+          peak = av;
+      }
+      return peak;
+    };
+
+    float fL = sanitizeAndPeak(fohBus.getWritePointer(0), numSamples);
+    float fR = (fohBus.getNumChannels() > 1)
+                   ? sanitizeAndPeak(fohBus.getWritePointer(1), numSamples)
+                   : fL;
+    float iL = sanitizeAndPeak(iemBus.getWritePointer(0), numSamples);
+    float iR = (iemBus.getNumChannels() > 1)
+                   ? sanitizeAndPeak(iemBus.getWritePointer(1), numSamples)
+                   : iL;
+
     // --- Copy Buses to Hardware Outputs ---
     // Snapshot the atomic offsets ONCE per block: the setters can write from the
     // message thread, so reading them several times (bounds-check then index)
@@ -1195,10 +1267,12 @@ public:
                     outputData[dirCh], scratchBuffers[i].getReadPointer(0),
                     fohBase, numSamples);
               if (dirCh + 1 < numOutputs && outputData[dirCh + 1] != nullptr &&
-                  scratchBuffers[i].getNumChannels() > 1)
+                  scratchBuffers[i].getNumChannels() > 1) {
                 juce::FloatVectorOperations::addWithMultiply(
                     outputData[dirCh + 1], scratchBuffers[i].getReadPointer(1),
                     fohBase, numSamples);
+                (void)sanitizeAndPeak(outputData[dirCh + 1], numSamples);
+              }
             } else {
               // Mono direct out: sum L + R * 0.5f if 2 channels, or L if 1 channel
               if (scratchBuffers[i].getNumChannels() >= 2) {
@@ -1215,31 +1289,10 @@ public:
                     fohBase, numSamples);
               }
             }
+            (void)sanitizeAndPeak(outputData[dirCh], numSamples);
           }
         }
       }
-    }
-
-    // Update master peaks
-    float fL = fohBus.getMagnitude(0, 0, fohBus.getNumSamples());
-    float fR = (fohBus.getNumChannels() > 1)
-                   ? fohBus.getMagnitude(1, 0, fohBus.getNumSamples())
-                   : fL;
-    float iL = iemBus.getMagnitude(0, 0, iemBus.getNumSamples());
-    float iR = (iemBus.getNumChannels() > 1)
-                   ? iemBus.getMagnitude(1, 0, iemBus.getNumSamples())
-                   : iL;
-
-    // Master Bus Output Protection (Sanitize NaN / Inf to protect hardware & hearing)
-    if (!std::isfinite(fL) || !std::isfinite(fR)) {
-      fohBus.clear();
-      fL = 0.0f;
-      fR = 0.0f;
-    }
-    if (!std::isfinite(iL) || !std::isfinite(iR)) {
-      iemBus.clear();
-      iL = 0.0f;
-      iR = 0.0f;
     }
 
     fohPeakL.store(fL);
@@ -1253,6 +1306,7 @@ public:
   addPluginToMasterChain(bool isFoh,
                          std::unique_ptr<juce::AudioPluginInstance> plugin) {
     juce::ScopedLock sl(lock);
+    juce::SpinLock::ScopedLockType mfl(masterFxLock);
     if (isFoh)
       fohPluginChain.push_back(std::move(plugin));
     else
@@ -1334,9 +1388,18 @@ public:
       stripObj->setProperty("gateEnabled", (bool)strip.gateEnabled);
       stripObj->setProperty("gateThreshold", (double)strip.gateThreshold);
       stripObj->setProperty("eqEnabled", (bool)strip.eqEnabled);
+      stripObj->setProperty("eqCurveMode", strip.eqCurveMode.load());
       stripObj->setProperty("hpfFreq", (double)strip.hpfFreq);
       stripObj->setProperty("eqLow", (double)strip.lowShelfGain);
       stripObj->setProperty("eqHigh", (double)strip.highShelfGain);
+      stripObj->setProperty("eqVolGain", (double)strip.eqVolGain.load());
+      stripObj->setProperty("eqMasterGain", (double)strip.eqMasterGain.load());
+      {
+        juce::Array<juce::var> bandsArr;
+        for (int b = 0; b < 10; ++b)
+          bandsArr.add((double)strip.eqBands[b].load());
+        stripObj->setProperty("eqBands", bandsArr);
+      }
       stripObj->setProperty("compEnabled", (bool)strip.compEnabled);
       stripObj->setProperty("compAmount", (double)strip.compAmount);
       stripObj->setProperty("chorusEnabled", (bool)strip.chorusEnabled);
@@ -1354,6 +1417,12 @@ public:
       stripObj->setProperty("irEnabled", (bool)strip.irEnabled);
       stripObj->setProperty("irMix", (double)strip.irMix);
       stripObj->setProperty("irPath", strip.getIRReverb().getLoadedPath());
+      stripObj->setProperty("musetteEnabled", strip.musetteEnabled.load());
+      stripObj->setProperty("musetteCents", (double)strip.musetteCents.load());
+      stripObj->setProperty("musette3Reed", (bool)(strip.musetteMode.load() == 1));
+      stripObj->setProperty("musetteMode", strip.musetteMode.load());
+      stripObj->setProperty("musetteMix", (double)strip.musetteMix.load());
+      stripObj->setProperty("channelMode", strip.channelMode.load());
       st->setProperty("strip", stripObj);
 
       // Save Sampler Settings
@@ -1500,9 +1569,18 @@ public:
         stateObj->setProperty("gateEnabled", st.gateEnabled);
         stateObj->setProperty("gateThreshold", (double)st.gateThreshold);
         stateObj->setProperty("eqEnabled", st.eqEnabled);
+        stateObj->setProperty("eqCurveMode", st.eqCurveMode);
         stateObj->setProperty("hpfFreq", (double)st.hpfFreq);
         stateObj->setProperty("eqLow", (double)st.lowShelfGain);
         stateObj->setProperty("eqHigh", (double)st.highShelfGain);
+        stateObj->setProperty("eqVolGain", (double)st.eqVolGain);
+        stateObj->setProperty("eqMasterGain", (double)st.eqMasterGain);
+        {
+          juce::Array<juce::var> bandsArr;
+          for (int b = 0; b < 10; ++b)
+            bandsArr.add((double)st.eqBands[b]);
+          stateObj->setProperty("eqBands", bandsArr);
+        }
         stateObj->setProperty("compEnabled", st.compEnabled);
         stateObj->setProperty("compAmount", (double)st.compAmount);
         stateObj->setProperty("chorusEnabled", st.chorusEnabled);
@@ -1549,16 +1627,19 @@ public:
 
     // Notes / Gig Notepad
     juce::Array<juce::var> noteNodes;
-    for (const auto &nt : currentNotes) {
-      auto *no = new juce::DynamicObject();
-      no->setProperty("title", nt.title);
-      no->setProperty("content", nt.content);
-      noteNodes.add(juce::var(no));
+    {
+      juce::ScopedLock nl(notesLock);
+      for (const auto &nt : currentNotes) {
+        auto *no = new juce::DynamicObject();
+        no->setProperty("title", nt.title);
+        no->setProperty("content", nt.content);
+        noteNodes.add(juce::var(no));
+      }
+      rig->setProperty("notes", noteNodes);
+      rig->setProperty("activeNoteTabIndex", activeNoteTabIndex);
+      rig->setProperty("noteFontSize", (double)noteFontSize);
+      rig->setProperty("noteIsMonospace", noteIsMonospace);
     }
-    rig->setProperty("notes", noteNodes);
-    rig->setProperty("activeNoteTabIndex", activeNoteTabIndex);
-    rig->setProperty("noteFontSize", (double)noteFontSize);
-    rig->setProperty("noteIsMonospace", noteIsMonospace);
 
     return juce::JSON::toString(juce::var(rig));
   }
@@ -1718,13 +1799,67 @@ public:
           strip.gateEnabled = stripObj->getProperty("gateEnabled");
           strip.gateThreshold = (float)stripObj->getProperty("gateThreshold");
           strip.eqEnabled = stripObj->getProperty("eqEnabled");
+          strip.eqCurveMode.store(stripObj->hasProperty("eqCurveMode") ? (bool)stripObj->getProperty("eqCurveMode") : false);
           strip.hpfFreq = (float)stripObj->getProperty("hpfFreq");
           strip.lowShelfGain = (float)stripObj->getProperty("eqLow");
           strip.highShelfGain = (float)stripObj->getProperty("eqHigh");
+          strip.eqVolGain.store(stripObj->hasProperty("eqVolGain") ? (float)stripObj->getProperty("eqVolGain") : 0.0f);
+          strip.eqMasterGain.store(stripObj->hasProperty("eqMasterGain") ? (float)stripObj->getProperty("eqMasterGain") : 0.0f);
+          if (auto *bandsArr = stripObj->getProperty("eqBands").getArray()) {
+            for (int b = 0; b < 10 && b < bandsArr->size(); ++b)
+              strip.eqBands[b].store((float)bandsArr->getReference(b));
+          }
           strip.compEnabled = stripObj->getProperty("compEnabled");
           strip.compAmount = (float)stripObj->getProperty("compAmount");
-          // Re-prepare to update coefficients
+          if (stripObj->hasProperty("chorusEnabled"))
+            strip.chorusEnabled.store((bool)stripObj->getProperty("chorusEnabled"));
+          if (stripObj->hasProperty("chorusRate"))
+            strip.chorusRate.store((float)stripObj->getProperty("chorusRate"));
+          if (stripObj->hasProperty("chorusMix"))
+            strip.chorusMix.store((float)stripObj->getProperty("chorusMix"));
+          if (stripObj->hasProperty("delayEnabled"))
+            strip.delayEnabled.store((bool)stripObj->getProperty("delayEnabled"));
+          if (stripObj->hasProperty("delayMode"))
+            strip.delayMode.store((int)stripObj->getProperty("delayMode"));
+          if (stripObj->hasProperty("delayTimeMs"))
+            strip.delayTimeMs.store((float)stripObj->getProperty("delayTimeMs"));
+          if (stripObj->hasProperty("delayFeedback"))
+            strip.delayFeedback.store((float)stripObj->getProperty("delayFeedback"));
+          if (stripObj->hasProperty("delayTone"))
+            strip.delayTone.store((float)stripObj->getProperty("delayTone"));
+          if (stripObj->hasProperty("delayMix"))
+            strip.delayMix.store((float)stripObj->getProperty("delayMix"));
+          if (stripObj->hasProperty("reverbEnabled"))
+            strip.reverbEnabled.store((bool)stripObj->getProperty("reverbEnabled"));
+          if (stripObj->hasProperty("reverbSize"))
+            strip.reverbSize.store((float)stripObj->getProperty("reverbSize"));
+          if (stripObj->hasProperty("reverbMix"))
+            strip.reverbMix.store((float)stripObj->getProperty("reverbMix"));
+          if (stripObj->hasProperty("musetteEnabled"))
+            strip.musetteEnabled.store((bool)stripObj->getProperty("musetteEnabled"));
+          if (stripObj->hasProperty("musetteCents"))
+            strip.musetteCents.store((float)stripObj->getProperty("musetteCents"));
+          if (stripObj->hasProperty("musette3Reed"))
+            strip.musette3Reed.store((bool)stripObj->getProperty("musette3Reed"));
+          if (stripObj->hasProperty("musetteMode"))
+            strip.musetteMode.store((int)stripObj->getProperty("musetteMode"));
+          else if (stripObj->hasProperty("musette3Reed"))
+            strip.musetteMode.store((bool)stripObj->getProperty("musette3Reed") ? 1 : 0);
+          if (stripObj->hasProperty("musetteMix"))
+            strip.musetteMix.store((float)stripObj->getProperty("musetteMix"));
+          if (stripObj->hasProperty("channelMode"))
+            strip.channelMode.store((int)stripObj->getProperty("channelMode"));
+          if (stripObj->hasProperty("irEnabled"))
+            strip.irEnabled.store((bool)stripObj->getProperty("irEnabled"));
+          if (stripObj->hasProperty("irMix"))
+            strip.irMix.store((float)stripObj->getProperty("irMix"));
+          // Re-prepare first so sample rate is set before generating any built-in IR
           strip.prepare(currentSampleRate);
+          if (stripObj->hasProperty("irPath")) {
+            auto irP = stripObj->getProperty("irPath").toString();
+            if (irP.isNotEmpty())
+              strip.getIRReverb().loadPathOrPreset(irP);
+          }
         }
 
         // Restore Arpeggiator Settings
@@ -1953,9 +2088,16 @@ public:
             st.gateEnabled = stv.getProperty("gateEnabled", false);
             st.gateThreshold = (float)stv.getProperty("gateThreshold", -60.0);
             st.eqEnabled = stv.getProperty("eqEnabled", false);
+            st.eqCurveMode = stv.getProperty("eqCurveMode", false);
             st.hpfFreq = (float)stv.getProperty("hpfFreq", 20.0);
             st.lowShelfGain = (float)stv.getProperty("eqLow", 0.0);
             st.highShelfGain = (float)stv.getProperty("eqHigh", 0.0);
+            st.eqVolGain = (float)stv.getProperty("eqVolGain", 0.0);
+            st.eqMasterGain = (float)stv.getProperty("eqMasterGain", 0.0);
+            if (auto *bandsArr = stv.getProperty("eqBands", juce::var()).getArray()) {
+              for (int b = 0; b < 10 && b < bandsArr->size(); ++b)
+                st.eqBands[b] = (float)bandsArr->getReference(b);
+            }
             st.compEnabled = stv.getProperty("compEnabled", false);
             st.compAmount = (float)stv.getProperty("compAmount", 0.0);
             st.chorusEnabled = stv.getProperty("chorusEnabled", false);
@@ -2001,26 +2143,29 @@ public:
     currentSceneIndex = rig.getProperty("currentSceneIndex", 0);
 
     // Notes / Gig Notepad
-    currentNotes.clear();
-    if (auto* noteArr = rig.getProperty("notes", juce::var()).getArray()) {
-      for (int i = 0; i < noteArr->size(); ++i) {
-        const auto& nv = noteArr->getReference(i);
-        if (nv.isObject()) {
-          Fanfare::NoteTab nt;
-          nt.title = nv.getProperty("title", "Notes").toString();
-          nt.content = nv.getProperty("content", "").toString();
-          currentNotes.push_back(nt);
+    {
+      juce::ScopedLock nl(notesLock);
+      currentNotes.clear();
+      if (auto* noteArr = rig.getProperty("notes", juce::var()).getArray()) {
+        for (int i = 0; i < noteArr->size(); ++i) {
+          const auto& nv = noteArr->getReference(i);
+          if (nv.isObject()) {
+            Fanfare::NoteTab nt;
+            nt.title = nv.getProperty("title", "Notes").toString();
+            nt.content = nv.getProperty("content", "").toString();
+            currentNotes.push_back(nt);
+          }
         }
       }
+      if (currentNotes.empty()) {
+        currentNotes.push_back({ "Chords", "" });
+        currentNotes.push_back({ "Lyrics", "" });
+        currentNotes.push_back({ "Notes", "" });
+      }
+      activeNoteTabIndex = rig.getProperty("activeNoteTabIndex", 0);
+      noteFontSize = (float)rig.getProperty("noteFontSize", 20.0);
+      noteIsMonospace = (bool)rig.getProperty("noteIsMonospace", true);
     }
-    if (currentNotes.empty()) {
-      currentNotes.push_back({ "Chords", "" });
-      currentNotes.push_back({ "Lyrics", "" });
-      currentNotes.push_back({ "Notes", "" });
-    }
-    activeNoteTabIndex = rig.getProperty("activeNoteTabIndex", 0);
-    noteFontSize = (float)rig.getProperty("noteFontSize", 20.0);
-    noteIsMonospace = (bool)rig.getProperty("noteIsMonospace", true);
 
     broadcastNotesChanged();
 
@@ -2146,14 +2291,20 @@ public:
         slot.swapA = s->getSwapA();
         slot.swapB = s->getSwapB();
         slot.midiChannelOverride = s->getMidiChannelOverride();
+        slot.outputTarget = s->getOutputTarget();
 
         auto& strip = s->getStrip();
         slot.strip.gateEnabled = strip.gateEnabled;
         slot.strip.gateThreshold = strip.gateThreshold;
         slot.strip.eqEnabled = strip.eqEnabled;
+        slot.strip.eqCurveMode = strip.eqCurveMode.load();
         slot.strip.hpfFreq = strip.hpfFreq;
         slot.strip.lowShelfGain = strip.lowShelfGain;
         slot.strip.highShelfGain = strip.highShelfGain;
+        slot.strip.eqVolGain = strip.eqVolGain.load();
+        slot.strip.eqMasterGain = strip.eqMasterGain.load();
+        for (int b = 0; b < 10; ++b)
+          slot.strip.eqBands[b] = strip.eqBands[b].load();
         slot.strip.compEnabled = strip.compEnabled;
         slot.strip.compAmount = strip.compAmount;
 
@@ -2250,10 +2401,13 @@ public:
         song.scenes.push_back(sc);
     }
     song.currentSceneIndex = currentSceneIndex;
-    song.notes = currentNotes;
-    song.activeNoteTabIndex = activeNoteTabIndex;
-    song.noteFontSize = noteFontSize;
-    song.noteIsMonospace = noteIsMonospace;
+    {
+        juce::ScopedLock nl(notesLock);
+        song.notes = currentNotes;
+        song.activeNoteTabIndex = activeNoteTabIndex;
+        song.noteFontSize = noteFontSize;
+        song.noteIsMonospace = noteIsMonospace;
+    }
 
     return song;
   }
@@ -2293,14 +2447,20 @@ public:
     songSlot.swapA = s->getSwapA();
     songSlot.swapB = s->getSwapB();
     songSlot.midiChannelOverride = s->getMidiChannelOverride();
+    songSlot.outputTarget = s->getOutputTarget();
 
     auto& stripData = s->getStrip();
     songSlot.strip.gateEnabled = stripData.gateEnabled;
     songSlot.strip.gateThreshold = stripData.gateThreshold;
     songSlot.strip.eqEnabled = stripData.eqEnabled;
+    songSlot.strip.eqCurveMode = stripData.eqCurveMode.load();
     songSlot.strip.hpfFreq = stripData.hpfFreq;
     songSlot.strip.lowShelfGain = stripData.lowShelfGain;
     songSlot.strip.highShelfGain = stripData.highShelfGain;
+    songSlot.strip.eqVolGain = stripData.eqVolGain.load();
+    songSlot.strip.eqMasterGain = stripData.eqMasterGain.load();
+    for (int b = 0; b < 10; ++b)
+      songSlot.strip.eqBands[b] = stripData.eqBands[b].load();
     songSlot.strip.compEnabled = stripData.compEnabled;
     songSlot.strip.compAmount = stripData.compAmount;
     songSlot.strip.chorusEnabled = stripData.chorusEnabled;
@@ -2444,14 +2604,20 @@ public:
     s->setMuteCC(songSlot.muteCC);
     s->setSwapPair(songSlot.swapCC, songSlot.swapA, songSlot.swapB);
     s->setMidiChannelOverride(songSlot.midiChannelOverride);
+    s->setOutputTarget(songSlot.outputTarget);
 
     auto& stripData = s->getStrip();
     stripData.gateEnabled = songSlot.strip.gateEnabled;
     stripData.gateThreshold = songSlot.strip.gateThreshold;
     stripData.eqEnabled = songSlot.strip.eqEnabled;
+    stripData.eqCurveMode.store(songSlot.strip.eqCurveMode);
     stripData.hpfFreq = songSlot.strip.hpfFreq;
     stripData.lowShelfGain = songSlot.strip.lowShelfGain;
     stripData.highShelfGain = songSlot.strip.highShelfGain;
+    stripData.eqVolGain.store(songSlot.strip.eqVolGain);
+    stripData.eqMasterGain.store(songSlot.strip.eqMasterGain);
+    for (int b = 0; b < 10; ++b)
+      stripData.eqBands[b].store(songSlot.strip.eqBands[b]);
     stripData.compEnabled = songSlot.strip.compEnabled;
     stripData.compAmount = songSlot.strip.compAmount;
     stripData.chorusEnabled = songSlot.strip.chorusEnabled;
@@ -2468,8 +2634,6 @@ public:
     stripData.reverbMix = songSlot.strip.reverbMix;
     stripData.irEnabled = songSlot.strip.irEnabled;
     stripData.irMix = songSlot.strip.irMix;
-    if (songSlot.strip.irPath.isNotEmpty())
-      stripData.getIRReverb().loadIR(juce::File(songSlot.strip.irPath));
     stripData.musetteEnabled.store(songSlot.strip.musetteEnabled);
     stripData.musetteCents.store(songSlot.strip.musetteCents);
     stripData.musette3Reed.store(songSlot.strip.musette3Reed);
@@ -2477,6 +2641,10 @@ public:
     stripData.musetteMix.store(songSlot.strip.musetteMix);
     stripData.channelMode.store(songSlot.strip.channelMode);
     stripData.prepare(currentSampleRate);
+    if (songSlot.strip.irPath.isNotEmpty())
+      stripData.getIRReverb().loadPathOrPreset(songSlot.strip.irPath);
+    else
+      stripData.getIRReverb().clear();
 
     auto& arpLive = s->getArpeggiator();
     arpLive.enabled.store(songSlot.arpeggiator.enabled);
@@ -2748,6 +2916,7 @@ public:
       // timeout: abandon, leave the slot without this plugin, rig continues.
       struct OffThreadVarBuild {
         FanfareEngine *engine;
+        std::shared_ptr<std::atomic<bool>> alive;
         juce::var vt;
         std::unique_ptr<juce::AudioPluginInstance> inst;
         juce::String err;
@@ -2757,6 +2926,7 @@ public:
       };
       auto ctx = std::make_shared<OffThreadVarBuild>();
       ctx->engine = this;
+      ctx->alive = engineAlive;
       ctx->vt = vt;
 
       std::thread t([ctx]() {
@@ -2766,9 +2936,11 @@ public:
         std::unique_ptr<juce::AudioPluginInstance> tmp;
         juce::String tmpErr;
         bool tmpOk = false;
-        if (! ctx->abandoned.load(std::memory_order_acquire))
+        if (! ctx->abandoned.load(std::memory_order_acquire) &&
+            ctx->alive && ctx->alive->load(std::memory_order_acquire))
           tmpOk = ctx->engine->buildPluginFromVar(ctx->vt, tmp, tmpErr) && (bool)tmp;
-        if (! ctx->abandoned.load(std::memory_order_acquire)) {
+        if (! ctx->abandoned.load(std::memory_order_acquire) &&
+            ctx->alive && ctx->alive->load(std::memory_order_acquire)) {
           ctx->inst = std::move(tmp);
           ctx->err = tmpErr;
           ctx->ok = tmpOk;
@@ -2815,10 +2987,19 @@ public:
     } else if (slotIdx >= 0) {
       slots[slotIdx]->setPluginInChain(chainIdx, std::move(instance));
     } else {
-      auto &chain = isFohOrChannel ? fohPluginChain : iemPluginChain;
-      while ((int)chain.size() <= chainIdx)
-        chain.push_back(nullptr);
-      chain[chainIdx] = std::move(instance);
+      std::unique_ptr<juce::AudioPluginInstance> displaced;
+      {
+        juce::SpinLock::ScopedLockType mfl(masterFxLock);
+        auto &chain = isFohOrChannel ? fohPluginChain : iemPluginChain;
+        while ((int)chain.size() <= chainIdx)
+          chain.push_back(nullptr);
+        displaced = std::move(chain[chainIdx]);
+        chain[chainIdx] = std::move(instance);
+      }
+      if (displaced) {
+        displaced->releaseResources();
+        displaced.reset();
+      }
     }
   }
 
@@ -3173,6 +3354,7 @@ private:
   std::vector<juce::AudioBuffer<float>> scratchBuffers;
   std::atomic<bool> parallelProcessingEnabled{true};
   std::atomic<DWORD_PTR> shelteredAffinityMask{0};
+  std::atomic<DWORD_PTR> dspWorkerAffinityMasks[kMaxDspHelpers] = {};
   std::atomic<DWORD_PTR> backgroundAffinityMask{0};
   std::atomic<int> activeDspHelperLimit{1};
   std::atomic<bool> preventPowerThrottlingEnabled{true};
@@ -3239,7 +3421,11 @@ private:
       const uint32_t curGen = dspTuningGen.load(std::memory_order_acquire);
       if (curGen != appliedGen) {
         appliedGen = curGen;
-        const DWORD_PTR mask = shelteredAffinityMask.load(std::memory_order_acquire);
+        DWORD_PTR mask = (workerIdx >= 0 && workerIdx < kMaxDspHelpers)
+                             ? dspWorkerAffinityMasks[workerIdx].load(std::memory_order_acquire)
+                             : 0;
+        if (mask == 0)
+          mask = shelteredAffinityMask.load(std::memory_order_acquire);
         if (mask != 0)
           SetThreadAffinityMask(GetCurrentThread(), mask);
         applyThreadHighQoS(preventPowerThrottlingEnabled.load(std::memory_order_acquire));
@@ -3890,18 +4076,45 @@ public:
     return s ? &s->getMp3Player() : nullptr;
   }
 
-  // Gig Notepad State
-  const std::vector<Fanfare::NoteTab>& getNotes() const { return currentNotes; }
-  void setNotes(const std::vector<Fanfare::NoteTab>& n) { currentNotes = n; }
-  int getActiveNoteTabIndex() const { return activeNoteTabIndex; }
-  void setActiveNoteTabIndex(int idx) { activeNoteTabIndex = idx; }
-  float getNoteFontSize() const { return noteFontSize; }
-  void setNoteFontSize(float sz) { noteFontSize = sz; }
-  bool getNoteIsMonospace() const { return noteIsMonospace; }
-  void setNoteIsMonospace(bool mono) { noteIsMonospace = mono; }
+  // Gig Notepad State (thread-safe across Message Thread & WebSocket Companion)
+  std::vector<Fanfare::NoteTab> getNotes() const {
+    juce::ScopedLock nl(notesLock);
+    return currentNotes;
+  }
+  void setNotes(const std::vector<Fanfare::NoteTab>& n) {
+    juce::ScopedLock nl(notesLock);
+    currentNotes = n;
+  }
+  int getActiveNoteTabIndex() const {
+    juce::ScopedLock nl(notesLock);
+    return activeNoteTabIndex;
+  }
+  void setActiveNoteTabIndex(int idx) {
+    juce::ScopedLock nl(notesLock);
+    activeNoteTabIndex = idx;
+  }
+  float getNoteFontSize() const {
+    juce::ScopedLock nl(notesLock);
+    return noteFontSize;
+  }
+  void setNoteFontSize(float sz) {
+    juce::ScopedLock nl(notesLock);
+    noteFontSize = sz;
+  }
+  bool getNoteIsMonospace() const {
+    juce::ScopedLock nl(notesLock);
+    return noteIsMonospace;
+  }
+  void setNoteIsMonospace(bool mono) {
+    juce::ScopedLock nl(notesLock);
+    noteIsMonospace = mono;
+  }
 
   void broadcastNotesChanged() {
-    juce::MessageManager::callAsync([this]() {
+    auto alive = engineAlive;
+    juce::MessageManager::callAsync([this, alive]() {
+      if (!alive || !alive->load(std::memory_order_acquire))
+        return;
       for (auto& pair : noteListeners) {
         if (pair.second) pair.second();
       }
@@ -3920,6 +4133,7 @@ public:
   std::function<void()> onNotesChanged;
 
 private:
+  mutable juce::CriticalSection notesLock;
   std::vector<Fanfare::NoteTab> currentNotes{ { "Chords", "" }, { "Lyrics", "" }, { "Notes", "" } };
   std::map<void*, std::function<void()>> noteListeners;
   int activeNoteTabIndex = 0;

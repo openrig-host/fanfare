@@ -87,8 +87,9 @@ public:
         pushInput(input, numSamples);
 
         // 3. Generate stretched output grains while enough input exists
+        // synthesizeGrain() can seek up to (hopIn + searchRange/2) and then read grainSize samples.
         float hopIn = (float)hopOut * ratio;
-        int neededInputForGrain = grainSize + searchRange;
+        int neededInputForGrain = grainSize + (int)std::ceil(hopIn) + (searchRange / 2) + 4;
 
         while (samplesInInputFifo >= neededInputForGrain && samplesInOutputFifo + hopOut <= outputFifo.getNumSamples()) {
             synthesizeGrain(hopIn);

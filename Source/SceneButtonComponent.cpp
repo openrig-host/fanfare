@@ -52,10 +52,12 @@ void SceneButtonComponent::itemDropped(const SourceDetails& dragSourceDetails) {
         file = RigLibrary::getSongsDirectory().getChildFile(path);
     }
 
+    juce::Component::SafePointer<SceneButtonComponent> safeThis(this);
     if (file.existsAsFile() && onFileDropped) {
         onFileDropped(sceneIndex, file);
     }
-    repaint();
+    if (safeThis != nullptr)
+        safeThis->repaint();
 }
 
 void SceneButtonComponent::mouseDown(const juce::MouseEvent& e) {
@@ -66,11 +68,13 @@ void SceneButtonComponent::mouseDown(const juce::MouseEvent& e) {
         return;
     }
 
+    juce::Component::SafePointer<SceneButtonComponent> safeThis(this);
     if (onClicked) {
         onClicked(sceneIndex);
     }
 
-    juce::Button::mouseDown(e);
+    if (safeThis != nullptr)
+        juce::Button::mouseDown(e);
 }
 
 void SceneButtonComponent::paintButton(juce::Graphics& g,

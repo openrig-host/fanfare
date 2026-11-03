@@ -25,9 +25,13 @@ struct SlotState {
   bool gateEnabled = false;
   float gateThreshold = -60.0f;
   bool eqEnabled = false;
+  bool eqCurveMode = false;
   float hpfFreq = 20.0f;
   float lowShelfGain = 0.0f;
   float highShelfGain = 0.0f;
+  float eqVolGain = 0.0f;
+  float eqMasterGain = 0.0f;
+  float eqBands[10] = {};
   bool compEnabled = false;
   float compAmount = 0.0f;
   bool chorusEnabled = false;

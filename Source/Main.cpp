@@ -7,6 +7,7 @@
 */
 
 #include "MainComponent.h"
+#include "Version.h"
 #include <JuceHeader.h>
 
 #ifdef _WIN32
@@ -25,7 +26,7 @@ public:
     return "Fanfare";
   }
   const juce::String getApplicationVersion() override {
-    return ProjectInfo::versionString;
+    return OPENRIG_VERSION_STRING;
   }
   bool moreThanOneInstanceAllowed() override { return true; }
 
@@ -45,7 +46,8 @@ public:
     FanfareLog::setupCrashHandlers();
 #endif
 
-    mainWindow.reset(new MainWindow(getApplicationName() + " v" + getApplicationVersion()));
+    mainWindow.reset(new MainWindow(getApplicationName() + " v" + getApplicationVersion() +
+                                    "  [Build: " + juce::String(__DATE__) + " " + juce::String(__TIME__) + "]"));
   }
 
   void shutdown() override {

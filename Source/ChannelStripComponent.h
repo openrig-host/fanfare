@@ -148,10 +148,27 @@ public:
     flatBtn.setTooltip("Reset all 10 EQ bands to 0 dB");
     Fanfare::setButtonRole(flatBtn, Fanfare::ButtonRole::Standard);
     flatBtn.onClick = [this] {
+      activeDragBand = -1;
       for (int i = 0; i < 10; ++i) {
         slot.getStrip().eqBands[i].store(0.0f);
+        lastEqBandValues[i] = 0.0;
+        dragAnchorBands[i] = 0.0;
         if (eqSliders[i]) eqSliders[i]->setValue(0.0, juce::dontSendNotification);
       }
+    };
+
+    addAndMakeVisible(eqCurveModeBtn);
+    updateEqCurveModeButton();
+    eqCurveModeBtn.onClick = [this] {
+      const bool next = !slot.getStrip().eqCurveMode.load();
+      slot.getStrip().eqCurveMode.store(next);
+      activeDragBand = -1;
+      for (int i = 0; i < 10; ++i) {
+        const double v = eqSliders[i] ? eqSliders[i]->getValue() : (double)slot.getStrip().eqBands[i].load();
+        dragAnchorBands[i] = v;
+        lastEqBandValues[i] = v;
+      }
+      updateEqCurveModeButton();
     };
 
     // Vol Slider (Input Trim)
@@ -180,12 +197,68 @@ public:
       eqSliders[i]->setSliderStyle(juce::Slider::LinearVertical);
       eqSliders[i]->setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
       eqSliders[i]->setRange(-12.0, 12.0, 0.1);
-      eqSliders[i]->setValue(slot.getStrip().eqBands[i].load(), juce::dontSendNotification);
+      const float initialBandDb = slot.getStrip().eqBands[i].load();
+      eqSliders[i]->setValue(initialBandDb, juce::dontSendNotification);
+      lastEqBandValues[i] = initialBandDb;
+      dragAnchorBands[i] = initialBandDb;
       eqSliders[i]->setDoubleClickReturnValue(true, 0.0);
-      eqSliders[i]->setTooltip(juce::String(bandNames[i]) + " Hz Band (-12 dB to +12 dB)");
+      eqSliders[i]->setTooltip(juce::String(bandNames[i]) + " Hz Band (-12 dB to +12 dB; hold Alt to bypass Curve Link)");
       int bandIdx = i;
+      eqSliders[i]->onDragStart = [this, bandIdx] {
+        activeDragBand = bandIdx;
+        for (int b = 0; b < 10; ++b)
+          dragAnchorBands[b] = eqSliders[b] ? eqSliders[b]->getValue() : (double)slot.getStrip().eqBands[b].load();
+      };
+      eqSliders[i]->onDragEnd = [this, bandIdx] {
+        if (activeDragBand == bandIdx)
+          activeDragBand = -1;
+        for (int b = 0; b < 10; ++b)
+          lastEqBandValues[b] = eqSliders[b] ? eqSliders[b]->getValue() : (double)slot.getStrip().eqBands[b].load();
+      };
       eqSliders[i]->onValueChange = [this, bandIdx] {
-        slot.getStrip().eqBands[bandIdx].store((float)eqSliders[bandIdx]->getValue());
+        if (isUpdatingEqCurve)
+          return;
+        const double newVal = eqSliders[bandIdx]->getValue();
+        slot.getStrip().eqBands[bandIdx].store((float)newVal);
+
+        const bool curveActive = slot.getStrip().eqCurveMode.load() &&
+                                 !juce::ModifierKeys::currentModifiers.isAltDown();
+        if (curveActive) {
+          static constexpr double kCurveWeights[4] = { 1.0, 0.62, 0.28, 0.08 };
+          isUpdatingEqCurve = true;
+          if (activeDragBand == bandIdx) {
+            const double delta = newVal - dragAnchorBands[bandIdx];
+            for (int b = 0; b < 10; ++b) {
+              if (b == bandIdx)
+                continue;
+              const int dist = std::abs(b - bandIdx);
+              if (dist <= 3 && eqSliders[b]) {
+                const double coupled = juce::jlimit(-12.0, 12.0, dragAnchorBands[b] + delta * kCurveWeights[dist]);
+                eqSliders[b]->setValue(coupled, juce::dontSendNotification);
+                const double snapped = eqSliders[b]->getValue();
+                slot.getStrip().eqBands[b].store((float)snapped);
+                lastEqBandValues[b] = snapped;
+              }
+            }
+          } else {
+            // Non-drag change (mouse wheel or double-click reset): apply proportional delta
+            const double delta = newVal - lastEqBandValues[bandIdx];
+            for (int b = 0; b < 10; ++b) {
+              if (b == bandIdx)
+                continue;
+              const int dist = std::abs(b - bandIdx);
+              if (dist <= 3 && eqSliders[b]) {
+                const double coupled = juce::jlimit(-12.0, 12.0, eqSliders[b]->getValue() + delta * kCurveWeights[dist]);
+                eqSliders[b]->setValue(coupled, juce::dontSendNotification);
+                const double snapped = eqSliders[b]->getValue();
+                slot.getStrip().eqBands[b].store((float)snapped);
+                lastEqBandValues[b] = snapped;
+              }
+            }
+          }
+          isUpdatingEqCurve = false;
+        }
+        lastEqBandValues[bandIdx] = newVal;
       };
 
       eqLabels[i] = std::make_unique<juce::Label>();
@@ -303,24 +376,64 @@ public:
     };
 
     addAndMakeVisible(irLoadBtn);
-    irLoadBtn.setButtonText("LOAD IR");
+    irLoadBtn.setButtonText("LOAD WAV");
     Fanfare::setButtonRole(irLoadBtn, Fanfare::ButtonRole::Standard);
-    irLoadBtn.setTooltip("Load an impulse response (.wav) for convolution reverb / cab sim");
+    irLoadBtn.setTooltip("Load a custom impulse response (.wav) file from disk");
     irLoadBtn.onClick = [this] {
       irChooser = std::make_unique<juce::FileChooser>(
           "Load Impulse Response (.wav)",
           juce::File::getSpecialLocation(juce::File::userMusicDirectory), "*.wav");
       auto flags = juce::FileBrowserComponent::openMode |
                    juce::FileBrowserComponent::canSelectFiles;
-      irChooser->launchAsync(flags, [this](const juce::FileChooser& fc) {
+      juce::Component::SafePointer<ChannelStripComponent> safeThis(this);
+      irChooser->launchAsync(flags, [safeThis](const juce::FileChooser& fc) {
+        if (safeThis == nullptr)
+          return;
         auto f = fc.getResult();
-        if (f == juce::File()) return;
-        if (slot.getStrip().getIRReverb().loadIR(f)) {
-          irNameLabel.setText(f.getFileName(), juce::dontSendNotification);
-          irToggle.setToggleState(true, juce::sendNotification);
-          slot.getStrip().irEnabled.store(true);
+        if (f == juce::File())
+          return;
+        if (safeThis->slot.getStrip().getIRReverb().loadIR(f)) {
+          safeThis->irPresetCombo.setSelectedId(1, juce::dontSendNotification);
+          safeThis->irNameLabel.setText(
+              safeThis->slot.getStrip().getIRReverb().getDisplayName(),
+              juce::dontSendNotification);
+          safeThis->irToggle.setToggleState(true, juce::dontSendNotification);
+          safeThis->slot.getStrip().irEnabled.store(true);
+          if (safeThis->slot.getStrip().irMix.load() < 0.02f) {
+            safeThis->slot.getStrip().irMix.store(0.30f);
+            safeThis->irMixKnob.setValue(0.30, juce::dontSendNotification);
+          }
         }
       });
+    };
+
+    addAndMakeVisible(irPresetCombo);
+    irPresetCombo.addItem("Preset: Custom / WAV...", 1);
+    {
+      const auto *presets = FanfareDSP::ConvolutionReverb::getBuiltinPresets();
+      for (int i = 0; i < FanfareDSP::ConvolutionReverb::kNumBuiltinPresets; ++i)
+        irPresetCombo.addItem(presets[i].menuLabel, i + 2);
+      const int activeIdx = FanfareDSP::ConvolutionReverb::findBuiltinPresetIndex(
+          slot.getStrip().getIRReverb().getLoadedPath());
+      irPresetCombo.setSelectedId(activeIdx >= 0 ? (activeIdx + 2) : 1,
+                                  juce::dontSendNotification);
+    }
+    irPresetCombo.setTooltip(
+        "Built-in synthesized acoustic IR spaces and speaker cab (Rooms/Halls: 20-35% mix, 2x12 Cab: 50-100% mix)");
+    irPresetCombo.onChange = [this] {
+      const int id = irPresetCombo.getSelectedId();
+      if (id >= 2) {
+        if (slot.getStrip().getIRReverb().loadPresetByIndex(id - 2)) {
+          irNameLabel.setText(slot.getStrip().getIRReverb().getDisplayName(),
+                              juce::dontSendNotification);
+          irToggle.setToggleState(true, juce::dontSendNotification);
+          slot.getStrip().irEnabled.store(true);
+          if (slot.getStrip().irMix.load() < 0.02f) {
+            slot.getStrip().irMix.store(0.30f);
+            irMixKnob.setValue(0.30, juce::dontSendNotification);
+          }
+        }
+      }
     };
 
     addAndMakeVisible(irMixLabel);
@@ -349,11 +462,8 @@ public:
     irNameLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
     irNameLabel.setJustificationType(juce::Justification::centredLeft);
     irNameLabel.setFont(juce::FontOptions(11.5f));
-    {
-      auto p = slot.getStrip().getIRReverb().getLoadedPath();
-      irNameLabel.setText(p.isEmpty() ? "(no IR loaded)" : juce::File(p).getFileName(),
-                          juce::dontSendNotification);
-    }
+    irNameLabel.setText(slot.getStrip().getIRReverb().getDisplayName(),
+                        juce::dontSendNotification);
 
     // Chorus
     addAndMakeVisible(chorusToggle);
@@ -745,6 +855,22 @@ public:
     stereoMonoBtn.repaint();
   }
 
+  void updateEqCurveModeButton() {
+    const bool curve = slot.getStrip().eqCurveMode.load();
+    if (curve) {
+      eqCurveModeBtn.setButtonText("CURVE LINK");
+      Fanfare::setButtonRole(eqCurveModeBtn, Fanfare::ButtonRole::Primary);
+      eqCurveModeBtn.setTooltip(
+          "EQ Slider Mode: Proportional Curve (moving a band smoothly pulls nearby bands in a bell curve; hold Alt for single-band tweak). Click for Independent mode.");
+    } else {
+      eqCurveModeBtn.setButtonText("INDEPENDENT");
+      Fanfare::setButtonRole(eqCurveModeBtn, Fanfare::ButtonRole::Standard);
+      eqCurveModeBtn.setTooltip(
+          "EQ Slider Mode: Independent (each band moves on its own). Click to enable Proportional Curve mode.");
+    }
+    eqCurveModeBtn.repaint();
+  }
+
   void showColorPicker() {
     auto *colourSelector = new juce::ColourSelector(juce::ColourSelector::showColourspace);
     colourSelector->setCurrentColour(slot.getChannelColor().withAlpha((juce::uint8)255));
@@ -805,6 +931,7 @@ public:
     eqGroup.setBounds(eqX, sectionY, eqW, sectionH);
     eqToggle.setBounds(eqX + 10, sectionY + 20, 75, 24);
     flatBtn.setBounds(eqX + 90, sectionY + 20, 55, 24);
+    eqCurveModeBtn.setBounds(eqX + 150, sectionY + 20, 112, 24);
 
     int numSliders = 12;
     int sliderW = (eqW - 20) / numSliders;
@@ -895,8 +1022,9 @@ public:
     }
 
     irGroup.setBounds(auxX, row3Y, auxW, row3H);
-    irToggle.setBounds(auxX + 12, row3Y + 22, 108, 24);
-    irLoadBtn.setBounds(auxX + 12, row3Y + 54, 108, 25);
+    irToggle.setBounds(auxX + 12, row3Y + 22, 100, 24);
+    irLoadBtn.setBounds(auxX + 118, row3Y + 22, 102, 24);
+    irPresetCombo.setBounds(auxX + 12, row3Y + 54, 208, 25);
     irNameLabel.setBounds(auxX + 12, row3Y + 86, 208, 24);
     irMixLabel.setBounds(auxX + auxW - 108, row3Y + 18, 96, 14);
     irMixKnob.setBounds(auxX + auxW - 108, row3Y + 34, 96, 82);
@@ -963,6 +1091,11 @@ private:
   juce::GroupComponent eqGroup;
   juce::TextButton eqToggle;
   juce::TextButton flatBtn;
+  juce::TextButton eqCurveModeBtn;
+  bool isUpdatingEqCurve = false;
+  int activeDragBand = -1;
+  double dragAnchorBands[10] = {};
+  double lastEqBandValues[10] = {};
   juce::Slider eqVolSlider;
   juce::Label eqVolLabel;
   std::unique_ptr<juce::Slider> eqSliders[10];
@@ -989,7 +1122,8 @@ private:
   // IR / convolution reverb
   juce::GroupComponent irGroup;
   juce::TextButton irToggle;
-  juce::TextButton irLoadBtn{"LOAD IR"};
+  juce::TextButton irLoadBtn{"LOAD WAV"};
+  juce::ComboBox irPresetCombo;
   juce::Label irMixLabel;
   BigKnob irMixKnob{""};
   juce::Label irNameLabel{"irNameLabel", "(no IR loaded)"};

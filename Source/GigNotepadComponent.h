@@ -387,8 +387,10 @@ public:
         loadFromEngine();
         updateLiveEditModeState();
 
-        engine.addNotesListener(this, [this] {
-            loadFromEngine();
+        juce::Component::SafePointer<GigNotepadComponent> safeInit(this);
+        engine.addNotesListener(this, [safeInit] {
+            if (safeInit != nullptr)
+                safeInit->loadFromEngine();
         });
         lookAndFeelChanged();
     }
@@ -553,18 +555,20 @@ public:
         alert->addButton("Add", 1, juce::KeyPress(juce::KeyPress::returnKey));
         alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
-        alert->enterModalState(true, juce::ModalCallbackFunction::create([this, alert](int result) {
+        juce::Component::SafePointer<GigNotepadComponent> safeThis(this);
+        alert->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, alert](int result) {
             std::unique_ptr<juce::AlertWindow> windowDeleter(alert);
+            if (safeThis == nullptr) return;
             if (result == 1) {
                 juce::String name = alert->getTextEditorContents("tabName").trim();
                 if (name.isNotEmpty()) {
-                    saveCurrentTabContent();
-                    tabs.push_back({ name, "" });
-                    activeTab = (int)tabs.size() - 1;
-                    engine.setNotes(tabs);
-                    engine.setActiveNoteTabIndex(activeTab);
-                    rebuildTabButtons();
-                    loadActiveTabContent();
+                    safeThis->saveCurrentTabContent();
+                    safeThis->tabs.push_back({ name, "" });
+                    safeThis->activeTab = (int)safeThis->tabs.size() - 1;
+                    safeThis->engine.setNotes(safeThis->tabs);
+                    safeThis->engine.setActiveNoteTabIndex(safeThis->activeTab);
+                    safeThis->rebuildTabButtons();
+                    safeThis->loadActiveTabContent();
                 }
             }
         }));
@@ -579,15 +583,17 @@ public:
         menu.addSeparator();
         menu.addItem(3, "Clear Tab Contents");
 
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&manageTabsBtn), [this](int result) {
+        juce::Component::SafePointer<GigNotepadComponent> safeThis(this);
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&manageTabsBtn), [safeThis](int result) {
+            if (safeThis == nullptr) return;
             if (result == 1) {
-                renameCurrentTabPrompt();
+                safeThis->renameCurrentTabPrompt();
             } else if (result == 2) {
-                deleteCurrentTab();
+                safeThis->deleteCurrentTab();
             } else if (result == 3) {
-                textEditor.clear();
-                saveCurrentTabContent();
-                if (liveViewer) liveViewer->setContent("");
+                safeThis->textEditor.clear();
+                safeThis->saveCurrentTabContent();
+                if (safeThis->liveViewer) safeThis->liveViewer->setContent("");
             }
         });
     }
@@ -599,14 +605,16 @@ public:
         alert->addButton("Save", 1, juce::KeyPress(juce::KeyPress::returnKey));
         alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
-        alert->enterModalState(true, juce::ModalCallbackFunction::create([this, alert](int result) {
+        juce::Component::SafePointer<GigNotepadComponent> safeThis(this);
+        alert->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, alert](int result) {
             std::unique_ptr<juce::AlertWindow> windowDeleter(alert);
-            if (result == 1) {
+            if (safeThis == nullptr) return;
+            if (result == 1 && safeThis->activeTab >= 0 && safeThis->activeTab < (int)safeThis->tabs.size()) {
                 juce::String name = alert->getTextEditorContents("tabName").trim();
                 if (name.isNotEmpty()) {
-                    tabs[activeTab].title = name;
-                    engine.setNotes(tabs);
-                    rebuildTabButtons();
+                    safeThis->tabs[safeThis->activeTab].title = name;
+                    safeThis->engine.setNotes(safeThis->tabs);
+                    safeThis->rebuildTabButtons();
                 }
             }
         }));
@@ -630,7 +638,9 @@ public:
         );
 
         auto folderChooserFlags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
-        fileChooser->launchAsync(folderChooserFlags, [this](const juce::FileChooser& chooser) {
+        juce::Component::SafePointer<GigNotepadComponent> safeThis(this);
+        fileChooser->launchAsync(folderChooserFlags, [safeThis](const juce::FileChooser& chooser) {
+            if (safeThis == nullptr) return;
             auto file = chooser.getResult();
             if (file.existsAsFile()) {
                 juce::String rawText = file.loadFileAsString();
@@ -638,34 +648,35 @@ public:
 
                 juce::String parsedText = rawText;
                 if (ext == ".html" || ext == ".htm") {
-                    parsedText = parseHtmlToStageFormat(rawText);
+                    parsedText = safeThis->parseHtmlToStageFormat(rawText);
                 }
 
-                if (textEditor.getText().trim().isEmpty()) {
-                    textEditor.setText(parsedText, false);
-                    saveCurrentTabContent();
-                    if (liveViewer) liveViewer->setContent(parsedText);
+                if (safeThis->textEditor.getText().trim().isEmpty()) {
+                    safeThis->textEditor.setText(parsedText, false);
+                    safeThis->saveCurrentTabContent();
+                    if (safeThis->liveViewer) safeThis->liveViewer->setContent(parsedText);
                 } else {
                     auto* alert = new juce::AlertWindow("Import Note", "How would you like to import '" + file.getFileName() + "'?", juce::MessageBoxIconType::QuestionIcon);
                     alert->addButton("Replace Tab", 1);
                     alert->addButton("New Tab", 2);
                     alert->addButton("Cancel", 0);
 
-                    alert->enterModalState(true, juce::ModalCallbackFunction::create([this, alert, parsedText, file](int res) {
+                    alert->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, alert, parsedText, file](int res) {
                         std::unique_ptr<juce::AlertWindow> windowDeleter(alert);
+                        if (safeThis == nullptr) return;
                         if (res == 1) {
-                            textEditor.setText(parsedText, false);
-                            saveCurrentTabContent();
-                            if (liveViewer) liveViewer->setContent(parsedText);
+                            safeThis->textEditor.setText(parsedText, false);
+                            safeThis->saveCurrentTabContent();
+                            if (safeThis->liveViewer) safeThis->liveViewer->setContent(parsedText);
                         } else if (res == 2) {
-                            saveCurrentTabContent();
+                            safeThis->saveCurrentTabContent();
                             juce::String tabName = file.getFileNameWithoutExtension();
-                            tabs.push_back({ tabName, parsedText });
-                            activeTab = (int)tabs.size() - 1;
-                            engine.setNotes(tabs);
-                            engine.setActiveNoteTabIndex(activeTab);
-                            rebuildTabButtons();
-                            loadActiveTabContent();
+                            safeThis->tabs.push_back({ tabName, parsedText });
+                            safeThis->activeTab = (int)safeThis->tabs.size() - 1;
+                            safeThis->engine.setNotes(safeThis->tabs);
+                            safeThis->engine.setActiveNoteTabIndex(safeThis->activeTab);
+                            safeThis->rebuildTabButtons();
+                            safeThis->loadActiveTabContent();
                         }
                     }));
                 }

@@ -1,8 +1,15 @@
 // Windows MMCSS for real-time audio thread priority
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <dbt.h>
+#include <mmsystem.h>
+#pragma comment(lib, "winmm.lib")
 #endif
+#include <limits>
 
 #include "CCMappingComponent.h"
 #include "HelpLauncher.h"
@@ -72,20 +79,29 @@ public:
                        DocumentWindow::closeButton |
                            DocumentWindow::minimiseButton),
         pluginInstance(pi) {
-    setContentNonOwned(content, true);
+    setContentOwned(content, true);
     setResizable(true, false);
     setUsingNativeTitleBar(true);
     centreWithSize(content->getWidth(), content->getHeight());
     setVisible(true);
     toFront(true);
   }
-  ~PluginWindow() override {
-    if (auto* content = getContentComponent()) {
-      clearContentComponent();
-      FanfareLog::safeExecutePluginCall([content]() {
-        delete content;
+
+  // Tear down the hosted VST3 IPlugView / AudioProcessorEditor synchronously
+  // while both the parent DocumentWindow HWND and the owning AudioPluginInstance
+  // are still alive (avoiding use-after-free when unloading plugins).
+  void destroyEditorNow() {
+    if (getContentComponent() != nullptr) {
+      FanfareLog::safeExecutePluginCall([this]() {
+        clearContentComponent();
       }, "PluginEditor destructor");
     }
+    setVisible(false);
+    pluginInstance = nullptr;
+  }
+
+  ~PluginWindow() override {
+    destroyEditorNow();
   }
 
   void closeButtonPressed() override {
@@ -291,16 +307,28 @@ MainComponent::MainComponent() {
           FanfareConstants::kDefaultWindowHeight);
   startTimer(FanfareConstants::kTimerIntervalMs);
 
-  // Setup MIDI inputs
-  // Setup MIDI inputs (wildcard listener + hotplug auto-enable)
+  // Setup MIDI inputs (wildcard listener + event-driven hotplug auto-enable)
+#ifdef _WIN32
+  startUsbDeviceWatcher();
+#endif
+  thermalMonitor.startMonitoring();
+  {
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    updateChecker.checkOnceAsync([safeThis](const UpdateChecker::ReleaseInfo &info) {
+      if (safeThis == nullptr)
+        return;
+      safeThis->latestReleaseUrl = info.htmlUrl;
+      juce::String label = "UPDATE v" + juce::String(info.major) + "." + juce::String(info.minor);
+      safeThis->updateBadgeBtn.setButtonText(label);
+      safeThis->updateBadgeBtn.setTooltip(
+          "New Fanfare milestone release available on GitHub (" + info.tagName +
+          "). Click to view release notes and download.");
+      safeThis->updateBadgeBtn.setVisible(true);
+      safeThis->resized();
+    });
+  }
   deviceManager.addMidiInputDeviceCallback({}, this);
   syncHotplugMidiInputs(true);
-  if (false) {
-    auto midiInputs = juce::MidiInput::getAvailableDevices();
-  for (auto &input : midiInputs) {
-    deviceManager.setMidiInputDeviceEnabled(input.identifier, true);
-    deviceManager.addMidiInputDeviceCallback(input.identifier, this); }
-  }
 
   // Add audio callback
   deviceManager.addAudioCallback(this);
@@ -352,6 +380,8 @@ MainComponent::~MainComponent() {
     webServer->stopServer();
   removeKeyListener (this);
   stopTimer();
+  updateChecker.stop();
+  thermalMonitor.stopMonitoring();
   flushGlitchLog(); // land any batched glitch entries before we vanish
   if (transitioner)
     transitioner->stopTransition();
@@ -360,17 +390,11 @@ MainComponent::~MainComponent() {
   Fanfare::SetlistManager::getInstance().removeChangeListener(this);
   ThemeManager::getInstance().removeChangeListener(this);
   saveAudioSettings();
-  deviceManager.removeMidiInputDeviceCallback({}, this);
-  // Setup MIDI inputs (wildcard listener + hotplug auto-enable)
-  deviceManager.addMidiInputDeviceCallback({}, this);
-  syncHotplugMidiInputs(true);
-  if (false) {
-    auto midiInputs = juce::MidiInput::getAvailableDevices();
-  for (auto &input : midiInputs)
-    deviceManager.removeMidiInputDeviceCallback(input.identifier, this); }
+#ifdef _WIN32
+  stopUsbDeviceWatcher();
+#endif
   for (const auto &id : activeMidiInputIds)
     deviceManager.setMidiInputDeviceEnabled(id, false);
-  deviceManager.removeMidiInputDeviceCallback({}, this);
   deviceManager.removeMidiInputDeviceCallback({}, this);
 
   deviceManager.removeAudioCallback(this);
@@ -667,6 +691,7 @@ void MainComponent::setupSlotComponents() {
           w->onWindowClosed = [this, w] {
             if (activePluginWindows.contains(w)) {
               activePluginWindows.removeObject(w, false);
+              w->destroyEditorNow();
               juce::MessageManager::callAsync([w]() { delete w; });
             }
           };
@@ -709,9 +734,11 @@ void MainComponent::setupSlotComponents() {
     // Sampler Dialog
     comp->onShowSampler = [this, slot] {
       samplerOverlay.reset(new SamplerComponent(*slot, [this] {
+        samplerOverlayOpen.store(false, std::memory_order_release);
         samplerOverlay.reset();
         resized();
       }));
+      samplerOverlayOpen.store(true, std::memory_order_release);
       addAndMakeVisible(samplerOverlay.get());
       samplerOverlay->centreWithSize(720, 600);
     };
@@ -730,7 +757,7 @@ void MainComponent::setupSlotComponents() {
     comp->onShowNoteRangeDialog = [this, slot, comp] {
       auto *nrComp = new NoteRangeComponent(*slot);
       nrComp->setSize(800, 180);
-      activeMidiNoteLearner = nrComp;
+      setActiveMidiNoteLearner(nrComp);
       juce::CallOutBox::launchAsynchronously(
           std::unique_ptr<juce::Component>(nrComp),
           getLocalArea(comp, comp->getNoteRangeButtonBounds()), this);
@@ -775,9 +802,10 @@ void MainComponent::setupSlotComponents() {
                   break;
               }
           }
-          auto loadPreset = [this, i, comp, selectedFile] {
+          auto loadPreset = [this, i, slot, comp, selectedFile] {
               Fanfare::SongSlot loadedSlot;
               if (Fanfare::RigSerializer::readStripFromFile(selectedFile, loadedSlot)) {
+                  closePluginWindowsForSlot(slot);
                   engine.loadSlotPreset(i, loadedSlot);
                   if (comp->getIsCollapsed())
                       comp->setCollapsed(false);
@@ -809,12 +837,13 @@ void MainComponent::setupSlotComponents() {
               "*.orstrip");
           fileChooser->launchAsync(
               juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-              [this, i, comp](const juce::FileChooser &fc) {
+              [this, i, slot, comp](const juce::FileChooser &fc) {
                 auto file = fc.getResult();
                 if (file == juce::File{})
                   return;
                 Fanfare::SongSlot loadedSlot;
                 if (Fanfare::RigSerializer::readStripFromFile(file, loadedSlot)) {
+                    closePluginWindowsForSlot(slot);
                     engine.loadSlotPreset(i, loadedSlot);
                     if (comp->getIsCollapsed())
                         comp->setCollapsed(false);
@@ -826,7 +855,8 @@ void MainComponent::setupSlotComponents() {
     };
 
     // Quick-load a specific strip file (from right-click submenu)
-    comp->onLoadStripFile = [this, i, comp](const juce::File &file) {
+    comp->onLoadStripFile = [this, i, slot, comp](const juce::File &file) {
+      closePluginWindowsForSlot(slot);
       engine.loadStripFromFile(i, file);
       if (comp->getIsCollapsed())
         comp->setCollapsed(false);
@@ -834,10 +864,12 @@ void MainComponent::setupSlotComponents() {
     };
 
     // Drag-and-drop strip preset from the library sidebar
-    comp->onLoadPresetFile = [this, i, comp](const juce::File &file) {
+    comp->onLoadPresetFile = [this, i, slot, comp](const juce::File &file) {
       Fanfare::SongSlot loadedSlot;
-      if (Fanfare::RigSerializer::readStripFromFile(file, loadedSlot))
+      if (Fanfare::RigSerializer::readStripFromFile(file, loadedSlot)) {
+        closePluginWindowsForSlot(slot);
         engine.loadSlotPreset(i, loadedSlot);
+      }
       if (comp->getIsCollapsed())
         comp->setCollapsed(false);
       resized();
@@ -915,25 +947,21 @@ void MainComponent::setupSlotComponents() {
 
       menu.showMenuAsync(juce::PopupMenu::Options(),
                          [this, i, slot, comp, chainIndex](int result) {
+                           if (result > 0 || result == -1) {
+                             if (auto *oldInstance = slot->getPluginInstance(chainIndex))
+                               closePluginWindowForInstance(oldInstance);
+                           }
                            if (result > 0) {
                              loadingOverlay.reset(new LoadingOverlay());
                              addAndMakeVisible(loadingOverlay.get());
-                             // Need engine method for aux returns or reuse slot
-                             // load with index mapping For now, let's assume
-                             // we'll add loadPluginIntoAuxReturn
                              engine.loadPluginIntoSlot(
                                  (100 + i), chainIndex, result - 1,
                                  [this, comp](bool s, const juce::String &e) {
                                    juce::ignoreUnused(s, e);
                                    loadingOverlay.reset();
                                    comp->repaint();
-                                   comp->repaint();
                                  });
-                                 if (false) {
-                           }
                            } else if (result == -1) {
-                             if (auto *oldInstance = slot->getPluginInstance(chainIndex))
-                               closePluginWindowForInstance(oldInstance);
                              juce::ScopedLock sl(engine.getCallbackLock());
                              slot->setPluginInChain(chainIndex, nullptr);
                              comp->repaint();
@@ -971,6 +999,7 @@ void MainComponent::setupSlotComponents() {
           w->onWindowClosed = [this, w] {
             if (activePluginWindows.contains(w)) {
               activePluginWindows.removeObject(w, false);
+              w->destroyEditorNow();
               juce::MessageManager::callAsync([w]() { delete w; });
             }
           };
@@ -987,7 +1016,7 @@ void MainComponent::setupSlotComponents() {
     comp->onShowNoteRangeDialog = [this, slot, comp] {
       auto *nrComp = new NoteRangeComponent(*slot);
       nrComp->setSize(800, 180);
-      activeMidiNoteLearner = nrComp;
+      setActiveMidiNoteLearner(nrComp);
       juce::CallOutBox::launchAsynchronously(
           std::unique_ptr<juce::Component>(nrComp),
           getLocalArea(comp, comp->getNoteRangeButtonBounds()), this);
@@ -1244,6 +1273,13 @@ void MainComponent::setupHeaderButtons() {
   Fanfare::styleHelpButton(mainHelpBtn, "#main-mixer", "HAAALP! Open the Fanfare User's Manual");
   addAndMakeVisible(mainHelpBtn);
 
+  addChildComponent(updateBadgeBtn);
+  Fanfare::setButtonRole(updateBadgeBtn, Fanfare::ButtonRole::Primary);
+  updateBadgeBtn.onClick = [this] {
+    if (latestReleaseUrl.isNotEmpty())
+      juce::URL(latestReleaseUrl).launchInDefaultBrowser();
+  };
+
   // Prev / Next Setlist buttons
   addAndMakeVisible(prevSetlistBtn);
   Fanfare::setButtonRole(prevSetlistBtn, Fanfare::ButtonRole::Standard);
@@ -1290,6 +1326,14 @@ void MainComponent::setupHeaderButtons() {
   xrunsLabel.setJustificationType(juce::Justification::centred);
   xrunsLabel.setTooltip("Audio Glitch / Underrun Counter (Click to view log)");
   xrunsLabel.addMouseListener(this, false);
+
+  addChildComponent(thermalLabel);
+  thermalLabel.setFont(BoutiqueLookAndFeel::monoFont(10.5f, true));
+  thermalLabel.setJustificationType(juce::Justification::centred);
+  thermalLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+  thermalLabel.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+  thermalLabel.setTooltip("CPU Thermal / Firmware Throttle Alert (Click for details)");
+  thermalLabel.addMouseListener(this, false);
 
   addAndMakeVisible(setupNameLabel);
   setupNameLabel.setFont(BoutiqueLookAndFeel::condensedFont(20.0f, 0.04f));
@@ -1584,17 +1628,24 @@ void MainComponent::refreshSceneButtons() {
             saveButtonMappings();
             refreshSceneButtons();
           } else if (result == 3) {
+            if (sceneLearnAlert != nullptr) {
+              sceneLearnAlert->exitModalState(0);
+              sceneLearnAlert = nullptr;
+            }
             auto* alert = new juce::AlertWindow(
               "MIDI Learn",
               "Send a Program Change from your controller now...",
               juce::AlertWindow::InfoIcon);
             alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
-            sceneMidiLearnArmed = sceneIdx;
+            sceneMidiLearnArmed.store(sceneIdx, std::memory_order_release);
+            juce::Component::SafePointer<MainComponent> safeThis(this);
             alert->enterModalState(true,
-              juce::ModalCallbackFunction::create([this](int) {
-                sceneMidiLearnArmed = -1;
-              }));
+              juce::ModalCallbackFunction::create([safeThis](int) {
+                if (safeThis != nullptr)
+                  safeThis->sceneMidiLearnArmed.store(-1, std::memory_order_release);
+              }),
+              true);
             sceneLearnAlert = alert;
           } else if (result == 4) {
             engine.clearSceneMidiTrigger(sceneIdx);
@@ -1687,7 +1738,8 @@ void MainComponent::logAudioGlitch(double actualMs, double expectedMs,
                        juce::String(actualMs, 2) + "ms (expected " +
                        juce::String(expectedMs, 2) + "ms) | callback took: " +
                        juce::String(cbDurationMs, 2) + "ms | CPU: " +
-                       cpuLabel.getText() + " | RAM: " + ramLabel.getText() + "\n";
+                       cpuLabel.getText() + " | RAM: " + ramLabel.getText() +
+                       " | " + thermalMonitor.formatGlitchLogTag() + "\n";
 
   // Batched: appends collect in memory and flush to disk at most once per
   // second (glitchMonitorTimer). During a storm this replaces ~13 file
@@ -1754,6 +1806,7 @@ void MainComponent::audioDeviceIOCallbackWithContext(
   // Per-thread hardening, flag-gated per mechanism (bisect - MinHost runs
   // no MMCSS and no shelter, and is clean where Fanfare storms).
 #ifdef _WIN32
+  FanfareLog::t_isRealtimeAudioThread = true;
   if constexpr (FanfareConstants::kCpuShelterEnabled) {
     const DWORD_PTR wantedProcMask = processShelterMask.load(std::memory_order_relaxed);
     if (wantedProcMask != 0) {
@@ -1814,7 +1867,18 @@ void MainComponent::audioDeviceIOCallbackWithContext(
       LOG_WARN("avrt.dll not loaded - audio thread set to THREAD_PRIORITY_HIGHEST");
     }
   }
-  } // end kMmcssEnabled (bisect)
+  } else {
+    // When MMCSS is disabled (avoiding Windows 80% MMCSS throttling), explicitly
+    // boost the ASIO callback thread to Kernel Priority 15 so it matches dspWorkers
+    // and can never be preempted by Priority 9-12 plugin/UI threads or DSP helpers.
+    thread_local DWORD lastBoostedAudioTid = 0;
+    const DWORD curAudioTid = ::GetCurrentThreadId();
+    if (curAudioTid != lastBoostedAudioTid) {
+      lastBoostedAudioTid = curAudioTid;
+      SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+      LOG_INFO("Audio callback thread boosted to THREAD_PRIORITY_TIME_CRITICAL (Priority 15)");
+    }
+  }
 #endif
 
   juce::MidiBuffer incomingMidi;
@@ -1852,20 +1916,121 @@ void MainComponent::captureDesiredAudioSetup() {
   }
 }
 
+#ifdef _WIN32
+#ifndef DEVICE_NOTIFY_ALL_INTERFACE_CLASSES
+#define DEVICE_NOTIFY_ALL_INTERFACE_CLASSES 0x00000004
+#endif
+
+void MainComponent::startUsbDeviceWatcher() {
+  if (usbNotifyHwnd != nullptr)
+    return;
+
+  struct UsbNotifyWndProc {
+    static LRESULT CALLBACK proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+      if (msg == WM_NCCREATE) {
+        auto *cs = reinterpret_cast<CREATESTRUCTW *>(lParam);
+        ::SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                            reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+        return TRUE;
+      }
+      if (msg == WM_DEVICECHANGE) {
+        if (wParam == DBT_DEVNODES_CHANGED ||
+            wParam == DBT_DEVICEARRIVAL ||
+            wParam == DBT_DEVICEREMOVECOMPLETE) {
+          if (auto *self = reinterpret_cast<MainComponent *>(
+                  ::GetWindowLongPtrW(hwnd, GWLP_USERDATA))) {
+            self->usbTopologyDirty.store(true, std::memory_order_release);
+          }
+        }
+      }
+      return ::DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+  };
+
+  static const wchar_t *kClassName = L"FanfareUsbNotifyWnd";
+  HINSTANCE hInst = ::GetModuleHandleW(nullptr);
+
+  WNDCLASSEXW wc{};
+  wc.cbSize = sizeof(WNDCLASSEXW);
+  wc.lpfnWndProc = &UsbNotifyWndProc::proc;
+  wc.hInstance = hInst;
+  wc.lpszClassName = kClassName;
+  if (::RegisterClassExW(&wc) == 0 && ::GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+    LOG_WARN("USB watcher: RegisterClassExW failed (err " +
+             juce::String((int)::GetLastError()) + ")");
+    return;
+  }
+
+  // Hidden top-level popup window (receives both WM_DEVICECHANGE broadcasts
+  // and RegisterDeviceNotificationW interface arrival/removal messages).
+  HWND hwnd = ::CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClassName,
+                                L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr,
+                                hInst, this);
+  if (hwnd == nullptr) {
+    LOG_WARN("USB watcher: CreateWindowExW failed (err " +
+             juce::String((int)::GetLastError()) + ")");
+    return;
+  }
+  ::SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+  usbNotifyHwnd = hwnd;
+
+  DEV_BROADCAST_DEVICEINTERFACE_W dbi{};
+  dbi.dbcc_size = sizeof(dbi);
+  dbi.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+  usbNotifyHandle = ::RegisterDeviceNotificationW(
+      hwnd, &dbi,
+      DEVICE_NOTIFY_WINDOW_HANDLE | DEVICE_NOTIFY_ALL_INTERFACE_CLASSES);
+}
+
+void MainComponent::stopUsbDeviceWatcher() {
+  if (usbNotifyHandle != nullptr) {
+    ::UnregisterDeviceNotification(static_cast<HDEVNOTIFY>(usbNotifyHandle));
+    usbNotifyHandle = nullptr;
+  }
+  if (usbNotifyHwnd != nullptr) {
+    HWND hwnd = static_cast<HWND>(usbNotifyHwnd);
+    ::SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+    ::DestroyWindow(hwnd);
+    usbNotifyHwnd = nullptr;
+  }
+}
+#endif
+
 void MainComponent::syncHotplugMidiInputs(bool isInitialSetup) {
   if (isSyncingMidiInputs)
     return;
   juce::ScopedValueSetter<bool> guard(isSyncingMidiInputs, true);
 
+#ifdef _WIN32
+  lastWinMmMidiInCount = (int)::midiInGetNumDevs();
+#endif
+  usbTopologyDirty.store(false, std::memory_order_release);
+
+  const juce::int64 nowMs = (juce::int64)juce::Time::getMillisecondCounter();
   auto currentInputs = juce::MidiInput::getAvailableDevices();
   juce::StringArray currentIds;
   for (const auto &in : currentInputs)
     currentIds.add(in.identifier);
 
+  // Clear backoff state for any port that left the OS device list so it
+  // reconnects with zero delay if plugged back in later.
+  for (auto it = midiOpenFailCounts.begin(); it != midiOpenFailCounts.end();) {
+    if (!currentIds.contains(it->first)) {
+      midiOpenRetryAfterMs.erase(it->first);
+      it = midiOpenFailCounts.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  lastEnumeratedMidiIds = currentIds;
+
   bool anyDisconnected = false;
+  bool mutatedDeviceManager = false;
   for (const auto &oldId : activeMidiInputIds) {
     if (!currentIds.contains(oldId)) {
+      suppressHotplugChangeBroadcastUntilMs = nowMs + 500;
       deviceManager.setMidiInputDeviceEnabled(oldId, false);
+      mutatedDeviceManager = true;
       anyDisconnected = true;
       LOG_WARN("USB MIDI input disconnected: " + oldId);
     }
@@ -1878,23 +2043,63 @@ void MainComponent::syncHotplugMidiInputs(bool isInitialSetup) {
     }
   }
 
+  juce::StringArray nextActiveIds;
   bool anyNewlyConnected = false;
   for (const auto &in : currentInputs) {
     const bool wasActive = activeMidiInputIds.contains(in.identifier);
     const bool isEnabled = deviceManager.isMidiInputDeviceEnabled(in.identifier);
-    if (!wasActive || !isEnabled) {
-      if (isEnabled && !wasActive) {
-        deviceManager.setMidiInputDeviceEnabled(in.identifier, false);
-      }
-      deviceManager.setMidiInputDeviceEnabled(in.identifier, true);
+    if (wasActive && isEnabled) {
+      nextActiveIds.add(in.identifier);
+      continue;
+    }
+
+    auto retryIt = midiOpenRetryAfterMs.find(in.identifier);
+    if (!isInitialSetup && retryIt != midiOpenRetryAfterMs.end() && nowMs < retryIt->second) {
+      continue;
+    }
+
+    suppressHotplugChangeBroadcastUntilMs = nowMs + 500;
+    if (isEnabled && !wasActive) {
+      deviceManager.setMidiInputDeviceEnabled(in.identifier, false);
+    }
+    deviceManager.setMidiInputDeviceEnabled(in.identifier, true);
+    mutatedDeviceManager = true;
+
+    const bool nowEnabled = deviceManager.isMidiInputDeviceEnabled(in.identifier);
+    if (nowEnabled) {
+      midiOpenFailCounts.erase(in.identifier);
+      midiOpenRetryAfterMs.erase(in.identifier);
+      nextActiveIds.add(in.identifier);
       if (!isInitialSetup) {
         anyNewlyConnected = true;
         LOG_INFO("USB MIDI input connected & enabled: " + in.name);
       }
+    } else {
+      const int fails = ++midiOpenFailCounts[in.identifier];
+      if (fails == 1) {
+        midiOpenRetryAfterMs[in.identifier] = nowMs + 5000;
+        LOG_WARN("MIDI input '" + in.name +
+                 "' is listed by Windows but unavailable (offline or in use) - backing off auto-enable.");
+      } else if (fails == 2) {
+        midiOpenRetryAfterMs[in.identifier] = nowMs + 20000;
+      } else if (fails == 3) {
+        midiOpenRetryAfterMs[in.identifier] = nowMs + 60000;
+      } else {
+        midiOpenRetryAfterMs[in.identifier] = (std::numeric_limits<juce::int64>::max)();
+        if (fails == 4) {
+          LOG_WARN("MIDI input '" + in.name +
+                   "' failed to open 4 times - quarantining until USB hardware change or manual Reset Audio.");
+        }
+      }
     }
   }
 
-  activeMidiInputIds = currentIds;
+  if (mutatedDeviceManager) {
+    suppressHotplugChangeBroadcastUntilMs =
+        (juce::int64)juce::Time::getMillisecondCounter() + 500;
+  }
+
+  activeMidiInputIds = nextActiveIds;
 
   if (anyNewlyConnected && inAudioRecoveryMode) {
     lastAudioRecoveryAttemptMs = (juce::int64)juce::Time::getMillisecondCounter() - 1900;
@@ -1902,7 +2107,41 @@ void MainComponent::syncHotplugMidiInputs(bool isInitialSetup) {
 }
 
 void MainComponent::checkAndRecoverAudioDevice() {
-  syncHotplugMidiInputs(false);
+  const juce::int64 nowCheckMs = (juce::int64)juce::Time::getMillisecondCounter();
+  const bool topologyChanged = usbTopologyDirty.exchange(false, std::memory_order_acq_rel);
+#ifdef _WIN32
+  const int winMmCount = (int)::midiInGetNumDevs();
+  const bool midiCountChanged = (winMmCount != lastWinMmMidiInCount);
+#else
+  const bool midiCountChanged = false;
+#endif
+
+  // If a genuine OS hardware event fired (with a 30s cooldown against noisy hubs),
+  // allow quarantined virtual/Bluetooth ports one fresh probe.
+  if ((topologyChanged || midiCountChanged) &&
+      (nowCheckMs - lastTopologyUnquarantineMs >= 30000)) {
+    lastTopologyUnquarantineMs = nowCheckMs;
+    for (auto &kv : midiOpenRetryAfterMs) {
+      if (kv.second == (std::numeric_limits<juce::int64>::max)()) {
+        kv.second = nowCheckMs;
+      }
+    }
+  }
+
+  bool retryTimerDue = false;
+  for (const auto &kv : midiOpenRetryAfterMs) {
+    if (kv.second < (std::numeric_limits<juce::int64>::max)() && nowCheckMs >= kv.second) {
+      retryTimerDue = true;
+      break;
+    }
+  }
+
+  // Event-driven hotplug: never call MidiInput::getAvailableDevices() during steady-state
+  // playback unless OS USB topology changed, WinMM device count changed, a finite retry
+  // backoff matured, or the audio interface itself is in recovery mode.
+  if (topologyChanged || midiCountChanged || retryTimerDue || inAudioRecoveryMode) {
+    syncHotplugMidiInputs(false);
+  }
 
   if (!hasDesiredAudioSetup || isRecoveringAudioDevice ||
       activeAudioSelector != nullptr || (transitioner != nullptr && transitioner->isBusy()))
@@ -1970,6 +2209,40 @@ void MainComponent::checkAndRecoverAudioDevice() {
   }
 }
 
+namespace {
+void deduplicateMidiInputsXml(juce::XmlElement &xml,
+                              const juce::StringArray &currentlyActiveIds,
+                              const std::map<juce::String, int> &failedCounts) {
+  juce::StringArray seenIds;
+  juce::StringArray seenOfflineNames;
+  for (int i = xml.getNumChildElements() - 1; i >= 0; --i) {
+    auto *child = xml.getChildElement(i);
+    if (child == nullptr || !child->hasTagName("MIDIINPUT"))
+      continue;
+    const juce::String id = child->getStringAttribute("identifier");
+    const juce::String name = child->getStringAttribute("name");
+    auto failIt = failedCounts.find(id);
+    if (failIt != failedCounts.end() && failIt->second > 0) {
+      xml.removeChildElement(child, true);
+      continue;
+    }
+    if (id.isNotEmpty() && seenIds.contains(id)) {
+      xml.removeChildElement(child, true);
+      continue;
+    }
+    const bool isCurrentlyActive = id.isNotEmpty() && currentlyActiveIds.contains(id);
+    if (!isCurrentlyActive && name.isNotEmpty() && seenOfflineNames.contains(name)) {
+      xml.removeChildElement(child, true);
+      continue;
+    }
+    if (id.isNotEmpty())
+      seenIds.add(id);
+    if (name.isNotEmpty())
+      seenOfflineNames.add(name);
+  }
+}
+} // namespace
+
 void MainComponent::saveAudioSettings() {
   if (inAudioRecoveryMode || isRecoveringAudioDevice)
     return;
@@ -1979,6 +2252,7 @@ void MainComponent::saveAudioSettings() {
   captureDesiredAudioSetup();
   auto xml = deviceManager.createStateXml();
   if (xml != nullptr) {
+    deduplicateMidiInputsXml(*xml, activeMidiInputIds, midiOpenFailCounts);
     auto file = FanfareConstants::getAppDirectory().getChildFile("audio_settings.xml");
     file.getParentDirectory().createDirectory();
     xml->writeTo(file);
@@ -1989,8 +2263,9 @@ void MainComponent::loadAudioSettings() {
   auto file = FanfareConstants::getAppDirectory().getChildFile("audio_settings.xml");
   if (file.existsAsFile()) {
     auto xml = juce::XmlDocument::parse(file);
-    if (xml != nullptr)
+    if (xml != nullptr) {
       if (xml->hasTagName("DEVICESETUP")) {
+        deduplicateMidiInputsXml(*xml, {}, midiOpenFailCounts);
         desiredAudioDeviceType = xml->getStringAttribute("deviceType", "ASIO");
         juce::String devName = xml->getStringAttribute("audioDeviceName");
         desiredAudioSetup.outputDeviceName = devName.isNotEmpty()
@@ -2007,9 +2282,10 @@ void MainComponent::loadAudioSettings() {
         desiredAudioSetup.useDefaultOutputChannels = !xml->hasAttribute("audioDeviceOutChans");
         hasDesiredAudioSetup = desiredAudioSetup.outputDeviceName.isNotEmpty();
       }
-      deviceManager.initialise(0, 8, xml.get(), !hasDesiredAudioSetup);
-      stripLegacyDirectSoundDeviceType();
-      captureDesiredAudioSetup();
+    }
+    deviceManager.initialise(0, 8, xml.get(), !hasDesiredAudioSetup);
+    stripLegacyDirectSoundDeviceType();
+    captureDesiredAudioSetup();
   } else {
     deviceManager.initialiseWithDefaultDevices(0, 2);
     stripLegacyDirectSoundDeviceType();
@@ -2229,12 +2505,16 @@ void MainComponent::applyEngineTuningSettings() {
     rtDspMask = procMaskToApply;
 
   // Count distinct physical cores represented in rtDspMask so we assign at most
-  // (physicalCores - 1) parallel DSP helpers (+ Audio Thread = 1 worker per physical core!).
-  int dspPhysicalCores = 0;
+  // (physicalCores - 1) parallel DSP helpers (+ Audio Thread = 1 worker per physical core!),
+  // and pin the ASIO callback thread and each DSP helper onto separate physical cores
+  // so two Priority-15 real-time threads never collide on Hyper-Threads of the same P-core.
+  juce::Array<DWORD_PTR> pCoreSlices;
   for (DWORD_PTR coreMask : topo.physicalCoreMasks) {
-    if ((coreMask & rtDspMask) != 0)
-      ++dspPhysicalCores;
+    const DWORD_PTR slice = coreMask & rtDspMask;
+    if (slice != 0)
+      pCoreSlices.add(slice);
   }
+  int dspPhysicalCores = pCoreSlices.size();
   if (dspPhysicalCores <= 0)
     dspPhysicalCores = juce::jmax(1, countBitsInMask(rtDspMask) / 2);
 
@@ -2243,7 +2523,24 @@ void MainComponent::applyEngineTuningSettings() {
                               ? juce::jlimit(1, 4, dspPhysicalCores - 1)
                               : 0;
 
-  dspThreadAffinityMask.store(rtDspMask, std::memory_order_release);
+  DWORD_PTR audioThreadMask = rtDspMask;
+  DWORD_PTR primaryHelperMask = rtDspMask;
+  if (pCoreSlices.size() >= 2) {
+    // Give the ASIO master callback thread the last (unsheltered, full) physical P-core,
+    // and assign each DSP helper its own separate physical P-core slice.
+    audioThreadMask = pCoreSlices.getLast();
+    const int workerPoolCores = pCoreSlices.size() - 1;
+    primaryHelperMask = pCoreSlices[0];
+    for (int h = 0; h < 4; ++h) {
+      engine.setDspWorkerAffinityMask(h, pCoreSlices[h % workerPoolCores]);
+    }
+  } else {
+    for (int h = 0; h < 4; ++h) {
+      engine.setDspWorkerAffinityMask(h, 0);
+    }
+  }
+
+  dspThreadAffinityMask.store(audioThreadMask, std::memory_order_release);
   engine.setActiveDspHelperLimit(helperLimit);
   engine.setPreventPowerThrottling(engineTuningSettings.preventPowerThrottling);
   engine.setShelteredAffinityMask(rtDspMask);
@@ -2259,6 +2556,7 @@ void MainComponent::applyEngineTuningSettings() {
       bgMask = candidateECores;
   }
   engine.setBackgroundAffinityMask(bgMask);
+  thermalMonitor.setBackgroundAffinityMask((uintptr_t)bgMask);
 
   if (juce::MessageManager::getInstanceWithoutCreating() != nullptr &&
       juce::MessageManager::getInstance()->isThisTheMessageThread()) {
@@ -2269,9 +2567,11 @@ void MainComponent::applyEngineTuningSettings() {
 
   LOG_INFO("Hybrid Affinity Applied -> Process: 0x" +
            juce::String::toHexString((juce::int64)procMaskToApply) +
-           " | Real-Time Audio/DSP: 0x" +
-           juce::String::toHexString((juce::int64)rtDspMask) +
-           " (" + juce::String(dspPhysicalCores) + " phys cores, " +
+           " | Audio Thread: 0x" +
+           juce::String::toHexString((juce::int64)audioThreadMask) +
+           " | DSP Helper[0]: 0x" +
+           juce::String::toHexString((juce::int64)primaryHelperMask) +
+           " (" + juce::String(dspPhysicalCores) + " phys P-cores, " +
            juce::String(helperLimit) + " helper + audio thread)" +
            " | UI/Background: 0x" +
            juce::String::toHexString((juce::int64)bgMask));
@@ -2335,6 +2635,8 @@ void MainComponent::resetAudioDevice() {
     deviceManager.setCurrentAudioDeviceType(desiredAudioDeviceType, true);
   }
   deviceManager.setAudioDeviceSetup(setup, true);
+  midiOpenFailCounts.clear();
+  midiOpenRetryAfterMs.clear();
   syncHotplugMidiInputs(false);
   if (auto *newDev = deviceManager.getCurrentAudioDevice()) {
     if (newDev->isOpen() && newDev->isPlaying()) {
@@ -2605,7 +2907,13 @@ void MainComponent::showSetupBuilderOverlay() {
 
 void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source) {
   if (source == &deviceManager) {
-    syncHotplugMidiInputs(false);
+    const juce::int64 nowMs = (juce::int64)juce::Time::getMillisecondCounter();
+    if (isSyncingMidiInputs || isRecoveringAudioDevice)
+      return;
+    if (activeAudioSelector == nullptr && nowMs < suppressHotplugChangeBroadcastUntilMs)
+      return;
+    if (activeAudioSelector == nullptr)
+      syncHotplugMidiInputs(false);
     saveAudioSettings();
   } else if (source == &ThemeManager::getInstance()) {
     // Theme changed: re-apply LookAndFeel colours, propagate lookAndFeelChanged()
@@ -2714,6 +3022,7 @@ void MainComponent::refreshThemeDependentStyles() {
   latencyLabel.setColour(juce::Label::textColourId, t.textDim);
   xrunsLabel.setColour(juce::Label::textColourId,
                        (audioUnderrunCount.load() + engineStallCount.load() > 0) ? t.warn : t.ok);
+  thermalLabel.setColour(juce::Label::textColourId, juce::Colours::white);
   clockLabel.setColour(juce::Label::textColourId, t.accent);
   freshBuildToggle.setColour(juce::ToggleButton::textColourId, t.textDim);
   autoCollapseToggle.setColour(juce::ToggleButton::textColourId, t.textDim);
@@ -2763,11 +3072,21 @@ void MainComponent::paint(juce::Graphics &g) {
   }
   if (!telemetryWellBounds.isEmpty()) {
     Fanfare::ModalFrame::paintRecessedWell(g, telemetryWellBounds.toFloat(), 2.5f);
+    if (thermalLabel.isVisible() && !thermalLabel.getBounds().isEmpty()) {
+      auto tb = thermalLabel.getBounds().toFloat().reduced(1.5f, 2.0f);
+      g.setColour(t.panic);
+      g.fillRoundedRectangle(tb, 2.0f);
+      g.setColour(juce::Colours::white.withAlpha(0.28f));
+      g.drawRoundedRectangle(tb.reduced(0.5f), 2.0f, 1.0f);
+    }
     g.setColour(t.hairline);
     const int topY = telemetryWellBounds.getY() + 4;
     const int botY = telemetryWellBounds.getBottom() - 4;
     for (auto* lbl : {&cpuLabel, &ramLabel, &latencyLabel, &xrunsLabel}) {
       g.drawVerticalLine(lbl->getRight(), (float)topY, (float)botY);
+    }
+    if (thermalLabel.isVisible() && !thermalLabel.getBounds().isEmpty()) {
+      g.drawVerticalLine(thermalLabel.getRight(), (float)topY, (float)botY);
     }
   }
 
@@ -2838,6 +3157,8 @@ void MainComponent::resized() {
   // Right side: Setlist Navigation reserved first so center toggles never clip them
   nextSetlistBtn.setBounds(sh.removeFromRight(42).reduced(2, 5));
   prevSetlistBtn.setBounds(sh.removeFromRight(42).reduced(2, 5));
+  if (updateBadgeBtn.isVisible())
+    updateBadgeBtn.setBounds(sh.removeFromRight(104).reduced(2, 5));
   preloadStatusLabel.setBounds(sh.removeFromRight(juce::jlimit(90, 210, sh.getWidth() / 4)).reduced(4, 2));
 
   int songTitleW = juce::jlimit(150, 310, sh.getWidth() - 390);
@@ -2871,21 +3192,37 @@ void MainComponent::resized() {
   mainHelpBtn.setBounds(cb.removeFromRight(64).reduced(2, 4));
   quickStartBtn.setBounds(cb.removeFromRight(28).reduced(2, 4));
 
-  // Center Recessed Telemetry LCD Well — strictly bounded inside remaining cb
+  // Center Recessed Telemetry LCD Well - strictly bounded inside remaining cb
   int availCenter = juce::jmax(120, cb.getWidth() - 8);
-  int wellW = juce::jmin(availCenter, 468);
+  const bool showThermal = thermalLabel.isVisible();
+  int wellW = juce::jmin(availCenter, showThermal ? 556 : 468);
   telemetryWellBounds = cb.withSizeKeepingCentre(wellW, controlBar.getHeight() - 8);
   auto tele = telemetryWellBounds.reduced(4, 0);
   const int tw = tele.getWidth();
-  const int cpuW = (tw * 18) / 100;
-  const int ramW = (tw * 28) / 100;
-  const int latW = (tw * 18) / 100;
-  const int xrW  = (tw * 17) / 100;
-  cpuLabel.setBounds(tele.removeFromLeft(cpuW));
-  ramLabel.setBounds(tele.removeFromLeft(ramW));
-  latencyLabel.setBounds(tele.removeFromLeft(latW));
-  xrunsLabel.setBounds(tele.removeFromLeft(xrW));
-  clockLabel.setBounds(tele);
+  if (showThermal) {
+    const int cpuW   = (tw * 15) / 100;
+    const int ramW   = (tw * 24) / 100;
+    const int latW   = (tw * 15) / 100;
+    const int xrW    = (tw * 14) / 100;
+    const int thermW = (tw * 16) / 100;
+    cpuLabel.setBounds(tele.removeFromLeft(cpuW));
+    ramLabel.setBounds(tele.removeFromLeft(ramW));
+    latencyLabel.setBounds(tele.removeFromLeft(latW));
+    xrunsLabel.setBounds(tele.removeFromLeft(xrW));
+    thermalLabel.setBounds(tele.removeFromLeft(thermW));
+    clockLabel.setBounds(tele);
+  } else {
+    const int cpuW = (tw * 18) / 100;
+    const int ramW = (tw * 28) / 100;
+    const int latW = (tw * 18) / 100;
+    const int xrW  = (tw * 17) / 100;
+    cpuLabel.setBounds(tele.removeFromLeft(cpuW));
+    ramLabel.setBounds(tele.removeFromLeft(ramW));
+    latencyLabel.setBounds(tele.removeFromLeft(latW));
+    xrunsLabel.setBounds(tele.removeFromLeft(xrW));
+    thermalLabel.setBounds({});
+    clockLabel.setBounds(tele);
+  }
 
   // Header Row 3: Stage Queue Slots
   auto presetRow = r.removeFromTop(38);
@@ -3347,6 +3684,7 @@ void MainComponent::loadButtonMappings() {
 
 void MainComponent::timerCallback() {
   double cpu = deviceManager.getCpuUsage() * 100.0;
+  thermalMonitor.setAudioCpuLoadPercent(cpu);
   cpuLabel.setText("CPU: " + juce::String(cpu, 1) + "%",
                    juce::dontSendNotification);
 
@@ -3367,6 +3705,23 @@ void MainComponent::timerCallback() {
     auto memStats = FanfareLog::getMemoryStats();
     juce::String appRamStr = ResourceInspectorModal::formatBytes(memStats.workingSetBytes);
     ramLabel.setText("RAM: " + appRamStr + " (" + juce::String(memStats.systemRamLoadPercent) + "%)", juce::dontSendNotification);
+
+    const auto thermSnap = thermalMonitor.getSnapshot();
+    if (thermSnap.tempCelsius > 0) {
+      cpuLabel.setTooltip("CPU Temp: " + juce::String(thermSnap.tempCelsius) +
+                          " C (Peak " + juce::String(thermSnap.peakTempCelsius) +
+                          " C) | Click to view Per-VST Memory & Resource Inspector");
+    }
+    const bool wasThermalVis = thermalLabel.isVisible();
+    if (thermSnap.warningActive) {
+      thermalLabel.setText(thermSnap.badgeText, juce::dontSendNotification);
+      thermalLabel.setTooltip("CPU THROTTLED: " + thermSnap.reasonText +
+                              " (Click for details)");
+    }
+    if (wasThermalVis != thermSnap.warningActive) {
+      thermalLabel.setVisible(thermSnap.warningActive);
+      resized();
+    }
   }
 
   // Round-trip latency readout (input + output buffer latency)
@@ -3534,6 +3889,7 @@ void MainComponent::openMasterPluginEditor(bool isFoh, int chainIndex) {
       w->onWindowClosed = [this, w] {
         if (activePluginWindows.contains(w)) {
           activePluginWindows.removeObject(w, false);
+          w->destroyEditorNow();
           juce::MessageManager::callAsync([w]() { delete w; });
         }
       };
@@ -3762,6 +4118,44 @@ void MainComponent::mouseDown(const juce::MouseEvent &e) {
     logFile.startAsProcess();
     return;
   }
+  if (e.originalComponent == &thermalLabel) {
+    const auto snap = thermalMonitor.getSnapshot();
+    thermalMonitor.acknowledgeLatch();
+    const bool stillActive = thermalMonitor.isWarningActive();
+    if (!stillActive && thermalLabel.isVisible()) {
+      thermalLabel.setVisible(false);
+      resized();
+    }
+
+    juce::String msg;
+    msg << "Status: "
+        << (snap.activelyThrottled ? "ACTIVELY THROTTLED RIGHT NOW"
+                                   : "Recent throttle event (clearing latch)")
+        << "\n";
+    msg << "Reason: " << snap.reasonText << "\n\n";
+    if (snap.tempCelsius > 0) {
+      msg << "CPU Temperature: " << snap.tempCelsius << " C  (Session Peak: "
+          << snap.peakTempCelsius << " C)\n";
+    }
+    if (snap.effectiveMhz > 0) {
+      msg << "Effective Clock: ~" << snap.effectiveMhz << " MHz\n";
+    }
+    if (snap.osTurboCapMhz > 0) {
+      msg << "OS Power Plan Turbo Cap: " << snap.osTurboCapMhz << " MHz\n";
+    } else if (snap.nominalMaxMhz > 0 && snap.minMhzLimit > 0) {
+      msg << "Firmware Clock Ceiling: " << snap.minMhzLimit << " / "
+          << snap.nominalMaxMhz << " MHz base\n";
+    }
+    msg << "\nStage Cooling Checklist:\n"
+        << "- Keep bottom intake vents clear (never sit flat on padded/nylon case lids or cloth).\n"
+        << "- Prop the back edge of the laptop up 0.5 - 1 inch for under-chassis airflow.\n"
+        << "- Plug AC power directly into the laptop (avoid unpowered/low-wattage USB-C hubs).";
+
+    juce::AlertWindow::showMessageBoxAsync(
+        juce::MessageBoxIconType::WarningIcon,
+        "CPU Thermal / Firmware Throttle Monitor", msg);
+    return;
+  }
 
 
 }
@@ -3795,10 +4189,20 @@ void MainComponent::closePluginWindowForInstance(juce::AudioPluginInstance* inst
   for (int i = activePluginWindows.size() - 1; i >= 0; --i) {
     if (auto *pw = dynamic_cast<PluginWindow*>(activePluginWindows[i])) {
       if (pw->pluginInstance == instance) {
+        pw->destroyEditorNow();
         auto* w = activePluginWindows.removeAndReturn(i);
         juce::MessageManager::callAsync([w]() { delete w; });
       }
     }
+  }
+}
+
+void MainComponent::closePluginWindowsForSlot(RackSlot* slot) {
+  if (!slot)
+    return;
+  for (int c = 0; c < 3; ++c) {
+    if (auto* pi = slot->getPluginInstance(c))
+      closePluginWindowForInstance(pi);
   }
 }
 
@@ -3808,6 +4212,14 @@ void MainComponent::closeOrphanedPluginWindows() {
     if (auto *slot = engine.getSlot(slotIdx)) {
       for (int chainIdx = 0; chainIdx < 3; ++chainIdx) {
         if (auto *pi = slot->getPluginInstance(chainIdx))
+          activeInstances.push_back(pi);
+      }
+    }
+  }
+  for (int r = 0; r < engine.getNumAuxReturns(); ++r) {
+    if (auto *aux = engine.getAuxReturn(r)) {
+      for (int chainIdx = 0; chainIdx < 3; ++chainIdx) {
+        if (auto *pi = aux->getPluginInstance(chainIdx))
           activeInstances.push_back(pi);
       }
     }
@@ -3823,6 +4235,7 @@ void MainComponent::closeOrphanedPluginWindows() {
     if (auto *pw = dynamic_cast<PluginWindow*>(activePluginWindows[i])) {
       bool found = (std::find(activeInstances.begin(), activeInstances.end(), pw->pluginInstance) != activeInstances.end());
       if (!found) {
+        pw->destroyEditorNow();
         auto* w = activePluginWindows.removeAndReturn(i);
         juce::MessageManager::callAsync([w]() { delete w; });
       }
@@ -3833,6 +4246,8 @@ void MainComponent::closeOrphanedPluginWindows() {
 void MainComponent::closeAllPluginWindows() {
   auto* tempArray = new juce::OwnedArray<juce::DocumentWindow>();
   for (int i = activePluginWindows.size() - 1; i >= 0; --i) {
+    if (auto *pw = dynamic_cast<PluginWindow*>(activePluginWindows[i]))
+      pw->destroyEditorNow();
     tempArray->add(activePluginWindows.removeAndReturn(i));
   }
   juce::MessageManager::callAsync([tempArray]() {

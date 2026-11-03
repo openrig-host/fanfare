@@ -1086,9 +1086,11 @@ public:
           fohLevel.store(ccVal / 127.0f);
         }
 
-        // IEM Level Control
+        // IEM Trim / Level Control (0 = mute, 64 ~= unity 1.0x FOH, 127 = 2.0x / +6 dB)
         if (iemCC.load() >= 0 && ccNum == iemCC.load()) {
-          iemLevel.store(ccVal / 127.0f);
+          const float norm = ccVal / 127.0f;
+          iemLevel.store(norm);
+          iemOffset.store(norm * 2.0f);
         }
 
         // Mute toggle: press (value > 64, same convention as setup

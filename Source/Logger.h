@@ -62,12 +62,22 @@ inline juce::File getLogFile() {
 inline void setMinLevel(Level level) { currentMinLevel = level; }
 
 // --- Thread-safe queue: log() pushes, flushLog() drains + writes ---
+// IMPORTANT: logQueueLock ONLY guards the in-memory StringArray swap (< 1 us)
+// so a real-time thread calling logToFile() can NEVER block behind disk I/O or
+// 10 MB log rotation. All actual file I/O is serialized under logFileWriteLock.
 inline juce::CriticalSection logQueueLock;
+inline juce::CriticalSection logFileWriteLock;
 inline juce::StringArray logQueue;
 
 // Helper to write directly to disk while flushing any queued messages first to preserve order
 inline void writeDirectlyToFile(const juce::String &fullMsg) {
-  const juce::ScopedLock sl(logQueueLock);
+  juce::StringArray drained;
+  {
+    const juce::ScopedLock ql(logQueueLock);
+    drained.swapWith(logQueue);
+  }
+
+  const juce::ScopedLock fl(logFileWriteLock);
   auto file = getLogFile();
 
   // Simple rotation: if > 10 MB, archive to .bak and start fresh
@@ -77,16 +87,11 @@ inline void writeDirectlyToFile(const juce::String &fullMsg) {
     file.moveFileTo(bak);
   }
 
-  // Flush any queued logs first to maintain chronological order
-  if (!logQueue.isEmpty()) {
-    juce::String queuedText;
-    for (const auto &s : logQueue)
-      queuedText << s << "\n";
-    file.appendText(queuedText);
-    logQueue.clear();
-  }
-
-  file.appendText(fullMsg + "\n");
+  juce::String out;
+  for (const auto &s : drained)
+    out << s << "\n";
+  out << fullMsg << "\n";
+  file.appendText(out);
 }
 
 inline void log(Level level, const juce::String &msg) {
@@ -143,6 +148,7 @@ inline void flushLog() {
     toWrite.swapWith(logQueue);
   }
 
+  const juce::ScopedLock fl(logFileWriteLock);
   auto file = getLogFile();
 
   // Simple rotation: if > 10 MB, archive to .bak and start fresh

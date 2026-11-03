@@ -91,6 +91,7 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
             slot.swapA = cv.getProperty("swapA", -1);
             slot.swapB = cv.getProperty("swapB", -1);
             slot.midiChannelOverride = cv.getProperty("midiChannel", -1);
+            slot.outputTarget = cv.getProperty("outputTarget", -1);
 
             juce::String ccList = cv.getProperty("allowedCCs", "64").toString();
             juce::StringArray toks;
@@ -139,9 +140,16 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
                 slot.strip.gateEnabled = so->getProperty("gateEnabled");
                 slot.strip.gateThreshold = (float)so->getProperty("gateThreshold");
                 slot.strip.eqEnabled = so->getProperty("eqEnabled");
+                slot.strip.eqCurveMode = so->hasProperty("eqCurveMode") ? (bool)so->getProperty("eqCurveMode") : false;
                 slot.strip.hpfFreq = (float)so->getProperty("hpfFreq");
                 slot.strip.lowShelfGain = (float)so->getProperty("eqLow");
                 slot.strip.highShelfGain = (float)so->getProperty("eqHigh");
+                slot.strip.eqVolGain = so->hasProperty("eqVolGain") ? (float)so->getProperty("eqVolGain") : 0.0f;
+                slot.strip.eqMasterGain = so->hasProperty("eqMasterGain") ? (float)so->getProperty("eqMasterGain") : 0.0f;
+                if (auto* bandsArr = so->getProperty("eqBands").getArray()) {
+                    for (int b = 0; b < 10 && b < bandsArr->size(); ++b)
+                        slot.strip.eqBands[b] = (float)bandsArr->getReference(b);
+                }
                 slot.strip.compEnabled = so->getProperty("compEnabled");
                 slot.strip.compAmount = (float)so->getProperty("compAmount");
                 slot.strip.chorusEnabled = so->hasProperty("chorusEnabled") ? (bool)so->getProperty("chorusEnabled") : false;
@@ -325,14 +333,24 @@ juce::var RigSerializer::songToVar(const Song& song) {
         st->setProperty("swapA", s.swapA);
         st->setProperty("swapB", s.swapB);
         st->setProperty("midiChannel", s.midiChannelOverride);
+        st->setProperty("outputTarget", s.outputTarget);
 
         auto* stripObj = new juce::DynamicObject();
         stripObj->setProperty("gateEnabled", (bool)s.strip.gateEnabled);
         stripObj->setProperty("gateThreshold", (double)s.strip.gateThreshold);
         stripObj->setProperty("eqEnabled", (bool)s.strip.eqEnabled);
+        stripObj->setProperty("eqCurveMode", (bool)s.strip.eqCurveMode);
         stripObj->setProperty("hpfFreq", (double)s.strip.hpfFreq);
         stripObj->setProperty("eqLow", (double)s.strip.lowShelfGain);
         stripObj->setProperty("eqHigh", (double)s.strip.highShelfGain);
+        stripObj->setProperty("eqVolGain", (double)s.strip.eqVolGain);
+        stripObj->setProperty("eqMasterGain", (double)s.strip.eqMasterGain);
+        {
+            juce::Array<juce::var> bandsArr;
+            for (int b = 0; b < 10; ++b)
+                bandsArr.add((double)s.strip.eqBands[b]);
+            stripObj->setProperty("eqBands", bandsArr);
+        }
         stripObj->setProperty("compEnabled", (bool)s.strip.compEnabled);
         stripObj->setProperty("compAmount", (double)s.strip.compAmount);
         stripObj->setProperty("chorusEnabled", (bool)s.strip.chorusEnabled);
@@ -525,14 +543,24 @@ juce::String RigSerializer::serializeStrip(const SongSlot& slot) {
     st->setProperty("swapA", slot.swapA);
     st->setProperty("swapB", slot.swapB);
     st->setProperty("midiChannel", slot.midiChannelOverride);
+    st->setProperty("outputTarget", slot.outputTarget);
 
     auto* stripObj = new juce::DynamicObject();
     stripObj->setProperty("gateEnabled", (bool)slot.strip.gateEnabled);
     stripObj->setProperty("gateThreshold", (double)slot.strip.gateThreshold);
     stripObj->setProperty("eqEnabled", (bool)slot.strip.eqEnabled);
+    stripObj->setProperty("eqCurveMode", (bool)slot.strip.eqCurveMode);
     stripObj->setProperty("hpfFreq", (double)slot.strip.hpfFreq);
     stripObj->setProperty("eqLow", (double)slot.strip.lowShelfGain);
     stripObj->setProperty("eqHigh", (double)slot.strip.highShelfGain);
+    stripObj->setProperty("eqVolGain", (double)slot.strip.eqVolGain);
+    stripObj->setProperty("eqMasterGain", (double)slot.strip.eqMasterGain);
+    {
+        juce::Array<juce::var> bandsArr;
+        for (int b = 0; b < 10; ++b)
+            bandsArr.add((double)slot.strip.eqBands[b]);
+        stripObj->setProperty("eqBands", bandsArr);
+    }
     stripObj->setProperty("compEnabled", (bool)slot.strip.compEnabled);
     stripObj->setProperty("compAmount", (double)slot.strip.compAmount);
     stripObj->setProperty("chorusEnabled", (bool)slot.strip.chorusEnabled);
@@ -679,6 +707,7 @@ bool RigSerializer::readStripFromFile(const juce::File& file, SongSlot& outSlot)
     outSlot.swapA = cv.getProperty("swapA", -1);
     outSlot.swapB = cv.getProperty("swapB", -1);
     outSlot.midiChannelOverride = cv.getProperty("midiChannel", -1);
+    outSlot.outputTarget = cv.getProperty("outputTarget", -1);
 
     juce::String ccListStr = cv.getProperty("allowedCCs", "64").toString();
     juce::StringArray toks;
@@ -692,8 +721,15 @@ bool RigSerializer::readStripFromFile(const juce::File& file, SongSlot& outSlot)
         outSlot.strip.gateThreshold = (float)so->getProperty("gateThreshold");
         outSlot.strip.eqEnabled = so->getProperty("eqEnabled");
         outSlot.strip.hpfFreq = (float)so->getProperty("hpfFreq");
+        outSlot.strip.eqCurveMode = so->hasProperty("eqCurveMode") ? (bool)so->getProperty("eqCurveMode") : false;
         outSlot.strip.lowShelfGain = (float)so->getProperty("eqLow");
         outSlot.strip.highShelfGain = (float)so->getProperty("eqHigh");
+        outSlot.strip.eqVolGain = so->hasProperty("eqVolGain") ? (float)so->getProperty("eqVolGain") : 0.0f;
+        outSlot.strip.eqMasterGain = so->hasProperty("eqMasterGain") ? (float)so->getProperty("eqMasterGain") : 0.0f;
+        if (auto* bandsArr = so->getProperty("eqBands").getArray()) {
+            for (int b = 0; b < 10 && b < bandsArr->size(); ++b)
+                outSlot.strip.eqBands[b] = (float)bandsArr->getReference(b);
+        }
         outSlot.strip.compEnabled = so->getProperty("compEnabled");
         outSlot.strip.compAmount = (float)so->getProperty("compAmount");
         outSlot.strip.chorusEnabled = so->hasProperty("chorusEnabled") ? (bool)so->getProperty("chorusEnabled") : false;

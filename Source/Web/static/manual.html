@@ -6,10 +6,10 @@
 -->
 <html>
 	<head>
-		<title>Fanfare v1.4.0: Stage Survival Manual</title>
+		<title>Fanfare v1.41: Stage Survival Manual</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-		<meta name="description" content="Fanfare v1.4.0 User's Manual & Stage Survival Guide. Strips, Songs, Scenes, Setlists, Stereo/Ping-Pong/Tape Delay, Per-Strip IEM Trim, Front Panel Dark & Bright skins, and bass-player-proof USB hotplugging." />
+		<meta name="description" content="Fanfare v1.41 User's Manual & Stage Survival Guide. Strips, Songs, Scenes, Setlists, Curve-Link EQ, Built-In Synthesized IRs, Stereo/Ping-Pong/Tape Delay, Dual-Deck Break DJ with Broadcast Auto-Leveler, Thermal Throttle Monitor, Milestone Update Checker, and bass-player-proof USB hotplugging." />
 		<link rel="stylesheet" href="assets-readonly/css/main.css" />
 		<style>
 			/* Readability & navigation refinements for 20-chapter manual */
@@ -133,9 +133,9 @@
 			<section id="header">
 				<header>
 					<span class="image avatar"><img src="Fanfare_Icon.png" alt="Fanfare" /></span>
-					<h1 id="logo"><a href="#workflow">Fanfare v1.4.0</a></h1>
+					<h1 id="logo"><a href="#workflow">Fanfare v1.41</a></h1>
 					<p>The Stage Survival Manual</p>
-					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. Delay, IEM, B3, USB)..." />
+					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. EQ, IR, Leveler, Thermal, USB)..." />
 				</header>
 				<nav id="nav">
 					<ul>
@@ -337,11 +337,19 @@
 												</tr>
 												<tr>
 													<td><strong><code>CPU</code> / <code>RAM</code> / <code>LAT</code> / <code>XRUNS</code></strong></td>
-													<td>Live telemetry. <code>CPU</code> is the audio-callback budget: the one number that predicts dropouts. Click <code>CPU</code> or <code>RAM</code> to open the Per-Strip Resource Inspector. <code>LAT</code> shows round-trip audio latency (or <code>RECONNECT...</code> if your USB cable was yanked). <code>XRUNS</code> reads <code>gap/stall</code>: a <em>gap</em> means Windows never delivered the audio callback in time (a machine problem: drivers, power management, USB delivery), while a <em>stall</em> means Fanfare's own engine workers ran late. Click <code>XRUNS</code> to reset the counter and open the timestamped glitch log.</td>
+													<td>Live telemetry. <code>CPU</code> is the audio-callback budget: the one number that predicts dropouts. Hover <code>CPU</code> to see live and session-peak CPU package temperature (in &deg;C), or click <code>CPU</code> / <code>RAM</code> to open the Per-Strip Resource Inspector. <code>LAT</code> shows round-trip audio latency (or <code>RECONNECT...</code> if your USB cable was yanked). <code>XRUNS</code> reads <code>gap/stall</code>: a <em>gap</em> means Windows never delivered the audio callback in time (a machine problem: drivers, power management, USB delivery), while a <em>stall</em> means Fanfare's own engine workers ran late. Click <code>XRUNS</code> to reset the counter and open the timestamped glitch log (which also stamps thermal/clock state alongside any underrun).</td>
+												</tr>
+												<tr>
+													<td><strong>Thermal &amp; Throttle Guard Badge (v1.41)</strong></td>
+													<td>Stays completely hidden when your laptop is healthy. If hot stage lights, blocked bottom vents, or a low-wattage USB-C power adapter cause Windows or motherboard firmware to clamp CPU clock speeds below base frequency (or trip PROCHOT thermal throttling), an amber/red warning badge appears beside <code>CPU</code>. Click it to view live effective MHz, package temperature, the exact throttle reason, and a quick Stage Cooling Checklist.</td>
+												</tr>
+												<tr>
+													<td><strong>Milestone Version Check (<code>UPDATE vX.Y</code>, v1.41)</strong></td>
+													<td>Runs once at startup on a lowest-priority background thread (after a 2-second settle so ASIO init has zero competition, with a strict 3-second timeout that fails silently when offline or on stage hotspot Wi-Fi). It never shows popups and intentionally ignores minor point patches (like <code>1.41</code>), displaying a quiet clickable <code>UPDATE v1.5</code> / <code>v2.0</code> button in the top bar only when a new major or minor milestone release is published on GitHub.</td>
 												</tr>
 												<tr>
 													<td><strong><code>[?]</code> / <code>NOTEPAD</code> / <code>REMOTE</code> / <code>HAAALP!</code></strong></td>
-													<td>Opens the interactive Quick-Start guide, the Gig Notepad (<code>Ctrl+N</code>), the Tablet Web HUD &amp; Wi-Fi Hotspot modal, or this manual right to the section you need. Fanfare also clamps its startup window inside your monitor's visible work area on high-DPI displays so the title bar never spawns off-screen.</td>
+													<td>Opens the interactive Quick-Start guide, the Gig Notepad (<code>Ctrl+N</code>), the Tablet Web HUD &amp; Wi-Fi Hotspot modal, or this manual right to the section you need. Floating inspector cards (<code>DYN</code>, <code>CC</code>, <code>NR</code>, <code>MIDI</code>, <code>SMP</code>, <code>MP3</code>) are framed with high-contrast 4px solid black borders so open panels never get lost against the mixer rack, and Fanfare clamps its startup window inside your monitor's visible work area on high-DPI displays.</td>
 												</tr>
 												<tr>
 													<td><strong><code>PANIC</code> (or <code>P</code> key)</strong></td>
@@ -408,23 +416,23 @@
 						<!-- 5. CHANNEL STRIP DSP -->
 							<section id="channel-strip-dsp">
 								<div class="container">
-									<h3>7. Strip DSP (Gate, 10-Band EQ, Compressor, Delay, Space &amp; IR)</h3>
+									<h3>7. Strip DSP (Gate, Curve-Link EQ, Compressor, Delay, Space &amp; Built-In IRs)</h3>
 									<span class="image fit"><img src="channel_strip_dsp.png" alt="Channel strip DSP panel" /></span>
-									<p>Click the <strong><code>DYN</code></strong> button at the bottom of any strip (or right-click a strip header and choose <strong>Open Channel Strip (EQ/Comp)...</strong>) to open the built-in zero-latency DSP console for that strip. Everything here is lock-free, pre-allocated, runs after your 3 VST slots, and uses virtually zero CPU:</p>
+									<p>Click the <strong><code>DYN</code></strong> button at the bottom of any strip (or right-click a strip header and choose <strong>Open Channel Strip (EQ/Comp)...</strong>) to open the built-in zero-latency DSP console for that strip. Everything here is lock-free, pre-allocated, denormal-protected, runs after your 3 VST slots, and persists completely across Songs (<code>.json</code>), Scenes, and Strip presets (<code>.orstrip</code>):</p>
 									<ul>
 										<li><strong>Input Channel Mode Button (Top Right):</strong> Cycles between <code>STEREO</code>, <code>MONO (L+R)</code>, <code>MONO (LEFT)</code>, and <code>MONO (RIGHT)</code>.</li>
 										<li><strong>Noise Gate:</strong> Silences noisy analog inputs or vintage amp-sim hiss when you aren't playing.</li>
-										<li><strong>10-Band Graphic EQ:</strong> Classic octave bands from <code>31.25 Hz</code> to <code>16 kHz</code> (&plusmn;12 dB per band), plus an input <code>VOL</code> trim, output <code>GAIN</code> trim, and a one-click <code>FLAT</code> reset button.</li>
-										<li><strong>Compressor + Gain Reduction Meter:</strong> Includes 5 stage-tuned presets: <code>Manual</code>, <code>MP3 / Track Leveler</code>, <code>Vocal / Lead Focus</code>, <code>Punchy Drums</code>, and <code>Brickwall Limiter</code>.</li>
+										<li><strong>10-Band Graphic EQ (<code>INDEPENDENT</code> &amp; <code>CURVE LINK</code> Modes, v1.41):</strong> Classic octave bands from <code>31.25 Hz</code> to <code>16 kHz</code> (&plusmn;12 dB per band), input <code>VOL</code> trim, output <code>GAIN</code> trim, and a one-click <code>FLAT</code> reset button (double-click any slider to snap back to <code>0.0 dB</code>). Click the mode toggle beside <code>FLAT</code> to switch between <strong><code>INDEPENDENT</code></strong> (each band moves strictly on its own for surgical room-ring notches) and <strong><code>CURVE LINK</code></strong> (dragging any slider proportionally pulls adjacent bands into a smooth, musical analog-style contour; hold <code>Alt</code> while dragging to move a single band independently without leaving Curve Link).</li>
+										<li><strong>Compressor + Gain Reduction Meter:</strong> Includes 5 stage-tuned presets: <code>Manual</code>, <code>MP3 / Track Leveler</code>, <code>Vocal / Lead Focus</code>, <code>Punchy Drums</code>, and <code>Brickwall Limiter</code>, with live downward Gain Reduction metering (up to 24 dB) and Makeup Gain.</li>
 										<li><strong>Space / Mod (Reverb &amp; Chorus):</strong> Built-in stereo room reverb and chorus for strips that just need a touch of air or width without loading another VST.</li>
-										<li><strong>Delay / Echo (v1.4):</strong> Full stereo tempo/time delay module with four distinct stage voices: <strong><code>STEREO</code></strong> (true L/R repeats), <strong><code>PING-PONG</code></strong> (wide alternating left-right bounce), <strong><code>MONO</code></strong> (centered slapback/echo), and <strong><code>TAPE WARM</code></strong> (warm analog-filtered repeats with gentle tape saturation). Includes a live <strong><code>TAP TEMPO</code></strong> button right in the header, smooth click-free <code>TIME</code> slewing (<code>10 ms</code> to <code>2.00 s</code>), runaway-safe <code>FEEDBACK</code> (<code>0%</code> to <code>92%</code> with low-cut and soft limiting), <code>TONE (LPF)</code> high-cut damping (<code>600 Hz</code> to <code>16 kHz</code>), and a unity-dry <code>MIX</code> law so flicking on an echo mid-solo never drops your dry lead volume.</li>
+										<li><strong>Delay / Echo (v1.4):</strong> Full stereo tempo/time delay module with four distinct stage voices: <strong><code>STEREO</code></strong> (true L/R repeats), <strong><code>PING-PONG</code></strong> (wide alternating left-right bounce), <strong><code>MONO</code></strong> (centered slapback/echo), and <strong><code>TAPE WARM</code></strong> (warm analog-filtered repeats with gentle tape saturation). Includes a live <strong><code>TAP TEMPO</code></strong> button, smooth click-free <code>TIME</code> slewing (<code>10 ms</code> to <code>2.00 s</code>), runaway-safe <code>FEEDBACK</code> (<code>0%</code> to <code>92%</code> with low-cut and soft limiting), <code>TONE (LPF)</code> high-cut damping (<code>600 Hz</code> to <code>16 kHz</code>), and a unity-dry <code>MIX</code> law so flicking on an echo mid-solo never drops your dry lead volume.</li>
 										<li><strong>IEM &amp; Aux Sends:</strong> Per-strip <code>IEM TRIM</code> (<code>OFF</code> to <code>+6.0 dB</code> relative to FOH) alongside <code>AUX 1</code> and <code>AUX 2</code> bus send knobs.</li>
-										<li><strong>Impulse Response (Cab / Room) Loader:</strong> Load any <code>.wav</code> guitar cab, rotary horn, or acoustic body impulse response with dry/wet mix control.</li>
+										<li><strong>Impulse Response (Cab / Room) + 6 Built-In Acoustic Spaces (v1.41):</strong> Pick from <strong>6 built-in physically synthesized stereo impulse responses</strong> generated natively in-code at your exact audio sample rate with zero external files required: <code>Studio Wood Room (0.55s)</code>, <code>Warm Studio Chamber (1.05s)</code>, <code>Symphony Concert Hall (2.1s)</code>, <code>Stone Sanctuary (3.0s)</code>, <code>Vintage Studio Plate (1.5s)</code>, and <code>2x12 Warm Tube Cab</code>. Or click <code>LOAD WAV</code> to load any custom <code>.wav</code> guitar cab, rotary horn, or acoustic body impulse from disk, with smooth dry/wet <code>MIX</code> control.</li>
 									</ul>
 
 									<blockquote>
 										<span class="use-case-label">Real-World Stage Use Case</span><br />
-										<strong>Fixing the "Left-Ear Only" DI, Piezo Quack &amp; Instant 80s Lead Echo:</strong> Plug an acoustic instrument or mono synth into Input 1 of a stereo interface and it only comes out of the left PA speaker; click the top-right mode button to switch from <code>STEREO</code> to <code>MONO (LEFT)</code> for an instant centered image. Got an acoustic pickup that sounds like a rubber band stretched over a tin can? Click <code>LOAD IR</code>, drop in a mic'd body impulse WAV, and blend <code>IR Mix</code> to 40%. Need your dry Minimoog patch to blossom into an arena solo on the bridge? Enable <strong>Delay / Echo</strong> in <code>PING-PONG</code> or <code>TAPE WARM</code> mode, tap quarter notes on <code>TAP TEMPO</code>, roll <code>TONE</code> back to <code>3.5 kHz</code> so the repeats sit tucked behind your attack, and save it straight into your Solo Scene.
+										<strong>Fixing the "Left-Ear Only" DI, Piezo Quack &amp; Instant 80s Lead Echo:</strong> Plug an acoustic instrument or mono synth into Input 1 of a stereo interface and it only comes out of the left PA speaker; click the top-right mode button to switch from <code>STEREO</code> to <code>MONO (LEFT)</code> for an instant centered image. Need to warm up a brittle stage piano without spiky single-band EQ peaks? Flip the EQ into <code>CURVE LINK</code> and nudge <code>250 Hz</code> up +2.5 dB for an instant broad warm shelf. Got a bone-dry organ or electric guitar patch? Pick <code>Room: Studio Wood Room (0.55s)</code> or <code>Cab: 2x12 Warm Tube Cab</code> right from the built-in IR preset menu (or drop in your favorite acoustic body <code>.wav</code> with <code>LOAD WAV</code>). Need your Minimoog patch to blossom into an arena solo on the bridge? Enable <strong>Delay / Echo</strong> in <code>PING-PONG</code> or <code>TAPE WARM</code> mode, tap quarter notes on <code>TAP TEMPO</code>, roll <code>TONE</code> back to <code>3.5 kHz</code>, and save it straight into your Solo Scene.
 									</blockquote>
 								</div>
 							</section>
@@ -606,20 +614,22 @@
 						<!-- 11. BREAK MUSIC -->
 							<section id="break-music">
 								<div class="container">
-									<h3>13. The Break DJ Strip: Dual-Deck Break Music &amp; Auto-DJ</h3>
+									<h3>13. The Break DJ Strip: Dual-Deck Break Music, Auto-Leveler &amp; Auto-DJ</h3>
 									<span class="image fit"><img src="break_music_player.png" alt="Break Music Dual-Deck DJ Player" /></span>
-									<p>The Break DJ strip is hardwired to Fanfare's <strong>Dual-Deck DJ &amp; Break Music Player</strong>. Click <code>MP3</code> on the strip (or switch to the <code>BREAK / DJ</code> tab on your Tablet HUD) to open it:</p>
+									<p>Strip 24 is hardwired to Fanfare's <strong>Dual-Deck DJ &amp; Break Music Player</strong>. Click <code>MP3</code> on the strip (or switch to the <code>BREAK / DJ</code> tab on your Tablet HUD) to open it. Every track (<code>MP3</code>, <code>WAV</code>, <code>AIFF</code>, <code>FLAC</code>, <code>OGG</code>) is decoded completely into RAM on load so live playback never touches your hard drive or codec on stage:</p>
 									<ul>
-										<li><strong>6 Preset Playlist Banks:</strong> Six instant buttons across the top (e.g., <em>Hits, Oldies, Dinner, Dance, Ballads, Break</em>). Left-click to load and play; right-click to assign a folder on your hard drive or rename the bank.</li>
-										<li><strong>Dual Decks (Deck A &amp; Deck B) + Equal-Power Crossfader:</strong> Load tracks into Deck A and Deck B, set non-destructive <code>SET IN</code> and <code>SET OUT</code> trim cues to skip long radio intros/outros, and crossfade manually or with one-click <code>&lt;&lt; FADE A</code> / <code>FADE B &gt;&gt;</code> buttons.</li>
-										<li><strong>Auto-DJ &amp; Beat-Sync:</strong> When <code>AUTO-DJ</code> is enabled, Fanfare automatically crossfades into the next track in your playlist when the current track reaches its Cue-Out point. Enable <code>BEAT-SYNC</code> and choose between <code>VINYL RESAMPLE</code> or <code>KEY-LOCK STRETCH</code> (SoundTouch pitch-locked time stretching) to match tempos during transitions.</li>
-										<li><strong>Smart Arrange:</strong> Click <code>SMART ARRANGE</code> to automatically sort your break playlist by <em>Smooth BPM Ramp</em>, <em>Minimal Tempo Step</em>, <em>Energy Wave</em>, or trim the playlist to fit an exact 30, 45, or 60-minute set break.</li>
-										<li><strong>YouTube 192k MP3 Grabber (<code>GRAB YT</code>):</strong> Someone in the wedding party requests a first-dance song you've never heard of five minutes before they walk in? Click <code>GRAB YT</code>, paste the YouTube URL, and Fanfare downloads and converts it to a 192 kbps MP3 right into your playlist.</li>
+										<li><strong>Broadcast Auto-Leveler (<code>LEVEL: ON</code>) + Live Gain Reduction Meter &amp; <code>GAIN</code> Fader:</strong> The right-hand master column features a dedicated stereo broadcast track leveler (<code>LEVEL: ON</code> / <code>LEVEL: OFF</code>) paired with a live amber/red Gain Reduction meter directly underneath it and a master output <code>GAIN</code> fader (<code>0.00</code> to <code>1.50</code>). Quiet 1970s vinyl transfers are gently lifted and brickwalled modern pop mixes are tamed automatically, keeping break-music volume steady all night without touching the mixer.</li>
+										<li><strong>6 Preset Playlist Banks (<code>1: HITS</code> through <code>6: BREAK</code>):</strong> Six instant buttons across the top (<em>Hits, Oldies, Dinner, Dance, Party, Break</em>). Left-click any bank to load and start playing immediately; right-click to assign a music folder on disk or rename the bank.</li>
+										<li><strong>Dual Decks (<code>DECK A</code> &amp; <code>DECK B</code>), Cue Trimming &amp; Tempo Lock:</strong> Independent <code>LOAD A...</code> / <code>LOAD B...</code> buttons, scrubbable playheads with elapsed, total, and countdown timers (e.g., <code>00:46 / 03:15 (-02:28)</code>), automatic background BPM &amp; downbeat analysis, non-destructive <code>SET IN</code> / <code>SET OUT</code> / <code>CLR</code> cue markers (skip long intro chatter or trigger early transitions), <code>PLAY</code> / <code>PAUSE</code> / <code>STOP</code>, and manual <code>SYNC TO B</code> / <code>SYNC TO A</code> tempo lock.</li>
+										<li><strong>Equal-Power Crossfader, <code>XFADE</code> Curves, <code>AUTO-DJ</code> &amp; <code>BEAT-SYNC</code>:</strong> Drag the crossfader manually or click <code>&lt;&lt; FADE A</code> / <code>FADE B &gt;&gt;</code> for smooth automatic glides, and click <code>XFADE</code> to cycle transition lengths (<code>CUT</code>, <code>2s</code>, <code>4s</code>, <code>6s</code>, <code>8s</code>). Enable <code>AUTO-DJ: ON</code> for zero-dead-air automatic crossfades when a track hits its Cue-Out point, enable <code>BEAT-SYNC: ON</code> to match tempos and quantize downbeats across transitions, and toggle between <code>MODE: VINYL (CLEAN)</code> (artifact-free studio resampling) and <code>MODE: KEY-LOCK</code> (pitch-preserving WSOLA time stretching).</li>
+										<li><strong><code>SMART ARRANGE</code>:</strong> Automatically sequences your playlist by <em>Smooth BPM Ramp (Low &rarr; High or High &rarr; Low)</em>, <em>Minimal Tempo Step (Smooth Flow)</em>, <em>Energy Wave (Build &amp; Peak)</em>, or trims the list to fit an exact <em>30, 45, or 60-minute</em> set break.</li>
+										<li><strong>YouTube 192k MP3 Grabber (<code>GRAB YOUTUBE</code>):</strong> Someone in the wedding party requests a song you've never heard of five minutes before they walk in? Click <code>GRAB YOUTUBE</code>, paste the YouTube URL, and Fanfare downloads and converts it to a 192 kbps MP3 right into your destination folder and playlist.</li>
+										<li><strong>Playlist Toolbar &amp; SQLite Library <code>EXPORT</code>:</strong> Drag files/folders straight into the list (or click <code>ADD FILES...</code> / <code>ADD FOLDER...</code>), reorder with <code>^ UP</code> / <code>V DN</code> (or <code>Alt+Up</code> / <code>Alt+Down</code>, <code>Delete</code> to remove), send any selected row <code>TO DECK A</code> or <code>TO DECK B</code>, <code>SAVE...</code> / <code>LOAD...</code> playlists, and click <code>EXPORT</code> to back up or export your persistent SQLite track/BPM/cue database to <strong>CSV (Excel)</strong>, <strong>JSON</strong>, <strong>Extended M3U (with cue points)</strong>, or a <strong>SQLite <code>.db</code> snapshot</strong> (plus import metadata from CSV).</li>
 									</ul>
 
 									<blockquote>
 										<span class="use-case-label">Real-World Stage Use Case</span><br />
-										<strong>Surviving the 20-Minute Set Break Without Phone Notifications:</strong> If you plug your phone into the mixer for break music, three things are guaranteed to happen: a text message ding will blast through the PA at 110 dB, a YouTube ad for lawnmowers will play right after a ballad, or you'll walk to the bar and your Bluetooth will disconnect. With the Break DJ strip, your break music runs inside Fanfare through its own broadcast leveler compressor, routed to FOH (and muted in your IEMs if you want peace and quiet), and you can skip tracks or adjust volume from your tablet across the room.
+										<strong>Surviving the 20-Minute Set Break Without Phone Notifications or Volume Jumps:</strong> If you plug your phone into the mixer for break music, four things are guaranteed to happen: a text message ding will blast through the PA at 110 dB, a YouTube ad for lawnmowers will play right after a ballad, a quiet Fleetwood Mac track will vanish under bar chatter right before a modern EDM remix takes everybody's eyebrows off, or you'll walk to the bar and your Bluetooth will disconnect. With the Break DJ strip, your playlist runs inside Fanfare from RAM with <code>LEVEL: ON</code> keeping every song at a steady dinner-or-dance volume, routed to FOH (and muted in your IEMs if you want peace and quiet), while you skip tracks or ride volume from your tablet across the room.
 									</blockquote>
 								</div>
 							</section>
@@ -729,8 +739,8 @@
 											<ol>
 												<li><strong>STAGE HUD:</strong> Giant Prev/Next song buttons, setlist strip with green preload indicators, active instruments list, <strong>88-Key Visual Zone Map</strong>, quick chord chart preview, and live segmented stereo LED FOH/IEM VU meters.</li>
 												<li><strong>SONGS:</strong> Color-coded touch grid of your entire Song library with instant tag filtering (<code>PIANO</code>, <code>B3 ORGAN</code>, <code>SYNTH / PAD</code>, <code>BRASS / HORNS</code>, <code>FAVORITES</code>).</li>
-												<li><strong>GIG NOTEPAD:</strong> Full-screen live chord chart &amp; lyric viewer/editor.</li>
-												<li><strong>TOUCH MIXER:</strong> Multi-touch FOH, IEM, Mute, and Master faders.</li>
+												<li><strong>GIG NOTEPAD:</strong> Full-screen live chord chart &amp; lyric viewer/editor with instant two-way WebSocket sync back to the desktop Notepad.</li>
+												<li><strong>TOUCH MIXER:</strong> Multi-touch FOH faders, per-strip IEM Trim faders (<code>0.00x</code> to <code>2.00x</code> relative to FOH, <code>1.00x</code> unity), Mute buttons, and Master faders.</li>
 												<li><strong>BREAK / DJ:</strong> Remote control for the Break DJ strip's Dual-Deck player, including the YouTube MP3 grabber.</li>
 											</ol>
 										</li>
@@ -819,7 +829,7 @@
 					<section id="footer">
 						<div class="container">
 							<ul class="copyright">
-								<li>&copy; Fanfare v1.4.0</li><li><a href="index.html">Fanfare Home</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
+								<li>&copy; Fanfare v1.41</li><li><a href="index.html">Fanfare Home</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
 							</ul>
 						</div>
 					</section>

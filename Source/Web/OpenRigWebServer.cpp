@@ -159,7 +159,11 @@ void WebServer::run() {
             if (clientSock != INVALID_SOCKET_VAL) {
                 // Spawn a detached worker thread for each incoming connection
                 std::thread([this, clientSock]() {
-                    handleClientConnection((void*)(uintptr_t)clientSock);
+                    try {
+                        handleClientConnection((void*)(uintptr_t)clientSock);
+                    } catch (...) {
+                        SOCKET_CLOSE(clientSock);
+                    }
                 }).detach();
             }
         }
@@ -334,6 +338,23 @@ bool WebServer::handleWebSocketHandshake(void* socketHandle, const juce::String&
     return sent > 0;
 }
 
+namespace {
+    constexpr uint64_t kMaxWsPayloadBytes = 1024ULL * 1024ULL; // 1 MB hard cap per WebSocket frame
+
+    bool recvExact(SocketType sock, void* dst, size_t len) noexcept {
+        uint8_t* ptr = static_cast<uint8_t*>(dst);
+        size_t total = 0;
+        while (total < len) {
+            const int chunk = static_cast<int>(std::min<size_t>(len - total, 65536));
+            const int n = ::recv(sock, reinterpret_cast<char*>(ptr + total), chunk, 0);
+            if (n <= 0)
+                return false;
+            total += static_cast<size_t>(n);
+        }
+        return true;
+    }
+}
+
 void WebServer::handleWebSocketSession(void* socketHandle) {
     SocketType sock = (SocketType)(uintptr_t)socketHandle;
 
@@ -342,69 +363,76 @@ void WebServer::handleWebSocketSession(void* socketHandle) {
         activeWsClients.insert(socketHandle);
     }
 
-    // Send initial status packet upon connect
-    juce::DynamicObject::Ptr root = new juce::DynamicObject();
-    root->setProperty("type", "status");
-    root->setProperty("data", buildStatusJson());
-    juce::String initMsg = juce::JSON::toString(juce::var(root.get()));
-    broadcastWebSocket(initMsg);
+    try {
+        // Send initial status packet upon connect
+        juce::DynamicObject::Ptr root = new juce::DynamicObject();
+        root->setProperty("type", "status");
+        root->setProperty("data", buildStatusJson());
+        juce::String initMsg = juce::JSON::toString(juce::var(root.get()));
+        broadcastWebSocket(initMsg);
 
-    // Frame reader loop
-    while (serverRunning.load()) {
-        uint8_t header[2];
-        int n = ::recv(sock, (char*)header, 2, 0);
-        if (n <= 0) break;
+        // Frame reader loop
+        while (serverRunning.load()) {
+            uint8_t header[2];
+            if (!recvExact(sock, header, 2))
+                break;
 
-        bool fin = (header[0] & 0x80) != 0;
-        uint8_t opcode = header[0] & 0x0F;
-        bool masked = (header[1] & 0x80) != 0;
-        uint64_t payloadLen = header[1] & 0x7F;
+            uint8_t opcode = header[0] & 0x0F;
+            bool masked = (header[1] & 0x80) != 0;
+            uint64_t payloadLen = header[1] & 0x7F;
 
-        if (opcode == 0x8) { // Close frame
-            break;
-        } else if (opcode == 0x9) { // Ping
-            // Send Pong
-            uint8_t pongHeader[2] = { 0x8A, 0x00 };
-            ::send(sock, (char*)pongHeader, 2, 0);
-            continue;
-        }
+            if (payloadLen == 126) {
+                uint8_t ext[2];
+                if (!recvExact(sock, ext, 2)) break;
+                payloadLen = ((uint64_t)ext[0] << 8) | ext[1];
+            } else if (payloadLen == 127) {
+                uint8_t ext[8];
+                if (!recvExact(sock, ext, 8)) break;
+                payloadLen = 0;
+                for (int i = 0; i < 8; ++i)
+                    payloadLen = (payloadLen << 8) | ext[i];
+            }
 
-        if (payloadLen == 126) {
-            uint8_t ext[2];
-            if (::recv(sock, (char*)ext, 2, 0) <= 0) break;
-            payloadLen = ((uint64_t)ext[0] << 8) | ext[1];
-        } else if (payloadLen == 127) {
-            uint8_t ext[8];
-            if (::recv(sock, (char*)ext, 8, 0) <= 0) break;
-            payloadLen = 0;
-            for (int i = 0; i < 8; ++i)
-                payloadLen = (payloadLen << 8) | ext[i];
-        }
+            if (payloadLen > kMaxWsPayloadBytes) {
+                // Reject oversized / malformed frames before allocating
+                break;
+            }
 
-        uint8_t maskKey[4] = { 0 };
-        if (masked) {
-            if (::recv(sock, (char*)maskKey, 4, 0) <= 0) break;
-        }
+            uint8_t maskKey[4] = { 0 };
+            if (masked) {
+                if (!recvExact(sock, maskKey, 4)) break;
+            }
 
-        std::vector<uint8_t> payload((size_t)payloadLen);
-        size_t totalReceived = 0;
-        while (totalReceived < payloadLen) {
-            int r = ::recv(sock, (char*)payload.data() + totalReceived, (int)(payloadLen - totalReceived), 0);
-            if (r <= 0) break;
-            totalReceived += r;
-        }
-        if (totalReceived < payloadLen) break;
+            std::vector<uint8_t> payload((size_t)payloadLen);
+            if (payloadLen > 0) {
+                if (!recvExact(sock, payload.data(), (size_t)payloadLen))
+                    break;
+            }
 
-        if (masked) {
-            for (size_t i = 0; i < payloadLen; ++i) {
-                payload[i] ^= maskKey[i % 4];
+            if (masked) {
+                for (size_t i = 0; i < payloadLen; ++i) {
+                    payload[i] ^= maskKey[i % 4];
+                }
+            }
+
+            if (opcode == 0x8) { // Close frame
+                break;
+            } else if (opcode == 0x9) { // Ping -> echo Pong with payload (capped <= 125 per RFC 6455)
+                const size_t pongLen = std::min<size_t>(payload.size(), 125);
+                uint8_t pongFrame[127];
+                pongFrame[0] = 0x8A;
+                pongFrame[1] = static_cast<uint8_t>(pongLen);
+                if (pongLen > 0)
+                    std::memcpy(pongFrame + 2, payload.data(), pongLen);
+                ::send(sock, reinterpret_cast<const char*>(pongFrame), static_cast<int>(2 + pongLen), 0);
+                continue;
+            } else if (opcode == 0x1) { // Text frame
+                juce::String textMsg = juce::String::fromUTF8((const char*)payload.data(), (int)payload.size());
+                processIncomingWsMessage(textMsg);
             }
         }
-
-        if (opcode == 0x1) { // Text frame
-            juce::String textMsg = juce::String::fromUTF8((const char*)payload.data(), (int)payload.size());
-            processIncomingWsMessage(textMsg);
-        }
+    } catch (...) {
+        // Never allow an unhandled exception to std::terminate() a detached WS thread
     }
 
     {
@@ -563,10 +591,10 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
     } else if (type == "set_slot_fader") {
         int slotIdx = json["slot"];
         juce::String ch = json["channel"].toString();
-        float val = (float)json["value"];
+        float val = juce::jlimit(0.0f, 1.0f, (float)json["value"]);
         if (slotIdx >= 0 && slotIdx < engine.getNumSlots()) {
             if (ch == "foh") engine.getSlot(slotIdx)->setFohLevel(val);
-            else if (ch == "iem") engine.getSlot(slotIdx)->setIemLevel(val);
+            else if (ch == "iem") engine.getSlot(slotIdx)->setIemOffset(val * 2.0f);
         }
     } else if (type == "set_slot_mute") {
         int slotIdx = json["slot"];
@@ -579,12 +607,15 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
     } else if (type == "set_notepad_tab") {
         int idx = json["index"];
         engine.setActiveNoteTabIndex(idx);
+        engine.broadcastNotesChanged();
     } else if (type == "set_notepad_font_size") {
         float sz = (float)json["size"];
         engine.setNoteFontSize(sz);
+        engine.broadcastNotesChanged();
     } else if (type == "set_notepad_monospace") {
         bool mono = json["isMonospace"];
         engine.setNoteIsMonospace(mono);
+        engine.broadcastNotesChanged();
     } else if (type == "update_notepad_content") {
         int idx = json["index"];
         juce::String content = json["content"].toString();
@@ -592,7 +623,7 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
         if (idx >= 0 && idx < (int)notes.size()) {
             notes[idx].content = content;
             engine.setNotes(notes);
-            if (engine.onNotesChanged) engine.onNotesChanged();
+            engine.broadcastNotesChanged();
         }
     } else if (type == "get_status") {
         juce::DynamicObject::Ptr root = new juce::DynamicObject();
@@ -629,6 +660,15 @@ void WebServer::timerCallback() {
     root->setProperty("iemL", FanfareLog::amplitudeToLogScale(engine.getIemPeakL()));
     root->setProperty("iemR", FanfareLog::amplitudeToLogScale(engine.getIemPeakR()));
     root->setProperty("cpu", mainComponent ? (float)mainComponent->getCpuUsage() : 0.0f);
+    if (++telemetryThrottleCount >= 15) {
+        telemetryThrottleCount = 0;
+        root->setProperty("underruns", mainComponent ? mainComponent->getAudioUnderruns() : 0);
+        const bool therm = mainComponent ? mainComponent->isThermalWarningActive() : false;
+        root->setProperty("thermalAlert", therm);
+        root->setProperty("cpuTempC", mainComponent ? mainComponent->getCpuTemperatureCelsius() : -1);
+        if (therm && mainComponent != nullptr)
+            root->setProperty("thermalText", mainComponent->getThermalBadgeText());
+    }
 
     broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
 }
@@ -724,42 +764,60 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
         engine.triggerPanic();
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/play") {
-        if (auto* mp3 = engine.getMp3Player()) {
-            mp3->play();
-            notifyMp3Changed();
-        }
+        juce::MessageManager::callAsync([this]() {
+            if (!serverRunning.load()) return;
+            if (auto* mp3 = engine.getMp3Player()) {
+                mp3->play();
+                notifyMp3Changed();
+            }
+        });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/pause") {
-        if (auto* mp3 = engine.getMp3Player()) {
-            mp3->pause();
-            notifyMp3Changed();
-        }
+        juce::MessageManager::callAsync([this]() {
+            if (!serverRunning.load()) return;
+            if (auto* mp3 = engine.getMp3Player()) {
+                mp3->pause();
+                notifyMp3Changed();
+            }
+        });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/next") {
-        if (auto* mp3 = engine.getMp3Player()) {
-            mp3->nextTrack(true);
-            notifyMp3Changed();
-        }
+        juce::MessageManager::callAsync([this]() {
+            if (!serverRunning.load()) return;
+            if (auto* mp3 = engine.getMp3Player()) {
+                mp3->nextTrack(true);
+                notifyMp3Changed();
+            }
+        });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/prev") {
-        if (auto* mp3 = engine.getMp3Player()) {
-            mp3->prevTrack();
-            notifyMp3Changed();
-        }
+        juce::MessageManager::callAsync([this]() {
+            if (!serverRunning.load()) return;
+            if (auto* mp3 = engine.getMp3Player()) {
+                mp3->prevTrack();
+                notifyMp3Changed();
+            }
+        });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/bank") {
         int bankIdx = jsonPayload["index"];
-        if (auto* mp3 = engine.getMp3Player()) {
-            mp3->loadBank(bankIdx, true);
-            notifyMp3Changed();
-        }
+        juce::MessageManager::callAsync([this, bankIdx]() {
+            if (!serverRunning.load()) return;
+            if (auto* mp3 = engine.getMp3Player()) {
+                mp3->loadBank(bankIdx, true);
+                notifyMp3Changed();
+            }
+        });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/track") {
         int trkIdx = jsonPayload["index"];
-        if (auto* mp3 = engine.getMp3Player()) {
-            mp3->playTrack(trkIdx, true);
-            notifyMp3Changed();
-        }
+        juce::MessageManager::callAsync([this, trkIdx]() {
+            if (!serverRunning.load()) return;
+            if (auto* mp3 = engine.getMp3Player()) {
+                mp3->playTrack(trkIdx, true);
+                notifyMp3Changed();
+            }
+        });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/gain") {
         float g = (float)jsonPayload["gain"];
@@ -781,11 +839,12 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
         if (url.isNotEmpty()) {
             YoutubeDownloadManager::getInstance().queueDownload(url, playNow,
                 [this, playNow](bool success, const juce::File& file, const juce::String& /*title*/, const juce::String& /*err*/) {
+                    if (!serverRunning.load()) return;
                     if (success && file.existsAsFile()) {
                         if (auto* mp3 = engine.getMp3Player()) {
                             mp3->addFile(file);
                             if (playNow) {
-                                int newIdx = (int)mp3->getPlaylist().size() - 1;
+                                int newIdx = (int)mp3->getPlaylistSnapshot().size() - 1;
                                 mp3->playTrack(newIdx, true);
                             }
                             notifyMp3Changed();
@@ -793,6 +852,7 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
                     }
                 },
                 [this](const juce::String& status, float /*progress*/) {
+                    if (!serverRunning.load()) return;
                     juce::DynamicObject::Ptr root = new juce::DynamicObject();
                     root->setProperty("type", "mp3_download_status");
                     root->setProperty("status", status);
@@ -825,8 +885,9 @@ juce::var WebServer::buildStatusJson() {
     }
     obj->setProperty("scenes", sceneArr);
 
+    auto setupsSnap = sm.getSetupsSnapshot();
     juce::Array<juce::var> setlistArr;
-    for (const auto& f : sm.getSetups()) {
+    for (const auto& f : setupsSnap) {
         setlistArr.add(f.getFileNameWithoutExtension());
     }
     obj->setProperty("setlist", setlistArr);
@@ -837,8 +898,8 @@ juce::var WebServer::buildStatusJson() {
 
     int preloadIdx = -1;
     juce::File nextFile = sm.getNextPreloadTarget();
-    for (int i = 0; i < sm.getSetups().size(); ++i) {
-        if (sm.getSetups()[i] == nextFile) {
+    for (int i = 0; i < setupsSnap.size(); ++i) {
+        if (setupsSnap[i] == nextFile) {
             preloadIdx = i;
             break;
         }
@@ -853,7 +914,8 @@ juce::var WebServer::buildStatusJson() {
         slObj->setProperty("index", i);
         slObj->setProperty("name", slot->getName());
         slObj->setProperty("fohLevel", slot->getFohLevel());
-        slObj->setProperty("iemLevel", slot->getIemLevel());
+        slObj->setProperty("iemLevel", juce::jlimit(0.0f, 1.0f, slot->getIemOffset() * 0.5f));
+        slObj->setProperty("iemOffset", slot->getIemOffset());
         slObj->setProperty("fohEnabled", slot->isFohEnabled());
         slObj->setProperty("iemEnabled", slot->isIemEnabled());
         slObj->setProperty("bypassed", slot->isBypassed());
@@ -876,6 +938,9 @@ juce::var WebServer::buildStatusJson() {
     obj->setProperty("cpuLoad", mainComponent ? mainComponent->getCpuUsage() : 0.0);
     obj->setProperty("ramMb", (int)(FanfareLog::getMemoryStats().workingSetBytes / (1024 * 1024)));
     obj->setProperty("underruns", mainComponent ? mainComponent->getAudioUnderruns() : 0);
+    obj->setProperty("thermalAlert", mainComponent ? mainComponent->isThermalWarningActive() : false);
+    obj->setProperty("cpuTempC", mainComponent ? mainComponent->getCpuTemperatureCelsius() : -1);
+    obj->setProperty("thermalText", mainComponent ? mainComponent->getThermalBadgeText() : juce::String("THERMAL"));
     obj->setProperty("librarySongs", buildSongsLibraryJson());
 
     return juce::var(obj.get());
@@ -995,7 +1060,7 @@ juce::var WebServer::buildSetlistJson() {
     auto& sm = Fanfare::SetlistManager::getInstance();
     obj->setProperty("activeIndex", sm.getActiveIndex());
     juce::Array<juce::var> setups;
-    for (const auto& f : sm.getSetups()) setups.add(f.getFileNameWithoutExtension());
+    for (const auto& f : sm.getSetupsSnapshot()) setups.add(f.getFileNameWithoutExtension());
     obj->setProperty("setups", setups);
     obj->setProperty("isPreloaded", sm.isPreloaded());
     obj->setProperty("preloadName", sm.getPreloadSetupName());
@@ -1030,7 +1095,8 @@ juce::var WebServer::buildMixerJson() {
         slObj->setProperty("index", i);
         slObj->setProperty("name", slot->getName());
         slObj->setProperty("fohLevel", slot->getFohLevel());
-        slObj->setProperty("iemLevel", slot->getIemLevel());
+        slObj->setProperty("iemLevel", juce::jlimit(0.0f, 1.0f, slot->getIemOffset() * 0.5f));
+        slObj->setProperty("iemOffset", slot->getIemOffset());
         slObj->setProperty("fohEnabled", slot->isFohEnabled());
         slObj->setProperty("iemEnabled", slot->isIemEnabled());
         slObj->setProperty("bypassed", slot->isBypassed());
@@ -1063,7 +1129,7 @@ juce::var WebServer::buildMp3Json() {
     obj->setProperty("currentTrackIndex", mp3->getCurrentTrackIndex());
 
     int curIdx = mp3->getCurrentTrackIndex();
-    const auto& playlist = mp3->getPlaylist();
+    const auto playlist = mp3->getPlaylistSnapshot();
     if (curIdx >= 0 && curIdx < (int)playlist.size()) {
         obj->setProperty("currentTitle", playlist[curIdx].title);
     } else {
@@ -1071,7 +1137,7 @@ juce::var WebServer::buildMp3Json() {
     }
 
     juce::Array<juce::var> banksArr;
-    for (const auto& b : mp3->getBanks()) {
+    for (const auto& b : mp3->getBanksSnapshot()) {
         juce::DynamicObject::Ptr bo = new juce::DynamicObject();
         bo->setProperty("index", b.index);
         bo->setProperty("name", b.name);

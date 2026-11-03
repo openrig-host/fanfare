@@ -116,6 +116,8 @@ public:
 
     ~Mp3PlayerProcessor() {
         isShuttingDown.store(true);
+        if (aliveToken)
+            aliveToken->store(false, std::memory_order_release);
         playing.store(false);
         
         stopDeckInternal(0);
@@ -372,14 +374,22 @@ public:
                 double remaining = effectiveEnd - curPos;
                 float xfadeSec = crossfadeDurationSec.load();
                 if (autoDjEnabled.load() && remaining <= (double)xfadeSec && remaining > 0.1) {
-                    // Trigger seamless Auto-DJ crossfade to next song
-                    juce::MessageManager::callAsync([this]() {
-                        nextTrack(true);
-                    });
+                    // One-shot latch prevents queueing hundreds of full-track decodes while message thread loads next song
+                    if (!autoDjAdvanceLatched.exchange(true, std::memory_order_acq_rel)) {
+                        auto alive = aliveToken;
+                        juce::MessageManager::callAsync([this, alive]() {
+                            if (alive && alive->load(std::memory_order_acquire) && !isShuttingDown.load())
+                                nextTrack(true);
+                        });
+                    }
                 } else if (remaining <= 0.05 || curDeck.transportSource.hasStreamFinished()) {
-                    juce::MessageManager::callAsync([this]() {
-                        onTrackFinished();
-                    });
+                    if (!trackFinishLatched.exchange(true, std::memory_order_acq_rel)) {
+                        auto alive = aliveToken;
+                        juce::MessageManager::callAsync([this, alive]() {
+                            if (alive && alive->load(std::memory_order_acquire) && !isShuttingDown.load())
+                                onTrackFinished();
+                        });
+                    }
                 }
             }
         }
@@ -398,6 +408,8 @@ public:
         Deck& curDeck = (activeIdx == 0) ? deckA : deckB;
 
         if (curDeck.isLoaded.load()) {
+            autoDjAdvanceLatched.store(false, std::memory_order_release);
+            trackFinishLatched.store(false, std::memory_order_release);
             if (curDeck.transportSource.hasStreamFinished()) {
                 curDeck.transportSource.setPosition(curDeck.trackInfo.cueInSeconds > 0.0 ? curDeck.trackInfo.cueInSeconds : 0.0);
             }
@@ -419,6 +431,8 @@ public:
     }
 
     void stop() {
+        autoDjAdvanceLatched.store(false, std::memory_order_release);
+        trackFinishLatched.store(false, std::memory_order_release);
         stopDeckInternal(0);
         stopDeckInternal(1);
         playing.store(false);
@@ -429,6 +443,8 @@ public:
         juce::ScopedLock sl(playlistLock);
         if (index < 0 || index >= (int)playlist.size()) return;
 
+        autoDjAdvanceLatched.store(false, std::memory_order_release);
+        trackFinishLatched.store(false, std::memory_order_release);
         currentTrackIndex = index;
         const auto& track = playlist[index];
 
@@ -503,6 +519,14 @@ public:
             if (loopMode == LoopMode::RepeatAll) {
                 nextIdx = 0;
             } else {
+                // Reached end of non-repeating playlist: if track already finished, stop cleanly
+                int activeIdx = activeDeckIndex.load();
+                Deck& cur = (activeIdx == 0) ? deckA : deckB;
+                if (cur.transportSource.hasStreamFinished() ||
+                    (cur.transportSource.getLengthInSeconds() > 0.0 &&
+                     cur.transportSource.getLengthInSeconds() - cur.transportSource.getCurrentPosition() <= 0.1)) {
+                    stop();
+                }
                 return;
             }
         }
@@ -705,6 +729,8 @@ public:
     }
 
     void setDeckPosition(int deckId, double seconds) {
+        autoDjAdvanceLatched.store(false, std::memory_order_release);
+        trackFinishLatched.store(false, std::memory_order_release);
         juce::SpinLock::ScopedLockType al(audioLock);
         Deck& d = (deckId == 0) ? deckA : deckB;
         if (d.isLoaded.load()) {
@@ -950,6 +976,10 @@ public:
     }
 
     const std::vector<TrackInfo>& getPlaylist() const { return playlist; }
+    std::vector<TrackInfo> getPlaylistSnapshot() const {
+        juce::ScopedLock sl(playlistLock);
+        return playlist;
+    }
     int getCurrentTrackIndex() const { return currentTrackIndex; }
 
     void setTrackBpm(int trackIdx, float bpm) {
@@ -1313,6 +1343,10 @@ public:
     }
 
     const std::vector<PlaylistBank>& getBanks() const { return banks; }
+    std::vector<PlaylistBank> getBanksSnapshot() const {
+        juce::ScopedLock sl(playlistLock);
+        return banks;
+    }
 
     void assignBankFolder(int bankIndex, const juce::File& folder, const juce::String& optionalName = "") {
         if (bankIndex < 0 || bankIndex >= (int)banks.size()) return;
@@ -1717,16 +1751,23 @@ private:
             }
         }
 
-        // Launch background BPM detection
-        BpmDetector::detectBpmAsync(formatManager, file, [this, fullPath, trackIndex](const BpmDetector::BpmResult& res) {
-            if (res.success && res.bpm > 0.0f) {
+        // Launch background BPM detection with lifetime token + message-thread marshaling
+        auto alive = aliveToken;
+        BpmDetector::detectBpmAsync(formatManager, file, [this, alive, fullPath, trackIndex](const BpmDetector::BpmResult& res) {
+            if (!alive || !alive->load(std::memory_order_acquire) || !res.success || res.bpm <= 0.0f)
+                return;
+
+            Fanfare::LibraryDatabase::getInstance().updateBpm(fullPath, res.bpm, res.firstBeatSeconds);
+
+            juce::MessageManager::callAsync([this, alive, fullPath, trackIndex, res]() {
+                if (!alive || !alive->load(std::memory_order_acquire) || isShuttingDown.load())
+                    return;
                 {
                     juce::ScopedLock sl(bpmCacheLock);
                     bpmCache[fullPath].bpm = res.bpm;
                     bpmCache[fullPath].firstBeatSeconds = res.firstBeatSeconds;
                     saveBpmCache();
                 }
-                Fanfare::LibraryDatabase::getInstance().updateBpm(fullPath, res.bpm, res.firstBeatSeconds);
                 {
                     juce::ScopedLock pl(playlistLock);
                     if (trackIndex >= 0 && trackIndex < (int)playlist.size() && playlist[trackIndex].file.getFullPathName() == fullPath) {
@@ -1734,18 +1775,20 @@ private:
                         playlist[trackIndex].firstBeatSeconds = res.firstBeatSeconds;
                     }
                 }
-                // Update active decks if matching file
-                if (deckA.isLoaded.load() && deckA.trackInfo.file.getFullPathName() == fullPath) {
-                    deckA.trackInfo.bpm = res.bpm;
-                    deckA.trackInfo.firstBeatSeconds = res.firstBeatSeconds;
-                }
-                if (deckB.isLoaded.load() && deckB.trackInfo.file.getFullPathName() == fullPath) {
-                    deckB.trackInfo.bpm = res.bpm;
-                    deckB.trackInfo.firstBeatSeconds = res.firstBeatSeconds;
+                {
+                    juce::SpinLock::ScopedLockType al(audioLock);
+                    if (deckA.isLoaded.load() && deckA.trackInfo.file.getFullPathName() == fullPath) {
+                        deckA.trackInfo.bpm = res.bpm;
+                        deckA.trackInfo.firstBeatSeconds = res.firstBeatSeconds;
+                    }
+                    if (deckB.isLoaded.load() && deckB.trackInfo.file.getFullPathName() == fullPath) {
+                        deckB.trackInfo.bpm = res.bpm;
+                        deckB.trackInfo.firstBeatSeconds = res.firstBeatSeconds;
+                    }
                 }
                 if (onPlaylistChanged) onPlaylistChanged();
                 if (onTrackChanged) onTrackChanged();
-            }
+            });
         });
     }
 
@@ -1770,6 +1813,9 @@ private:
     FanfareDSP::SimpleComp levelerL, levelerR;
     std::atomic<bool> levelerEnabled{true};
 
+    std::shared_ptr<std::atomic<bool>> aliveToken = std::make_shared<std::atomic<bool>>(true);
+    std::atomic<bool> autoDjAdvanceLatched{false};
+    std::atomic<bool> trackFinishLatched{false};
     std::atomic<bool> playing{false};
     std::atomic<bool> isShuttingDown{false};
     std::atomic<float> gain{1.0f};

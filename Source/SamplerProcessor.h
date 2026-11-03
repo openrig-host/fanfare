@@ -70,11 +70,20 @@ public:
             double noteOffset = midiNoteNumber - s->rootNote.load() + pitchOffset;
             pitchRatio = std::pow(2.0, noteOffset / 12.0) * (s->sourceSampleRate / sr);
             
-            sourceSamplePosition = s->startRatio.load() * s->length;
+            const float safeStart = juce::jlimit(0.0f, 0.999f, s->startRatio.load());
+            sourceSamplePosition = (double)safeStart * (double)juce::jmax(0, s->length - 1);
             lgain = velocity * s->volume.load();
             rgain = lgain;
             
-            envelopeLevel = 1.0f;
+            if (s->params.attack > 0.0001) {
+                envelopeLevel = 0.0f;
+                envelopeAttackStep = 1.0f / (float)std::max(1.0, s->params.attack * sr);
+                isAttacking = true;
+            } else {
+                envelopeLevel = 1.0f;
+                envelopeAttackStep = 1.0f;
+                isAttacking = false;
+            }
             envelopeReleaseCoeff = 1.0f - (float)std::exp(-1.0f / (std::max(0.001, s->params.release) * sr));
             isReleasing = false;
         }
@@ -93,28 +102,34 @@ public:
     
     void renderNextBlock(juce::AudioBuffer<float>& outputBuffer, int startSample, int numSamples) override {
         auto* sound = dynamic_cast<CustomSamplerSound*>(getCurrentlyPlayingSound().get());
-        if (sound == nullptr || sound->data == nullptr)
+        if (sound == nullptr || sound->data == nullptr || sound->length <= 0)
             return;
             
         auto& data = *sound->data;
         const int numChannels = data.getNumChannels();
+        if (numChannels <= 0 || data.getNumSamples() <= 0)
+            return;
+        const int safeLen = juce::jmin(sound->length, data.getNumSamples());
+        const float safeStartRatio = juce::jlimit(0.0f, 0.999f, sound->startRatio.load());
+        const float safeEndRatio = juce::jlimit(safeStartRatio + 0.001f, 1.0f, sound->endRatio.load());
+        const int endSample = juce::jlimit(1, safeLen, (int)(safeEndRatio * (float)safeLen));
         
         while (--numSamples >= 0) {
             auto pos = (int)sourceSamplePosition;
-            int endSample = (int)(sound->endRatio.load() * sound->length);
-            if (pos >= endSample || pos >= sound->length) {
+            if (pos >= endSample || pos >= safeLen) {
                 if (sound->isLooping.load() && !isReleasing) {
-                    double startSamplePos = sound->startRatio.load() * sound->length;
-                    sourceSamplePosition = startSamplePos;
+                    double startSamplePos = (double)safeStartRatio * (double)(safeLen - 1);
+                    sourceSamplePosition = juce::jlimit(0.0, (double)(safeLen - 1), startSamplePos);
                     pos = (int)sourceSamplePosition;
                 } else {
                     clearCurrentNote();
                     break;
                 }
             }
+            pos = juce::jlimit(0, safeLen - 1, pos);
             
-            auto alpha = (float)(sourceSamplePosition - pos);
-            auto nextPos = pos + 1 < sound->length ? pos + 1 : pos;
+            auto alpha = juce::jlimit(0.0f, 1.0f, (float)(sourceSamplePosition - pos));
+            auto nextPos = pos + 1 < safeLen ? pos + 1 : pos;
             
             float outL = 0.0f;
             float outR = 0.0f;
@@ -138,7 +153,13 @@ public:
             outL *= currentGain;
             outR *= currentGain;
             
-            if (isReleasing) {
+            if (isAttacking && !isReleasing) {
+                envelopeLevel += envelopeAttackStep;
+                if (envelopeLevel >= 1.0f) {
+                    envelopeLevel = 1.0f;
+                    isAttacking = false;
+                }
+            } else if (isReleasing) {
                 envelopeLevel -= envelopeReleaseCoeff;
                 if (envelopeLevel <= 0.0f) {
                     clearCurrentNote();
@@ -163,7 +184,9 @@ private:
     double pitchRatio = 1.0;
     float lgain = 0.0f, rgain = 0.0f;
     float envelopeLevel = 1.0f;
+    float envelopeAttackStep = 0.01f;
     float envelopeReleaseCoeff = 0.001f;
+    bool isAttacking = false;
     bool isReleasing = false;
 };
 

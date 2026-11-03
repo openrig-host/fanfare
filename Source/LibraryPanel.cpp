@@ -389,37 +389,41 @@ void LibraryList::listBoxItemClicked(int row, const juce::MouseEvent &e) {
     menu.addItem(6, "Reveal in Explorer");
     menu.addItem(4, "Delete Item");
 
-    menu.showMenuAsync(juce::PopupMenu::Options(), [this, row, folderIdMap](int result) {
-      if (row < 0 || row >= (int)items.size()) return;
-      const auto &targetItem = items[row];
-      auto file = targetItem.file;
+    juce::File clickedFile = item.file;
+    juce::Component::SafePointer<LibraryList> safeThis(this);
+    menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis, clickedFile, folderIdMap](int result) {
+      if (safeThis == nullptr || result == 0) return;
+      auto file = clickedFile;
 
       if (result == 10) {
-        toggleFavorite(file);
+        safeThis->toggleFavorite(file);
       } else if (result == 100) {
-        moveItemToFolder(file, "");
+        safeThis->moveItemToFolder(file, "");
       } else if (result == 999) {
-        createNewFolder();
+        safeThis->createNewFolder();
       } else if (folderIdMap.count(result) > 0) {
-        moveItemToFolder(file, folderIdMap.at(result));
+        safeThis->moveItemToFolder(file, folderIdMap.at(result));
       } else if (result == 1) {
-        learningFile = file;
-        repaint();
+        safeThis->learningFile = file;
+        safeThis->learningActive.store(true, std::memory_order_release);
+        safeThis->repaint();
       } else if (result == 2) {
         SetupMidiTriggers::getInstance().clearTrigger(file.getFileName());
-        repaint();
+        safeThis->repaint();
       } else if (result == 3) {
-        learningFile = juce::File{};
-        repaint();
+        safeThis->learningFile = juce::File{};
+        safeThis->learningActive.store(false, std::memory_order_release);
+        safeThis->repaint();
       } else if (result == 4) {
         juce::AlertWindow::showOkCancelBox(
             juce::MessageBoxIconType::WarningIcon, "Delete Item",
             "Are you sure you want to permanently delete '" + file.getFileNameWithoutExtension() + "'?",
             "Delete", "Cancel", nullptr,
-            juce::ModalCallbackFunction::create([this, file](int confirmResult) {
+            juce::ModalCallbackFunction::create([safeThis, file](int confirmResult) {
               if (confirmResult == 1) {
                 file.deleteFile();
-                refresh();
+                if (safeThis != nullptr)
+                  safeThis->refresh();
               }
             }));
       } else if (result == 5) {
@@ -562,13 +566,16 @@ juce::File LibraryPanel::getSelectedPresetFile() const {
 }
 
 bool LibraryPanel::isLearning() const {
-  return setupsList && setupsList->learningFile.existsAsFile();
+  return setupsList && setupsList->learningActive.load(std::memory_order_acquire);
 }
 
 void LibraryPanel::assignLearnedTrigger(SetupMidiTrigger t) {
-  if (setupsList && setupsList->learningFile.existsAsFile()) {
-    auto fileName = setupsList->learningFile.getFileName();
-    SetupMidiTriggers::getInstance().setTrigger(fileName, t);
+  if (setupsList && setupsList->learningActive.load(std::memory_order_acquire)) {
+    setupsList->learningActive.store(false, std::memory_order_release);
+    if (setupsList->learningFile.existsAsFile()) {
+      auto fileName = setupsList->learningFile.getFileName();
+      SetupMidiTriggers::getInstance().setTrigger(fileName, t);
+    }
     setupsList->learningFile = juce::File{};
     setupsList->repaint();
   }

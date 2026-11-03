@@ -98,6 +98,12 @@ public:
                     const juce::Rectangle<int> &textArea,
                     juce::TextLayout &textLayout) override;
 
+  void drawCallOutBoxBackground(juce::CallOutBox &box, juce::Graphics &g,
+                                const juce::Path &path,
+                                juce::Image &cachedImage) override;
+
+  int getCallOutBoxBorderSize(const juce::CallOutBox &box) override;
+
   void drawLinearSlider(juce::Graphics &g, int x, int y, int width, int height,
                         float sliderPos, float minSliderPos, float maxSliderPos,
                         const juce::Slider::SliderStyle style,

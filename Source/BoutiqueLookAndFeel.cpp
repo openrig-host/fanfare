@@ -700,8 +700,8 @@ void BoutiqueLookAndFeel::drawPopupMenuBackground(juce::Graphics &g, int width, 
   juce::Rectangle<float> r(0.0f, 0.0f, (float)width, (float)height);
   g.setColour(t.panel);
   g.fillRect(r);
-  g.setColour(t.borderStrong);
-  g.drawRect(r, 1.0f);
+  g.setColour(juce::Colour(0xFF0A0A0A));
+  g.drawRect(r, 2.5f);
 }
 
 void BoutiqueLookAndFeel::drawTabButton(juce::TabBarButton &button,
@@ -742,10 +742,45 @@ void BoutiqueLookAndFeel::drawAlertBox(juce::Graphics &g,
 
   // Subtle teal accent rule along header bottom
   g.setColour(t.accentDim);
-  g.fillRect(1, 35, bounds.getWidth() - 2, 1);
+  g.fillRect(4, 35, bounds.getWidth() - 8, 1);
 
   g.setColour(t.text);
   textLayout.draw(g, textArea.toFloat());
+}
+
+void BoutiqueLookAndFeel::drawCallOutBoxBackground(juce::CallOutBox &box,
+                                                   juce::Graphics &g,
+                                                   const juce::Path &path,
+                                                   juce::Image &cachedImage) {
+  const auto &t = ThemeManager::getInstance().active();
+
+  if (cachedImage.isNull()) {
+    cachedImage = juce::Image(
+        juce::Image::ARGB, box.getWidth(), box.getHeight(), true,
+        *g.getInternalContext().getPreferredImageTypeForTemporaryImages());
+    cachedImage.setBackupEnabled(false);
+
+    juce::Graphics g2(cachedImage);
+    juce::DropShadow(juce::Colours::black.withAlpha(t.dark ? 0.82f : 0.55f),
+                     12, {0, 4})
+        .drawForPath(g2, path);
+  }
+
+  g.setColour(juce::Colours::black);
+  g.drawImageAt(cachedImage, 0, 0);
+
+  // Solid opaque panel fill so underlying rack clutter never bleeds through
+  g.setColour(t.panel);
+  g.fillPath(path);
+
+  // Bold 4px solid black outer frame around the CallOutBox card + pointer arrow
+  g.setColour(juce::Colour(0xFF0A0A0A));
+  g.strokePath(path, juce::PathStrokeType(4.0f, juce::PathStrokeType::curved,
+                                          juce::PathStrokeType::rounded));
+}
+
+int BoutiqueLookAndFeel::getCallOutBoxBorderSize(const juce::CallOutBox &) {
+  return 18;
 }
 
 void BoutiqueLookAndFeel::drawLinearSliderThumb(juce::Graphics &g, int x, int y,

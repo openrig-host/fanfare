@@ -25,6 +25,7 @@ public:
         if (file.existsAsFile()) {
             auto varObj = juce::JSON::parse(file);
             if (auto* obj = varObj.getDynamicObject()) {
+                juce::SpinLock::ScopedLockType sl(triggerLock);
                 triggers.clear();
                 for (const auto& prop : obj->getProperties()) {
                     auto name = prop.name.toString();
@@ -46,12 +47,15 @@ public:
         file.getParentDirectory().createDirectory();
         
         auto* obj = new juce::DynamicObject();
-        for (auto it = triggers.begin(); it != triggers.end(); ++it) {
-            auto* triggerObj = new juce::DynamicObject();
-            triggerObj->setProperty("isProgramChange", it.getValue().isProgramChange);
-            triggerObj->setProperty("number", it.getValue().number);
-            triggerObj->setProperty("channel", it.getValue().channel);
-            obj->setProperty(it.getKey(), triggerObj);
+        {
+            juce::SpinLock::ScopedLockType sl(triggerLock);
+            for (auto it = triggers.begin(); it != triggers.end(); ++it) {
+                auto* triggerObj = new juce::DynamicObject();
+                triggerObj->setProperty("isProgramChange", it.getValue().isProgramChange);
+                triggerObj->setProperty("number", it.getValue().number);
+                triggerObj->setProperty("channel", it.getValue().channel);
+                obj->setProperty(it.getKey(), triggerObj);
+            }
         }
         
         juce::FileOutputStream stream(file);
@@ -63,31 +67,37 @@ public:
     }
     
     void setTrigger(const juce::String& setupName, SetupMidiTrigger trigger) {
-        // Clear this trigger if bound elsewhere to avoid duplicates
-        if (trigger.number != -1) {
-            juce::StringArray keysToRemove;
-            for (auto it = triggers.begin(); it != triggers.end(); ++it) {
-                if (it.getValue().isProgramChange == trigger.isProgramChange && 
-                    it.getValue().number == trigger.number && 
-                    (trigger.channel == 0 || it.getValue().channel == 0 || it.getValue().channel == trigger.channel)) {
-                    keysToRemove.add(it.getKey());
+        {
+            juce::SpinLock::ScopedLockType sl(triggerLock);
+            // Clear this trigger if bound elsewhere to avoid duplicates
+            if (trigger.number != -1) {
+                juce::StringArray keysToRemove;
+                for (auto it = triggers.begin(); it != triggers.end(); ++it) {
+                    if (it.getValue().isProgramChange == trigger.isProgramChange && 
+                        it.getValue().number == trigger.number && 
+                        (trigger.channel == 0 || it.getValue().channel == 0 || it.getValue().channel == trigger.channel)) {
+                        keysToRemove.add(it.getKey());
+                    }
+                }
+                for (const auto& k : keysToRemove) {
+                    triggers.remove(k);
                 }
             }
-            for (const auto& k : keysToRemove) {
-                triggers.remove(k);
-            }
+            triggers.set(setupName, trigger);
         }
-        
-        triggers.set(setupName, trigger);
         save();
     }
     
     void clearTrigger(const juce::String& setupName) {
-        triggers.remove(setupName);
+        {
+            juce::SpinLock::ScopedLockType sl(triggerLock);
+            triggers.remove(setupName);
+        }
         save();
     }
     
     SetupMidiTrigger getTrigger(const juce::String& setupName) {
+        juce::SpinLock::ScopedLockType sl(triggerLock);
         if (triggers.contains(setupName)) {
             return triggers.getReference(setupName);
         }
@@ -97,6 +107,9 @@ public:
     }
     
     juce::String findSetupForTrigger(bool isPC, int number, int channel) const {
+        juce::SpinLock::ScopedTryLockType sl(triggerLock);
+        if (!sl.isLocked())
+            return {};
         for (auto it = triggers.begin(); it != triggers.end(); ++it) {
             if (it.getValue().isProgramChange == isPC && 
                 it.getValue().number == number && 
@@ -112,5 +125,6 @@ private:
         load();
     }
     
+    mutable juce::SpinLock triggerLock;
     juce::HashMap<juce::String, SetupMidiTrigger> triggers;
 };
