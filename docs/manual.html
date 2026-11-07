@@ -51,18 +51,21 @@
 			}
 			#header > header h1 a { color: var(--text); border-bottom: none; }
 			#header > header p { color: var(--dim); }
-			#nav ul li a {
-				color: var(--dim);
+			/* base paints the nav white/teal with !important at
+			   #header > nav ... specificity - rules must match it exactly */
+			#header > nav ul li { border-top-color: var(--border); }
+			#header > nav ul li a {
+				color: var(--dim) !important;
 				border-left: 3px solid transparent;
 				border-bottom: none;
 				border-radius: 0 4px 4px 0;
 				transition: color 0.12s, background 0.12s, border-color 0.12s;
 			}
-			#nav ul li a:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
-			#nav ul li a.active {
-				color: var(--accent);
+			#header > nav ul li a:hover { color: var(--text) !important; background: rgba(255, 255, 255, 0.04); }
+			#header > nav ul li a.active {
+				color: var(--accent) !important;
 				border-left-color: var(--accent);
-				background: rgba(255, 160, 47, 0.07);
+				background: rgba(255, 160, 47, 0.08);
 			}
 			#header footer .icons a { color: var(--faint); border-bottom: none; }
 			#header footer .icons a:hover { color: var(--accent); }
@@ -108,7 +111,11 @@
 			pre { background: var(--panel-alt); border: 1px solid var(--border); }
 			pre code { border: none; background: transparent; }
 			table th, table td { border-color: var(--border); color: var(--body); }
-			table thead { color: var(--text); }
+			table thead { color: var(--text); border-bottom-color: var(--border); }
+			table tfoot { border-top-color: var(--border); }
+			table tbody tr { border-color: var(--border); }
+			table tbody tr:nth-child(2n + 1) { background-color: rgba(255, 255, 255, 0.02); }
+			#main > section { border-top-color: var(--bg); }
 			table tbody tr:nth-child(2n) { background: var(--panel); }
 			.button, button, input[type="submit"] {
 				background: var(--raised) !important;
