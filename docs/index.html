@@ -3,16 +3,35 @@
 	Design based on "Dimension" by HTML5 UP (html5up.net | @ajlkn),
 	free for personal and commercial use under the CCA 3.0 license.
 -->
-<html>
+<html lang="en">
 	<head>
 		<title>Fanfare: Live VST3 Host for Keyboard Players</title>
 		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="description" content="Fanfare v1.41 is a rack-based VST3 host for keyboard players who gig. Clean song changes, separate FOH and IEM mixes with per-strip IEM trim, Curve-Link EQ, built-in acoustic IRs, stereo/ping-pong/tape delay, dual-deck DJ player with broadcast auto-leveling, Front Panel Dark &amp; Bright skins, tablet HUD, and a panic button that works." />
+		<link rel="canonical" href="https://openrig-host.github.io/fanfare/" />
+		<link rel="icon" type="image/png" href="Fanfare_Icon.png" />
+		<meta property="og:site_name" content="Fanfare" />
+		<meta property="og:type" content="website" />
+		<meta property="og:url" content="https://openrig-host.github.io/fanfare/" />
+		<meta property="og:title" content="Fanfare: Live VST3 Host for Keyboard Players" />
+		<meta property="og:description" content="No stuck notes. No dropouts. No failed song changes. A rack-based VST3 host for keyboard players who gig." />
+		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<link rel="preload" as="image" href="hero_bg.jpg" />
 		<link rel="stylesheet" href="assets/css/main.css" />
 		<noscript><link rel="stylesheet" href="assets/css/noscript.css" /></noscript>
 		<style>
-			#bg { background-image: url("fanfare_v1_4_console.jpg"); }
+			/* Hero background: serve the pre-darkened, pre-blurred plate through the
+			   theme's #bg:after layer so cover/no-repeat and the blur-on-open
+			   transition work as designed (never paint a raw UI screenshot on #bg). */
+			#bg:after { background-image: url("hero_bg.jpg"); }
+			#bg:before {
+				background-image: linear-gradient(to top, rgba(19, 21, 25, 0.55), rgba(19, 21, 25, 0.25));
+				background-size: auto;
+				background-position: center;
+				background-repeat: no-repeat;
+			}
 			.feature-grid {
 				display: grid;
 				grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -96,6 +115,12 @@
 				color: rgba(255,255,255,0.65); padding: 0.4em 1.1em; margin-bottom: 1.5em;
 				text-decoration: none;
 			}
+			.logo .logo-img {
+				display: block; width: 100%; height: 100%;
+				border-radius: 50%; object-fit: cover;
+			}
+			#footer .copyright { color: rgba(255,255,255,0.65); }
+			#footer .copyright a { color: rgba(255,255,255,0.75) !important; }
 		</style>
 	</head>
 	<body class="is-preload">
@@ -106,7 +131,7 @@
 				<!-- Header -->
 					<header id="header">
 						<div class="logo">
-							<span class="icon solid fa-music"></span>
+							<img class="logo-img" src="Fanfare_Icon.png" alt="" />
 						</div>
 						<div class="content">
 							<div class="inner">
@@ -144,7 +169,7 @@
 									<li><a href="manual.html" class="button icon solid fa-book">User's Manual</a></li>
 									<li><a href="https://github.com/openrig-host/fanfare" class="button" target="_blank" rel="noopener">Source Code</a></li>
 								</ul>
-								<span class="image main"><img src="vu_meters_detail.png" alt="Analog peak VU metering and dual FOH/IEM bus faders" /></span>
+								<span class="image main"><img src="vu_meters_detail.png" width="258" height="1002" decoding="async" alt="Analog peak VU metering and dual FOH/IEM bus faders" /></span>
 								<p>Separate master faders and VU meters for <strong>FOH</strong> (front of house) and <strong>IEM</strong> (in-ear monitors), plus per-strip <strong>IEM Trim</strong> (<code>-inf</code> to <code>+6 dB</code>) so you can turn up your Rhodes in your ears without touching what the room hears.</p>
 							</article>
 
@@ -219,24 +244,24 @@
 							<article id="screenshots">
 								<h2 class="major">Screenshots</h2>
 								<div class="showcase-tabs">
-									<button class="tab-btn active" onclick="switchTab(0)">Full Live Rig</button>
-									<button class="tab-btn" onclick="switchTab(1)">Tablet Stage HUD</button>
-									<button class="tab-btn" onclick="switchTab(2)">Channel Strip DSP</button>
-									<button class="tab-btn" onclick="switchTab(3)">MIDI FX</button>
-									<button class="tab-btn" onclick="switchTab(4)">Sampler</button>
-									<button class="tab-btn" onclick="switchTab(5)">VST Editors</button>
-									<button class="tab-btn" onclick="switchTab(6)">CC Manager</button>
-									<button class="tab-btn" onclick="switchTab(7)">Break-Music Player</button>
+									<button type="button" class="tab-btn active" onclick="switchTab(0)">Full Live Rig</button>
+									<button type="button" class="tab-btn" onclick="switchTab(1)">Tablet Stage HUD</button>
+									<button type="button" class="tab-btn" onclick="switchTab(2)">Channel Strip DSP</button>
+									<button type="button" class="tab-btn" onclick="switchTab(3)">MIDI FX</button>
+									<button type="button" class="tab-btn" onclick="switchTab(4)">Sampler</button>
+									<button type="button" class="tab-btn" onclick="switchTab(5)">VST Editors</button>
+									<button type="button" class="tab-btn" onclick="switchTab(6)">CC Manager</button>
+									<button type="button" class="tab-btn" onclick="switchTab(7)">Break-Music Player</button>
 								</div>
 								<div>
-									<img src="fanfare_v1_4_console.jpg" class="showcase-img active" alt="Fanfare v1.4 Front Panel live mixer interface" />
-									<img src="tablet_stage_hud.png" class="showcase-img" alt="Fanfare v1.4 Tablet Stage HUD over Wi-Fi SoftAP" />
-									<img src="channel_strip_dsp.png" class="showcase-img" alt="Channel strip processing and convolution panel" />
-									<img src="midi_effects_panel.png" class="showcase-img" alt="Arpeggiator transpose and octaver MIDI FX" />
-									<img src="sampler_splice_editor.png" class="showcase-img" alt="8-pad sampler and waveform splice handle editor" />
-									<img src="active_vst_windows.png" class="showcase-img" alt="Active VST editors" />
-									<img src="cc_assignment_manager.png" class="showcase-img" alt="CC assignment manager screen" />
-									<img src="break_music_player.png" class="showcase-img" alt="Dual-deck break-music player with YouTube download" />
+									<img src="fanfare_v1_4_console.jpg" width="1024" height="571" decoding="async" class="showcase-img active" alt="Fanfare v1.4 Front Panel live mixer interface" />
+									<img src="tablet_stage_hud.png" width="1280" height="800" loading="lazy" decoding="async" class="showcase-img" alt="Fanfare v1.4 Tablet Stage HUD over Wi-Fi SoftAP" />
+									<img src="channel_strip_dsp.png" width="965" height="512" loading="lazy" decoding="async" class="showcase-img" alt="Channel strip processing and convolution panel" />
+									<img src="midi_effects_panel.png" width="934" height="618" loading="lazy" decoding="async" class="showcase-img" alt="Arpeggiator transpose and octaver MIDI FX" />
+									<img src="sampler_splice_editor.png" width="1024" height="851" loading="lazy" decoding="async" class="showcase-img" alt="8-pad sampler and waveform splice handle editor" />
+									<img src="active_vst_windows.png" width="1024" height="545" loading="lazy" decoding="async" class="showcase-img" alt="Active VST editors" />
+									<img src="cc_assignment_manager.png" width="991" height="748" loading="lazy" decoding="async" class="showcase-img" alt="CC assignment manager screen" />
+									<img src="break_music_player.png" width="1024" height="764" loading="lazy" decoding="async" class="showcase-img" alt="Dual-deck break-music player with YouTube download" />
 								</div>
 								<p class="showcase-caption" id="tab-caption-text">Full live mixer interface with setlist manager, dual FOH/IEM mixes, and peak VU metering. Click an image to expand.</p>
 							</article>
@@ -287,7 +312,7 @@
 										<div class="step-desc">If anything fails to load, the swap doesn't happen and the current song keeps playing.</div>
 									</div>
 								</div>
-								<span class="image main"><img src="channel_strip_dsp.png" alt="Channel strip dynamics and EQ interface" /></span>
+								<span class="image main"><img src="channel_strip_dsp.png" width="965" height="512" loading="lazy" decoding="async" alt="Channel strip dynamics and EQ interface" /></span>
 							</article>
 
 						<!-- Download -->
@@ -304,7 +329,7 @@
 									<li><a href="https://github.com/openrig-host/fanfare/releases/latest" class="button primary icon solid fa-download" target="_blank" rel="noopener">Download Latest Release</a></li>
 									<li><a href="https://github.com/openrig-host/fanfare/blob/trunk/BUILDING.md" class="button" target="_blank" rel="noopener">Build Instructions</a></li>
 								</ul>
-								<p style="text-align:center; font-size:0.8em; color:rgba(255,255,255,0.5);">Windows 10/11 (64-bit) · VST3 plugin support · ASIO drivers for live low-latency use</p>
+								<p style="text-align:center; font-size:0.8em; color:rgba(255,255,255,0.55);">Free, open source (GPL v3). Your plugins and patches stay on your machine.</p>
 							</article>
 
 					</div>
