@@ -19,120 +19,166 @@
 		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
 		<meta name="twitter:card" content="summary_large_image" />
 		<link rel="stylesheet" href="assets-readonly/css/main.css" />
-		<style>
-			/* Readability & navigation refinements for 20-chapter manual */
-			body, input, select, textarea {
-				color: #4a4a4a;
+<style>
+			/* ============================================================
+			   Nota-style dark theme - matches the app's Studio palette
+			   (bg #1E1E1E, panel #252525, text #E8E8E8, accent #FFA02F).
+			   Overrides the Read Only base theme; single file, no build.
+			   ============================================================ */
+			:root {
+				--bg: #1e1e1e; --panel: #252525; --panel-alt: #2b2b2b;
+				--raised: #343434; --border: #3a3a3a; --border-strong: #4b4b4b;
+				--text: #e8e8e8; --body: #c9c9c9; --dim: #a6a6a6; --faint: #6e6e6e;
+				--accent: #ffa02f; --on-accent: #1c1409;
 			}
-			h1, h2, h3, h4, h5, h6, strong, b {
-				color: #2c3e50;
+			html { scroll-behavior: smooth; }
+			body {
+				background-color: var(--bg) !important;
+				color: var(--body);
 			}
-			blockquote {
-				background: #f7fbfa;
-				border-left: solid 6px #4acaa8;
-				font-style: normal;
-				padding: 1.25em 1.5em;
-				border-radius: 0 6px 6px 0;
-				color: #3a4a46;
+			h1, h2, h3, h4, h5, h6, strong, b { color: var(--text); }
+			a { color: var(--accent); border-bottom-color: rgba(255, 160, 47, 0.35); }
+			a:hover { color: #ffb964; }
+			::selection { background: rgba(255, 160, 47, 0.35); }
+			hr { border-bottom: solid 1px var(--border); }
+
+			/* ---- sidebar ---- */
+			#header {
+				background-color: var(--panel) !important;
+				border-right: 1px solid var(--border);
 			}
-			blockquote strong {
-				color: #1f7a61;
+			#header > header h1 a { color: var(--text); border-bottom: none; }
+			#header > header p { color: var(--dim); }
+			#nav ul li a {
+				color: var(--dim);
+				border-left: 3px solid transparent;
+				border-bottom: none;
+				border-radius: 0 4px 4px 0;
+				transition: color 0.12s, background 0.12s, border-color 0.12s;
 			}
-			#header > header {
-				padding: 1.6em 1.5em 1em 1.5em;
+			#nav ul li a:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
+			#nav ul li a.active {
+				color: var(--accent);
+				border-left-color: var(--accent);
+				background: rgba(255, 160, 47, 0.07);
 			}
-			#header > header .avatar {
-				width: 4.5em;
-				margin: 0 auto 0.9em auto;
-			}
-			#header > header h1 {
-				font-size: 1.35em;
-			}
-			#header > header p {
-				font-size: 0.85em;
-				margin: 0.4em 0 0.8em 0;
-				line-height: 1.4em;
-			}
-			#header > nav ul li a {
-				padding: 0.42em 1.2em;
-				font-size: 0.82em;
-				text-align: left;
-			}
+			#header footer .icons a { color: var(--faint); border-bottom: none; }
+			#header footer .icons a:hover { color: var(--accent); }
 			#nav-filter {
-				width: 100%;
-				height: 2.3em;
-				padding: 0 0.75em;
-				font-size: 0.82em;
-				border-radius: 4px;
-				border: solid 1px rgba(0, 0, 0, 0.25);
-				background: rgba(0, 0, 0, 0.35);
-				color: #ffffff;
+				background: var(--bg);
+				border: solid 1px var(--border);
+				color: var(--text);
 			}
-			#nav-filter::placeholder {
-				color: rgba(255, 255, 255, 0.85);
-			}
+			#nav-filter::placeholder { color: var(--faint); }
 			#nav-filter:focus {
-				background: #ffffff;
-				color: #2c3e50;
-				border-color: #ffffff;
+				background: var(--bg);
+				color: var(--text);
+				border-color: var(--accent);
 			}
-			#nav-filter:focus::placeholder {
-				color: rgba(44, 62, 80, 0.55);
+			#nav-filter:focus::placeholder { color: var(--faint); }
+
+			/* ---- main column ---- */
+			#main {
+				background: var(--bg) !important;
+				box-shadow: none !important;
+				border-radius: 0 !important;
+				border-left: 1px solid var(--border);
 			}
-			.image.main {
-				height: auto;
-				max-height: 26em;
-				overflow: hidden;
-				border-bottom: solid 4px #f4f4f4;
+			#main > section > .container { color: var(--body); }
+			#main > section { border-bottom: 1px solid var(--border); }
+			header.major h2, header.major { color: var(--text); }
+			header.major:after { background-color: var(--accent) !important; }
+			p, li { color: var(--body); }
+			blockquote {
+				background: var(--panel);
+				border-left: solid 3px var(--accent);
+				color: var(--body);
+				border-radius: 0 6px 6px 0;
 			}
-			.image.fit {
-				text-align: center;
-				background: #f8f9fa;
-				border: solid 1px #e4e4e4;
-				border-radius: 6px;
-				padding: 0.75em;
+			blockquote strong { color: var(--text); }
+			code {
+				background: var(--panel-alt);
+				border: 1px solid var(--border);
+				color: var(--accent);
+				border-radius: 3px;
+				padding: 0.08em 0.35em;
 			}
-			.image.fit img {
-				width: auto;
-				max-width: 100%;
-				max-height: 22em;
-				margin: 0 auto;
-				border-radius: 4px;
-				cursor: zoom-in;
+			pre { background: var(--panel-alt); border: 1px solid var(--border); }
+			pre code { border: none; background: transparent; }
+			table th, table td { border-color: var(--border); color: var(--body); }
+			table thead { color: var(--text); }
+			table tbody tr:nth-child(2n) { background: var(--panel); }
+			.button, button, input[type="submit"] {
+				background: var(--raised) !important;
+				color: var(--text) !important;
+				box-shadow: none !important;
+				border: 1px solid var(--border) !important;
 			}
-			.image.right {
-				max-width: 14em;
-			}
-			.image.right img {
-				width: auto;
-				max-width: 100%;
-				max-height: 24em;
-				border: solid 1px #e4e4e4;
-				border-radius: 5px;
-				cursor: zoom-in;
-			}
+			.button:hover { border-color: var(--accent) !important; color: var(--accent) !important; }
 			.use-case-label {
-				display: inline-block;
-				background: #4acaa8;
-				color: #ffffff;
-				font-size: 0.72em;
-				font-weight: 700;
-				letter-spacing: 0.08em;
-				text-transform: uppercase;
-				padding: 0.2em 0.7em;
-				border-radius: 4px;
-				margin-bottom: 0.6em;
+				background: var(--accent);
+				color: var(--on-accent);
 			}
-			.lightbox {
-				display: none; position: fixed; z-index: 20000; top: 0; left: 0;
-				width: 100%; height: 100%; background: rgba(0,0,0,0.9); cursor: zoom-out;
+			.image.main { border-bottom: solid 4px var(--panel-alt); background: var(--panel); }
+			.image.fit { background: var(--panel); border: solid 1px var(--border); }
+			.image.right img { border: solid 1px var(--border); }
+			#main #footer { color: var(--faint); }
+			#main #footer .icons a { color: var(--faint); border-bottom: none; }
+			#main #footer .icons a:hover { color: var(--accent); }
+
+			/* ---- hero + card grid (Nota landing style) ---- */
+			.manual-hero { padding: 2.5em 0 2em; margin-bottom: 2em; }
+			.manual-hero h1 {
+				font-size: 2.5em;
+				letter-spacing: -0.01em;
+				margin: 0 0 0.35em;
 			}
-			.lightbox-content {
-				max-width: 94%; max-height: 92vh; position: absolute;
-				top: 50%; left: 50%; transform: translate(-50%, -50%);
-				border-radius: 6px;
-				box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+			.manual-hero > p {
+				color: var(--dim);
+				font-size: 1.08em;
+				line-height: 1.6em;
+				max-width: 42em;
+				margin: 0;
 			}
+			.manual-cards {
+				display: grid;
+				grid-template-columns: repeat(auto-fill, minmax(265px, 1fr));
+				gap: 14px;
+				margin-top: 2.2em;
+			}
+			a.manual-card {
+				display: block;
+				background: var(--panel);
+				border: 1px solid var(--border);
+				border-radius: 8px;
+				padding: 1.05em 1.15em;
+				text-decoration: none;
+				transition: border-color 0.15s, transform 0.15s;
+			}
+			a.manual-card:hover {
+				border-color: var(--accent);
+				transform: translateY(-2px);
+			}
+			a.manual-card h3 {
+				display: flex;
+				align-items: baseline;
+				margin: 0 0 0.35em;
+				font-size: 1em;
+			}
+			a.manual-card h3 .arrow { margin-left: auto; color: var(--accent); }
+			a.manual-card p {
+				margin: 0;
+				color: var(--dim);
+				font-size: 0.87em;
+				line-height: 1.5em;
+			}
+			@media screen and (max-width: 736px) {
+				.manual-hero h1 { font-size: 1.9em; }
+			}
+
+			/* lightbox unchanged */
+			.lightbox { display: none; position: fixed; z-index: 20000; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.92); cursor: zoom-out; }
+			.lightbox-content { max-width: 94%; max-height: 92vh; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); border-radius: 6px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); }
 		</style>
 	</head>
 	<body class="is-preload">
@@ -185,6 +231,22 @@
 
 				<!-- Main -->
 					<div id="main">
+
+						<!-- Hero + chapter cards (Nota-style landing) -->
+						<div class="manual-hero container">
+							<h1>Stage Survival Manual</h1>
+							<p>Everything Fanfare can do, and how to do it &mdash; from plugging in to the last encore. Twenty-three chapters, zero panic. If nothing is making noise right now, jump straight to the <a href="#no-sound">No-Sound Emergency Checklist</a>.</p>
+							<div class="manual-cards">
+								<a class="manual-card" href="#workflow"><h3>Start Here <span class="arrow">&rarr;</span></h3><p>Building blocks, first noise in ten minutes, and the emergency checklist.</p></a>
+								<a class="manual-card" href="#main-mixer"><h3>The Console <span class="arrow">&rarr;</span></h3><p>Main faders, FOH &amp; IEM buses, Panic, and USB hotplug survival.</p></a>
+								<a class="manual-card" href="#strips"><h3>Strips &amp; DSP <span class="arrow">&rarr;</span></h3><p>Strip chains, Curve-Link EQ, delay, IRs, musette and note splits.</p></a>
+								<a class="manual-card" href="#cc-assignments"><h3>MIDI &amp; CCs <span class="arrow">&rarr;</span></h3><p>CC assignments, B3 drawbars, transpose, arp and octaver.</p></a>
+								<a class="manual-card" href="#sampler"><h3>Sampler &amp; Breaks <span class="arrow">&rarr;</span></h3><p>The 8-pad sampler and the dual-deck break DJ with auto-leveler.</p></a>
+								<a class="manual-card" href="#song-builder"><h3>Build &amp; Perform <span class="arrow">&rarr;</span></h3><p>Song Builder, Scenes, Stage Queue, Setlists and the Gig Notepad.</p></a>
+								<a class="manual-card" href="#web-remote"><h3>Remote &amp; Settings <span class="arrow">&rarr;</span></h3><p>Tablet Stage HUD, settings, routing and the Resource Inspector.</p></a>
+								<a class="manual-card" href="#engine-tuning"><h3>Under the Hood <span class="arrow">&rarr;</span></h3><p>Engine &amp; CPU tuning, USB quirks, community and roll-your-own.</p></a>
+							</div>
+						</div>
 
 						<!-- 1. WORKFLOW -->
 							<section id="workflow">
