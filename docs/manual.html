@@ -22,13 +22,15 @@
 <style>
 			/* ============================================================
 			   Nota-style dark theme - matches the app's Studio palette
-			   (bg #1E1E1E, panel #252525, text #E8E8E8, accent #FFA02F).
-			   Overrides the Read Only base theme; single file, no build.
-			   ============================================================ */
+			   (bg #1E1E1E, panel #252525, accent #FFA02F). Text ramp is
+			   brighter than the app palette for screen readability
+			   (body #DEDEDE ~12.9:1 on bg). Overrides the Read Only
+			   base theme; single file, no build.
+			   ============================================================ -->
 			:root {
 				--bg: #1e1e1e; --panel: #252525; --panel-alt: #2b2b2b;
 				--raised: #343434; --border: #3a3a3a; --border-strong: #4b4b4b;
-				--text: #e8e8e8; --body: #c9c9c9; --dim: #a6a6a6; --faint: #6e6e6e;
+				--text: #f2f2f2; --body: #dedede; --dim: #bfbfbf; --faint: #8f8f8f;
 				--accent: #ffa02f; --on-accent: #1c1409;
 			}
 			html { scroll-behavior: smooth; }
