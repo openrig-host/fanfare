@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(Fanfare VERSION 1.3.1 LANGUAGES C CXX)
+project(Fanfare VERSION 1.4.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,7 +17,7 @@ juce_add_gui_app(Fanfare
     PRODUCT_NAME    "Fanfare"
     COMPANY_NAME    "Fanfare"
     BUNDLE_ID       "com.fanfare.app"
-    ICON_BIG        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Resources/OpenRig_Icon.png"
+    ICON_BIG        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Resources/Fanfare_Icon.png"
 )
 
 # All compilation units (must match the Projucer source list).
@@ -64,6 +64,7 @@ target_link_libraries(Fanfare PRIVATE
     juce::juce_audio_utils
     juce::juce_core
     juce::juce_data_structures
+    juce::juce_dsp
     juce::juce_events
     juce::juce_graphics
     juce::juce_gui_basics

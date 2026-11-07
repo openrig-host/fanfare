@@ -31,6 +31,49 @@ inline ButtonRole getButtonRole(const juce::Button& btn) {
     return ButtonRole::Standard;
 }
 
+// Label casing for the active theme. Front Panel themes engrave UPPERCASE;
+// Studio uses sentence case ("SAVE SET" -> "Save set") while keeping known
+// acronyms (FOH, IEM, MIDI...) and anything that isn't all-caps (plugin and
+// song names) untouched.
+inline juce::String toSentenceCase(const juce::String& s) {
+    if (s.isEmpty() || s != s.toUpperCase() || s == s.toLowerCase())
+        return s; // mixed case (user names) or no letters at all
+    static const juce::StringArray acronyms {
+        "FOH", "IEM", "CC", "NR", "DYN", "SMP", "MP3", "MIDI", "DSP", "EQ", "IR",
+        "VST", "VST3", "CPU", "RAM", "LAT", "XRUNS", "USB", "ASIO", "HUD", "BPM",
+        "DJ", "FX", "OK", "PC", "LFO", "ADSR", "UNLK", "GUI", "ID", "MS", "DB",
+        "HZ", "KHZ", "WAV", "CSV", "JSON", "SQLITE", "M3U", "LPF", "HPF", "VU",
+        "OFF", "ON", "A", "B", "L", "R", "M", "S", "E", "I", "F"};
+    juce::StringArray words;
+    words.addTokens(s, " ", "");
+    bool firstAlphaDone = false;
+    for (auto& w : words) {
+        juce::String core = w.retainCharacters("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+        if (core.isEmpty() || core.containsAnyOf("0123456789") || acronyms.contains(core)) {
+            if (core.isNotEmpty())
+                firstAlphaDone = true;
+            continue;
+        }
+        juce::String lower = w.toLowerCase();
+        if (!firstAlphaDone) {
+            for (int i = 0; i < lower.length(); ++i) {
+                if (juce::CharacterFunctions::isLetter(lower[i])) {
+                    lower = lower.substring(0, i) + lower.substring(i, i + 1).toUpperCase() +
+                            lower.substring(i + 1);
+                    break;
+                }
+            }
+            firstAlphaDone = true;
+        }
+        w = lower;
+    }
+    return words.joinIntoString(" ");
+}
+
+inline juce::String themedLabel(const juce::String& s) {
+    return ThemeManager::isStudio() ? toSentenceCase(s) : s.toUpperCase();
+}
+
 // Shared Front Panel chassis frame for modal overlays and inspector panels.
 namespace ModalFrame {
 
@@ -47,6 +90,34 @@ inline void paintOverlayScrimAndPanel(juce::Graphics& g,
 
     auto pf = panelBounds.toFloat();
     const bool isDark = ThemeManager::getInstance().active().dark;
+
+    // Studio: flat Nota-style card - soft shadow, 1px border, sentence-case
+    // title over a hairline. No sunken header, no bezel, no engraving.
+    if (ThemeManager::isStudio()) {
+        if (panelBounds != fullBounds) {
+            juce::DropShadow(juce::Colours::black.withAlpha(0.55f), 18, {0, 6})
+                .drawForRectangle(g, panelBounds);
+        }
+        g.setColour(ThemeManager::get(Theme::Role::panel));
+        g.fillRoundedRectangle(pf, 6.0f);
+        if (headerHeight > 0) {
+            g.setColour(ThemeManager::get(Theme::Role::border));
+            g.fillRect(pf.getX() + 1.0f, (float)(panelBounds.getY() + headerHeight - 1),
+                       pf.getWidth() - 2.0f, 1.0f);
+            if (engravedTitle.isNotEmpty()) {
+                g.setColour(ThemeManager::get(Theme::Role::text));
+                g.setFont(juce::FontOptions(15.0f, juce::Font::bold));
+                g.drawText(toSentenceCase(engravedTitle),
+                           panelBounds.getX() + 16, panelBounds.getY(),
+                           panelBounds.getWidth() - 160, headerHeight,
+                           juce::Justification::centredLeft, true);
+            }
+        }
+        g.setColour(ThemeManager::get(Theme::Role::borderStrong));
+        g.drawRoundedRectangle(pf.reduced(0.5f), 6.0f, 1.0f);
+        juce::ignoreUnused(drawOuterBezel, isDark);
+        return;
+    }
 
     // Drop shadow (visible whenever panelBounds sits inside a larger scrim)
     if (panelBounds != fullBounds) {
@@ -101,6 +172,14 @@ inline void paintOverlayScrimAndPanel(juce::Graphics& g,
 
 inline void paintRecessedWell(juce::Graphics& g, juce::Rectangle<float> bounds, float radius = 2.5f) {
     const bool isDark = ThemeManager::getInstance().active().dark;
+    if (ThemeManager::isStudio()) {
+        // Studio: flat field, 1px hairline, no inner shadow
+        g.setColour(ThemeManager::get(Theme::Role::sunken));
+        g.fillRoundedRectangle(bounds, juce::jmax(radius, 3.0f));
+        g.setColour(ThemeManager::get(Theme::Role::border));
+        g.drawRoundedRectangle(bounds.reduced(0.5f), juce::jmax(radius, 3.0f), 1.0f);
+        return;
+    }
     g.setColour(ThemeManager::get(Theme::Role::sunken));
     g.fillRoundedRectangle(bounds, radius);
 

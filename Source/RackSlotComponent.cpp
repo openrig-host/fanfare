@@ -348,6 +348,7 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   fohRoutingBtn.setClickingTogglesState(true);
   fohRoutingBtn.setButtonText("FOH");
   Fanfare::setButtonRole(fohRoutingBtn, Fanfare::ButtonRole::Foh);
+  fohRoutingBtn.getProperties().set("isSendToggle", true);
   fohRoutingBtn.setTooltip("FOH Send: Routes this channel's signal to the Front of House mix. Hold to learn a FOH fader CC.");
   fohRoutingBtn.setToggleState(slot.isFohEnabled(), juce::dontSendNotification);
   fohRoutingBtn.onClick = [this]() {
@@ -368,6 +369,7 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   iemRoutingBtn.setClickingTogglesState(true);
   iemRoutingBtn.setButtonText("IEM");
   Fanfare::setButtonRole(iemRoutingBtn, Fanfare::ButtonRole::Iem);
+  iemRoutingBtn.getProperties().set("isSendToggle", true);
   iemRoutingBtn.setTooltip("IEM Send: Routes this channel's signal to your In-Ear Monitors mix. Hold to learn an IEM fader CC.");
   iemRoutingBtn.setToggleState(slot.isIemEnabled(), juce::dontSendNotification);
   iemRoutingBtn.onClick = [this]() {

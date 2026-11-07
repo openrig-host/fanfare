@@ -6,8 +6,12 @@
 
 /**
  * BoutiqueLookAndFeel
- * Implements the "Front Panel" hardware aesthetic for Fanfare, unified with
- * the Tablet Stage HUD: charcoal/paper panel faces, hairline borders, top bevel
+ * Two render styles, chosen by the active theme:
+ *  - Studio (default, Theme::isStudio): Nota-style flat surfaces, 1px
+ *    hairlines, sentence-case Source Sans 3 labels, JetBrains Mono numbers,
+ *    one orange accent for active state only.
+ *  - Front Panel: the hardware aesthetic shared with the Tablet Stage HUD:
+ *    charcoal/paper panel faces, hairline borders, top bevel
  * highlights, engraved Barlow Condensed labels, Source Sans 3 body text,
  * gold FOH / cyan IEM bus coding, and brushed-metal fader caps.
  */
@@ -21,10 +25,14 @@ public:
   static juce::Typeface::Ptr getCondensedTypeface();
   static juce::Typeface::Ptr getUiRegularTypeface();
   static juce::Typeface::Ptr getUiBoldTypeface();
+  static juce::Typeface::Ptr getMonoTypeface(bool bold = false);
 
   static juce::Font condensedFont(float height, float kerning = 0.05f);
   static juce::Font uiFont(float height, bool bold = false);
   static juce::Font monoFont(float height, bool bold = false);
+
+  // Slider value boxes render in the mono face to match telemetry readouts.
+  juce::Label *createSliderTextBox(juce::Slider &slider) override;
 
   // Reusable segmented LED meter renderer (red zone anchored to top of scale)
   static void drawSegmentedMeterBar(juce::Graphics& g,

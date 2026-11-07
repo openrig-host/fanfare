@@ -15,6 +15,7 @@ public:
     const Theme& active() const { return Theme::all()[juce::jlimit(0, (int)Theme::all().size() - 1, currentIndex)]; }
 
     static juce::Colour get(Theme::Role r) { return getInstance().active().get(r); }
+    static bool isStudio() { return getInstance().active().isStudio(); }
 
     int getCurrentIndex() const { return currentIndex; }
     juce::String getCurrentId() const { return active().id; }
@@ -58,6 +59,13 @@ public:
         if (f.existsAsFile()) {
             auto parsed = juce::JSON::parse(f);
             if (auto* obj = parsed.getDynamicObject()) {
+                // One-time introduction of the Studio look (Nov 2026): existing
+                // installs switch to Studio once; any later choice sticks.
+                if (!static_cast<bool>(obj->getProperty("studioIntroduced"))) {
+                    currentIndex = 0; // Studio
+                    saveToSettings();
+                    return;
+                }
                 juce::String rawId = obj->getProperty("themeId").toString();
                 juce::String normId = Theme::normalizeThemeId(rawId);
                 for (size_t i = 0; i < Theme::all().size(); ++i) {
@@ -70,7 +78,7 @@ public:
                 }
             }
         }
-        currentIndex = 0; // Front Panel Dark
+        currentIndex = 0; // Studio
     }
 
     void saveToSettings() {
@@ -78,6 +86,7 @@ public:
         f.getParentDirectory().createDirectory();
         juce::DynamicObject::Ptr obj = new juce::DynamicObject();
         obj->setProperty("themeId", getCurrentId());
+        obj->setProperty("studioIntroduced", true);
         juce::FileOutputStream fos(f);
         if (fos.openedOk()) {
             fos.setPosition(0);

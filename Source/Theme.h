@@ -3,7 +3,10 @@
 #include <JuceHeader.h>
 #include <vector>
 
-// Theme.h - "Front Panel" role-based color system.
+// Theme.h - role-based color system.
+//
+//   - Studio (default): Nota-style flat neutral greys, single orange accent
+//     (#FFA02F), FOH green / IEM blue. Rendered flat by BoutiqueLookAndFeel.
 //
 // Shared source of truth with the Tablet HUD (`Source/Web/static/style.css`):
 //   - Front Panel Dark: charcoal metal (#1B1F22), hairline borders, engraved
@@ -164,9 +167,72 @@ struct Theme {
         return juce::Colours::magenta;
     }
 
+    // Studio style = Nota-like flat rendering: no bevels/gradients/engraving,
+    // sentence-case labels, 1px hairlines, single orange accent. The Front
+    // Panel themes keep the hardware look. BoutiqueLookAndFeel branches on this.
+    bool isStudio() const { return id.startsWith("studio"); }
+
     static const std::vector<Theme>& all() {
         static const std::vector<Theme> themes = {
-            // ---------- 1. Front Panel Dark (default) ----------
+            // ---------- 0. Studio (default; Nota-style calm greys + orange) ----------
+            // Accent orange = active/selected/armed only. FOH green / IEM blue
+            // stay clear of the accent and of danger red.
+            {"studio", "Studio", true, true,
+             /*background*/     juce::Colour(0xFF1C1D1F),
+             /*panel*/          juce::Colour(0xFF232427),
+             /*panelAlt*/       juce::Colour(0xFF2A2B2E),
+             /*raised*/         juce::Colour(0xFF313236),
+             /*border*/         juce::Colour(0xFF38393D),
+             /*borderStrong*/   juce::Colour(0xFF4A4B50),
+             /*text*/           juce::Colour(0xFFE6E6E6),
+             /*textDim*/        juce::Colour(0xFFA0A1A5),
+             /*textFaint*/      juce::Colour(0xFF6E6F74),
+             /*textOnAccent*/   juce::Colour(0xFF1C1409),
+             /*accent*/         juce::Colour(0xFFFFA02F),
+             /*accentDim*/      juce::Colour(0xFFB8701F),
+             /*foh*/            juce::Colour(0xFF5FC08A),
+             /*iem*/            juce::Colour(0xFF5AA9F0),
+             /*ok*/             juce::Colour(0xFF5FC08A),
+             /*warn*/           juce::Colour(0xFFE5C07B),
+             /*danger*/         juce::Colour(0xFFE5534B),
+             /*panic*/          juce::Colour(0xFFE0443B),
+             /*active*/         juce::Colour(0xFFFFA02F),
+             /*bypassed*/       juce::Colour(0xFF3A3B3F),
+             /*meterLow*/       juce::Colour(0xFF5FC08A),
+             /*meterMid*/       juce::Colour(0xFFE5C07B),
+             /*meterPeak*/      juce::Colour(0xFFE5534B),
+             /*catMonitor*/     juce::Colour(0xFFC9915A),
+             /*catKeyboard*/    juce::Colour(0xFF6F9FC8),
+             /*catAccordion*/   juce::Colour(0xFFC0645E),
+             /*catReturn*/      juce::Colour(0xFF7C84C4),
+             /*catDefault*/     juce::Colour(0xFF4A4B50),
+             /*midiNote*/       juce::Colour(0xFF5FC08A),
+             /*midiCC*/         juce::Colour(0xFF5AA9F0),
+             /*midiPC*/         juce::Colour(0xFFB08AE0),
+             /*midiArm*/        juce::Colour(0xFFFFA02F),
+             /*midiOther*/      juce::Colour(0xFFE08D5A),
+             /*scrim*/          juce::Colour(0xD9111214),
+             /*knobFace*/       juce::Colour(0xFF313236),
+             /*trackGroove*/    juce::Colour(0xFF151618),
+             /*knobThumb*/      juce::Colour(0xFFE6E6E6),
+             /*canvas*/         juce::Colour(0xFF1C1D1F),
+             /*sunken*/         juce::Colour(0xFF18191B),
+             /*hairline*/       juce::Colour(0x1FFFFFFF),
+             /*hairlineStrong*/ juce::Colour(0x33FFFFFF),
+             /*engrave*/        juce::Colour(0xFFA0A1A5),
+             /*faceTop*/        juce::Colour(0xFF2E2F33),
+             /*faceBot*/        juce::Colour(0xFF2E2F33),
+             /*pressTop*/       juce::Colour(0xFF26272A),
+             /*pressBot*/       juce::Colour(0xFF26272A),
+             /*bevelHi*/        juce::Colour(0x00FFFFFF),
+             /*vuFace*/         juce::Colour(0xFFF3EFE6),
+             /*faderCapFoh*/    juce::Colour(0xFF5FC08A),
+             /*faderCapIem*/    juce::Colour(0xFF5AA9F0),
+             /*helpFaceTop*/    juce::Colour(0xFF2E2F33),
+             /*helpFaceBot*/    juce::Colour(0xFF2E2F33),
+             /*helpText*/       juce::Colour(0xFFE6E6E6)},
+
+            // ---------- 1. Front Panel Dark ----------
             {"frontPanelDark", "Front Panel Dark", true, true,
              /*background*/     juce::Colour(0xFF131619),
              /*panel*/          juce::Colour(0xFF1B1F22),

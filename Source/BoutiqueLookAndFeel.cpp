@@ -1,6 +1,7 @@
 #include "BoutiqueLookAndFeel.h"
 #include "AssetLoader.h"
 #include "EmbeddedFonts.h"
+#include "EmbeddedMonoFonts.h"
 
 namespace {
 
@@ -44,6 +45,13 @@ juce::Typeface::Ptr BoutiqueLookAndFeel::getUiBoldTypeface() {
 }
 
 juce::Font BoutiqueLookAndFeel::condensedFont(float height, float kerning) {
+  // Studio drops the engraved condensed caps: labels use the UI sans
+  // (slightly smaller, since Source Sans is wider than Barlow Condensed).
+  if (ThemeManager::isStudio()) {
+    if (auto tf = getUiBoldTypeface())
+      return juce::Font(juce::FontOptions(tf).withHeight(height * 0.96f));
+    return juce::Font(juce::FontOptions(height * 0.96f, juce::Font::bold));
+  }
   if (auto tf = getCondensedTypeface()) {
     return juce::Font(juce::FontOptions(tf).withHeight(height).withKerningFactor(kerning));
   }
@@ -59,8 +67,29 @@ juce::Font BoutiqueLookAndFeel::uiFont(float height, bool bold) {
   return juce::Font(juce::FontOptions(height, useBoldFace ? juce::Font::bold : juce::Font::plain));
 }
 
+juce::Typeface::Ptr BoutiqueLookAndFeel::getMonoTypeface(bool bold) {
+  static juce::Typeface::Ptr regular = loadGzippedTypeface(
+      Fanfare::EmbeddedMonoFonts::JETBRAINS_MONO_REGULAR_GZ,
+      Fanfare::EmbeddedMonoFonts::JETBRAINS_MONO_REGULAR_GZ_LEN);
+  static juce::Typeface::Ptr boldTf = loadGzippedTypeface(
+      Fanfare::EmbeddedMonoFonts::JETBRAINS_MONO_BOLD_GZ,
+      Fanfare::EmbeddedMonoFonts::JETBRAINS_MONO_BOLD_GZ_LEN);
+  return bold ? boldTf : regular;
+}
+
+// Numeric readouts (CPU, RAM, dB, value boxes): embedded JetBrains Mono for
+// tabular digits; falls back to Consolas if the embedded face fails to load.
 juce::Font BoutiqueLookAndFeel::monoFont(float height, bool bold) {
+  if (auto tf = getMonoTypeface(bold))
+    return juce::Font(juce::FontOptions(tf).withHeight(height));
   return juce::Font(juce::FontOptions("Consolas", height, bold ? juce::Font::bold : juce::Font::plain));
+}
+
+juce::Label *BoutiqueLookAndFeel::createSliderTextBox(juce::Slider &slider) {
+  auto *box = LookAndFeel_V4::createSliderTextBox(slider);
+  box->setFont(monoFont(juce::jlimit(10.5f, 13.0f, (float)slider.getTextBoxHeight() - 5.0f)));
+  box->setJustificationType(juce::Justification::centred);
+  return box;
 }
 
 void BoutiqueLookAndFeel::drawSegmentedMeterBar(juce::Graphics& g,
@@ -200,9 +229,15 @@ juce::Typeface::Ptr BoutiqueLookAndFeel::getTypefaceForFont(const juce::Font& fo
   const auto name = font.getTypefaceName();
   if (name.containsIgnoreCase("Consolas") || name.containsIgnoreCase("Cascadia") ||
       name.containsIgnoreCase("Mono") || name == juce::Font::getDefaultMonospacedFontName()) {
+    if (auto tf = getMonoTypeface(font.isBold()))
+      return tf;
     return juce::LookAndFeel_V4::getTypefaceForFont(font);
   }
   if (name.containsIgnoreCase("Barlow") || name.containsIgnoreCase("Condensed")) {
+    if (ThemeManager::isStudio()) {
+      if (auto tf = getUiBoldTypeface())
+        return tf;
+    }
     if (auto tf = getCondensedTypeface())
       return tf;
   }
@@ -219,6 +254,8 @@ juce::Typeface::Ptr BoutiqueLookAndFeel::getTypefaceForFont(const juce::Font& fo
 
 juce::Font BoutiqueLookAndFeel::getTextButtonFont(juce::TextButton&, int buttonHeight) {
   float h = juce::jlimit(10.5f, 13.5f, (float)buttonHeight * 0.56f);
+  if (ThemeManager::isStudio())
+    return uiFont(juce::jlimit(11.5f, 13.5f, (float)buttonHeight * 0.55f), false);
   return condensedFont(h, 0.05f);
 }
 
@@ -232,6 +269,8 @@ juce::Font BoutiqueLookAndFeel::getPopupMenuFont() {
 }
 
 juce::Font BoutiqueLookAndFeel::getAlertWindowTitleFont() {
+  if (ThemeManager::isStudio())
+    return uiFont(16.0f, true);
   return condensedFont(17.5f, 0.06f);
 }
 
@@ -302,6 +341,30 @@ void BoutiqueLookAndFeel::drawToggleButton(juce::Graphics &g,
                                 bounds.getCentreY() - boxSize * 0.5f,
                                 boxSize, boxSize);
 
+  if (t.isStudio()) {
+    // Flat checkbox: accent fill + check mark when on, sentence-case label.
+    const bool on = button.getToggleState();
+    g.setColour(on ? t.accent : (shouldDrawButtonAsHighlighted ? t.raised : t.sunken));
+    g.fillRoundedRectangle(ledBox, 3.0f);
+    g.setColour(on ? t.accent : (shouldDrawButtonAsHighlighted ? t.borderStrong : t.border));
+    g.drawRoundedRectangle(ledBox.reduced(0.5f), 3.0f, 1.0f);
+    if (on) {
+      juce::Path tick;
+      tick.startNewSubPath(ledBox.getX() + 3.2f, ledBox.getCentreY() + 0.2f);
+      tick.lineTo(ledBox.getX() + 5.6f, ledBox.getBottom() - 3.4f);
+      tick.lineTo(ledBox.getRight() - 3.0f, ledBox.getY() + 3.4f);
+      g.setColour(t.textOnAccent);
+      g.strokePath(tick, juce::PathStrokeType(1.7f, juce::PathStrokeType::curved,
+                                              juce::PathStrokeType::rounded));
+    }
+    g.setColour(button.isEnabled() ? (on ? t.text : t.textDim) : t.textFaint);
+    g.setFont(uiFont(13.0f, false));
+    g.drawFittedText(Fanfare::toSentenceCase(button.getButtonText()),
+                     bounds.withTrimmedLeft(boxSize + 8.0f).toNearestInt(),
+                     juce::Justification::centredLeft, 1, 0.85f);
+    return;
+  }
+
   Fanfare::ModalFrame::paintRecessedWell(g, ledBox, 2.0f);
 
   if (button.getToggleState()) {
@@ -360,6 +423,21 @@ void BoutiqueLookAndFeel::drawRotarySlider(juce::Graphics &g, int x, int y,
   }
 
   // Drop shadow
+  if (t.isStudio()) {
+    // Flat knob: solid face, 1px rim, accent pointer
+    g.setColour(t.raised);
+    g.fillEllipse(center.x - knobRadius, center.y - knobRadius,
+                  knobRadius * 2.0f, knobRadius * 2.0f);
+    g.setColour(t.borderStrong);
+    g.drawEllipse(center.x - knobRadius, center.y - knobRadius,
+                  knobRadius * 2.0f, knobRadius * 2.0f, 1.0f);
+    juce::Path sp;
+    sp.addRoundedRectangle(-1.1f, -knobRadius + 2.5f, 2.2f, knobRadius * 0.62f, 1.0f);
+    sp.applyTransform(juce::AffineTransform::rotation(angle).translated(center.x, center.y));
+    g.setColour(t.text);
+    g.fillPath(sp);
+    return;
+  }
   g.setColour(juce::Colours::black.withAlpha(0.42f));
   g.fillEllipse(center.x - knobRadius, center.y - knobRadius + 1.5f,
                 knobRadius * 2.0f, knobRadius * 2.0f);
@@ -385,6 +463,153 @@ void BoutiqueLookAndFeel::drawRotarySlider(juce::Graphics &g, int x, int y,
   g.fillPath(p);
 }
 
+// ============================================================================
+// Studio (Nota-style) button rendering: flat fills, 1px borders, 4px radius.
+// Accent fill = active/armed. Strip sends (isSendToggle) invert the usual
+// emphasis: ON is the normal state and stays quiet (thin bus-colour underline);
+// OFF is the exception and gets an amber outline.
+// ============================================================================
+namespace {
+
+void drawStudioButtonBackground(juce::Graphics &g, juce::Button &button,
+                                Fanfare::ButtonRole role, bool isActive,
+                                bool isOver, bool isDown) {
+  const auto &t = ThemeManager::getInstance().active();
+  auto r = button.getLocalBounds().toFloat().reduced(0.5f);
+  const float radius = 4.0f;
+  const bool isSend = static_cast<bool>(button.getProperties().getWithDefault("isSendToggle", false));
+
+  juce::Colour fill = isDown ? t.pressTop : (isOver ? t.raised : t.panelAlt);
+  juce::Colour border = isOver ? t.borderStrong : t.border;
+  juce::Colour underline = juce::Colours::transparentBlack;
+
+  switch (role) {
+    case Fanfare::ButtonRole::PluginSlot: {
+      const bool hasPlugin = static_cast<bool>(button.getProperties().getWithDefault("hasPlugin", false));
+      const bool isMidiOut = static_cast<bool>(button.getProperties().getWithDefault("isMidiOut", false));
+      if (!hasPlugin) {
+        g.setColour(isOver ? t.panelAlt : t.panel.withAlpha(0.0f));
+        g.fillRoundedRectangle(r, radius);
+        juce::Path outline, dashed;
+        outline.addRoundedRectangle(r, radius);
+        const float dashes[] = {3.0f, 3.0f};
+        juce::PathStrokeType(1.0f).createDashedStroke(dashed, outline, dashes, 2);
+        g.setColour(isOver ? t.borderStrong : t.border);
+        g.fillPath(dashed);
+        return;
+      }
+      g.setColour(isDown ? t.pressTop : (isOver ? t.raised : t.panelAlt));
+      g.fillRoundedRectangle(r, radius);
+      juce::Colour bar = isMidiOut ? t.midiPC : t.accent;
+      if (button.getProperties().contains("slotAccent"))
+        bar = juce::Colour((juce::uint32)(juce::int64)button.getProperties()["slotAccent"]);
+      g.setColour(bar);
+      g.fillRoundedRectangle(r.getX() + 1.5f, r.getY() + 3.0f, 2.0f, r.getHeight() - 6.0f, 1.0f);
+      g.setColour(isOver ? t.borderStrong : t.border);
+      g.drawRoundedRectangle(r, radius, 1.0f);
+      return;
+    }
+    case Fanfare::ButtonRole::Panic:
+      fill = isDown ? t.panic.darker(0.25f) : (isOver ? t.panic.brighter(0.12f) : t.panic);
+      border = t.panic.brighter(0.25f);
+      break;
+    case Fanfare::ButtonRole::Mute:
+      if (isActive) {
+        fill = isDown ? t.danger.darker(0.2f) : (isOver ? t.danger.brighter(0.1f) : t.danger);
+        border = t.danger.brighter(0.2f);
+      }
+      break;
+    case Fanfare::ButtonRole::Foh:
+    case Fanfare::ButtonRole::Iem: {
+      const juce::Colour bus = (role == Fanfare::ButtonRole::Foh) ? t.foh : t.iem;
+      if (isSend) {
+        if (isActive) {
+          underline = bus;
+        } else {
+          fill = isOver ? t.panelAlt : t.panel;
+          border = t.warn.withAlpha(0.85f);
+        }
+      } else if (isActive) {
+        // generic latching toggle (INV, TOG, loop, delay mode...)
+        fill = isDown ? t.accent.darker(0.2f) : t.accent;
+        border = t.accent.brighter(0.15f);
+      }
+      break;
+    }
+    case Fanfare::ButtonRole::Danger:
+      border = t.danger.withAlpha(isOver ? 0.9f : 0.55f);
+      break;
+    case Fanfare::ButtonRole::Subtle:
+      fill = isDown ? t.pressTop : (isOver ? t.panelAlt : juce::Colours::transparentBlack);
+      border = isOver ? t.border : juce::Colours::transparentBlack;
+      break;
+    case Fanfare::ButtonRole::Primary:
+      if (isActive) {
+        fill = isDown ? t.accent.darker(0.2f) : t.accent;
+        border = t.accent.brighter(0.15f);
+      } else {
+        border = isOver ? t.accent : t.accentDim;
+      }
+      break;
+    case Fanfare::ButtonRole::Help:
+    case Fanfare::ButtonRole::Standard:
+    default:
+      if (isActive) {
+        fill = isDown ? t.accent.darker(0.2f) : (isOver ? t.accent.brighter(0.08f) : t.accent);
+        border = t.accent.brighter(0.15f);
+      }
+      break;
+  }
+
+  if (!button.isEnabled()) {
+    fill = fill.withMultipliedAlpha(0.5f);
+    border = border.withMultipliedAlpha(0.5f);
+  }
+
+  g.setColour(fill);
+  g.fillRoundedRectangle(r, radius);
+  if (!border.isTransparent()) {
+    g.setColour(border);
+    g.drawRoundedRectangle(r, radius, 1.0f);
+  }
+  if (!underline.isTransparent()) {
+    g.setColour(underline);
+    g.fillRoundedRectangle(r.getX() + 4.0f, r.getBottom() - 3.0f, r.getWidth() - 8.0f, 2.0f, 1.0f);
+  }
+}
+
+juce::Colour studioButtonTextColour(const juce::Button &button, Fanfare::ButtonRole role, bool isActive) {
+  const auto &t = ThemeManager::getInstance().active();
+  const bool isSend = static_cast<bool>(button.getProperties().getWithDefault("isSendToggle", false));
+  switch (role) {
+    case Fanfare::ButtonRole::Panic:
+      return juce::Colour(0xFFFFF8F6);
+    case Fanfare::ButtonRole::Mute:
+      return isActive ? juce::Colour(0xFFFFF8F6) : t.textDim;
+    case Fanfare::ButtonRole::Foh:
+    case Fanfare::ButtonRole::Iem:
+      if (isSend)
+        return isActive ? t.text : t.warn;
+      return isActive ? t.textOnAccent : t.textDim;
+    case Fanfare::ButtonRole::Danger:
+      return t.danger;
+    case Fanfare::ButtonRole::PluginSlot: {
+      const bool hasPlugin = static_cast<bool>(button.getProperties().getWithDefault("hasPlugin", false));
+      return hasPlugin ? t.text : t.textFaint;
+    }
+    case Fanfare::ButtonRole::Primary:
+      return isActive ? t.textOnAccent : t.accent;
+    case Fanfare::ButtonRole::Subtle:
+      return t.textDim;
+    case Fanfare::ButtonRole::Help:
+    case Fanfare::ButtonRole::Standard:
+    default:
+      return isActive ? t.textOnAccent : t.text;
+  }
+}
+
+} // namespace
+
 void BoutiqueLookAndFeel::drawButtonBackground(juce::Graphics &g,
                                                juce::Button &button,
                                                const juce::Colour &backgroundColour,
@@ -398,6 +623,13 @@ void BoutiqueLookAndFeel::drawButtonBackground(juce::Graphics &g,
   const float cornerSize = 3.0f;
   const auto role = Fanfare::getButtonRole(button);
   const bool isActive = button.getToggleState();
+
+  if (t.isStudio()) {
+    juce::ignoreUnused(backgroundColour);
+    drawStudioButtonBackground(g, button, role, isActive,
+                               shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
+    return;
+  }
 
   // Plugin slot plate: recessed well when empty, raised plate + 3px left bar when loaded
   if (role == Fanfare::ButtonRole::PluginSlot) {
@@ -579,6 +811,35 @@ void BoutiqueLookAndFeel::drawButtonText(juce::Graphics &g, juce::TextButton &bu
   const bool isActive = button.getToggleState();
 
   auto bounds = button.getLocalBounds();
+
+  if (t.isStudio()) {
+    juce::Colour col = studioButtonTextColour(button, role, isActive);
+    if (!button.isEnabled())
+      col = col.withMultipliedAlpha(0.45f);
+    g.setColour(col);
+    const int w = button.getWidth(), h = button.getHeight();
+    if (role == Fanfare::ButtonRole::PluginSlot) {
+      const bool hasPlugin = static_cast<bool>(button.getProperties().getWithDefault("hasPlugin", false));
+      if (!hasPlugin) {
+        // empty slot: a faint "+" instead of SLOT n / [EMPTY] noise
+        g.setFont(uiFont(13.0f, false));
+        g.drawText("+", bounds, juce::Justification::centred, false);
+        return;
+      }
+      g.setFont(uiFont(12.0f, false));
+      g.drawFittedText(button.getButtonText(), bounds.withTrimmedLeft(8).withTrimmedRight(3),
+                       juce::Justification::centredLeft, 1, 0.85f);
+      return;
+    }
+    const bool strong = (role == Fanfare::ButtonRole::Panic) || isActive;
+    const float size = (w < 34 || h < 22) ? 11.5f : (role == Fanfare::ButtonRole::Panic ? 13.5f : 12.5f);
+    g.setFont(uiFont(size, strong));
+    g.drawFittedText(Fanfare::toSentenceCase(button.getButtonText()),
+                     (w < 34) ? bounds : bounds.reduced(4, 0),
+                     juce::Justification::centred, 1, 0.8f);
+    return;
+  }
+
   if (shouldDrawButtonAsDown && role != Fanfare::ButtonRole::PluginSlot)
     bounds = bounds.translated(0, 1);
 
@@ -662,7 +923,12 @@ void BoutiqueLookAndFeel::drawComboBox(juce::Graphics &g, int width, int height,
   const auto& t = ThemeManager::getInstance().active();
   juce::Rectangle<float> r(0.0f, 0.0f, (float)width, (float)height);
 
-  if (t.dark) {
+  if (t.isStudio()) {
+    g.setColour(box.isMouseOver(true) ? t.raised : t.panelAlt);
+    g.fillRoundedRectangle(r, 4.0f);
+    g.setColour(box.isMouseOver(true) ? t.borderStrong : t.border);
+    g.drawRoundedRectangle(r.reduced(0.5f), 4.0f, 1.0f);
+  } else if (t.dark) {
     Fanfare::ModalFrame::paintRecessedWell(g, r, 2.5f);
   } else {
     g.setColour(t.raised);
@@ -700,6 +966,11 @@ void BoutiqueLookAndFeel::drawPopupMenuBackground(juce::Graphics &g, int width, 
   juce::Rectangle<float> r(0.0f, 0.0f, (float)width, (float)height);
   g.setColour(t.panel);
   g.fillRect(r);
+  if (t.isStudio()) {
+    g.setColour(t.borderStrong);
+    g.drawRect(r, 1.0f);
+    return;
+  }
   g.setColour(juce::Colour(0xFF0A0A0A));
   g.drawRect(r, 2.5f);
 }
@@ -711,6 +982,20 @@ void BoutiqueLookAndFeel::drawTabButton(juce::TabBarButton &button,
   const auto& t = ThemeManager::getInstance().active();
   auto area = button.getActiveArea().toFloat();
   const bool isFront = button.isFrontTab();
+
+  if (t.isStudio()) {
+    g.setColour(isFront ? t.panelAlt : (isMouseOver ? t.panel.brighter(0.04f) : t.panel));
+    g.fillRect(area);
+    if (isFront) {
+      g.setColour(t.accent);
+      g.fillRect(area.getX(), area.getBottom() - 2.0f, area.getWidth(), 2.0f);
+    }
+    g.setColour(isFront ? t.text : (isMouseOver ? t.text : t.textDim));
+    g.setFont(uiFont(13.0f, isFront));
+    g.drawFittedText(Fanfare::toSentenceCase(button.getButtonText().trim()),
+                     button.getTextArea(), juce::Justification::centred, 1);
+    return;
+  }
 
   g.setColour(isFront ? t.panelAlt : (isMouseOver ? t.panel : t.sunken));
   g.fillRect(area);
@@ -740,9 +1025,11 @@ void BoutiqueLookAndFeel::drawAlertBox(juce::Graphics &g,
 
   Fanfare::ModalFrame::paintOverlayScrimAndPanel(g, bounds, bounds, {}, 36);
 
-  // Subtle teal accent rule along header bottom
-  g.setColour(t.accentDim);
-  g.fillRect(4, 35, bounds.getWidth() - 8, 1);
+  // Subtle teal accent rule along header bottom (Front Panel only)
+  if (!t.isStudio()) {
+    g.setColour(t.accentDim);
+    g.fillRect(4, 35, bounds.getWidth() - 8, 1);
+  }
 
   g.setColour(t.text);
   textLayout.draw(g, textArea.toFloat());
@@ -772,6 +1059,12 @@ void BoutiqueLookAndFeel::drawCallOutBoxBackground(juce::CallOutBox &box,
   // Solid opaque panel fill so underlying rack clutter never bleeds through
   g.setColour(t.panel);
   g.fillPath(path);
+
+  if (t.isStudio()) {
+    g.setColour(t.borderStrong);
+    g.strokePath(path, juce::PathStrokeType(1.0f));
+    return;
+  }
 
   // Bold 4px solid black outer frame around the CallOutBox card + pointer arrow
   g.setColour(juce::Colour(0xFF0A0A0A));
@@ -806,6 +1099,14 @@ void BoutiqueLookAndFeel::drawLinearSliderThumb(juce::Graphics &g, int x, int y,
                                      (float)y + ((float)height - thumbH) * 0.5f,
                                      thumbW, thumbH);
 
+    if (t.isStudio()) {
+      g.setColour(t.knobThumb);
+      g.fillRoundedRectangle(thumbRect, 2.5f);
+      g.setColour(t.background);
+      g.drawRoundedRectangle(thumbRect, 2.5f, 1.0f);
+      return;
+    }
+
     g.setColour(juce::Colours::black.withAlpha(0.45f));
     g.fillRoundedRectangle(thumbRect.translated(0.0f, 1.0f), 2.0f);
 
@@ -828,6 +1129,18 @@ void BoutiqueLookAndFeel::drawLinearSliderThumb(juce::Graphics &g, int x, int y,
   juce::Rectangle<float> thumbRect((float)x + ((float)width - thumbW) * 0.5f,
                                    sliderPos - thumbH * 0.5f,
                                    thumbW, thumbH);
+
+  if (t.isStudio()) {
+    // Flat fader cap: light face, bus-coloured centre line
+    auto cap = thumbRect.withSizeKeepingCentre(thumbRect.getWidth(), juce::jmin(thumbH, 20.0f));
+    g.setColour(t.knobThumb);
+    g.fillRoundedRectangle(cap, 3.0f);
+    g.setColour(t.background);
+    g.drawRoundedRectangle(cap, 3.0f, 1.0f);
+    g.setColour(lineCol);
+    g.fillRect(cap.getX() + 3.0f, cap.getCentreY() - 1.0f, cap.getWidth() - 6.0f, 2.0f);
+    return;
+  }
 
   // Drop shadow
   g.setColour(juce::Colours::black.withAlpha(0.50f));
@@ -877,6 +1190,26 @@ void BoutiqueLookAndFeel::drawLinearSliderBackground(juce::Graphics &g, int x, i
     busCol = t.iem;
 
   if (slider.isVertical()) {
+    if (t.isStudio()) {
+      // Thin flat track, sparse hairline ticks, solid bus-coloured fill
+      const float trackW = 4.0f;
+      const float endY = (float)(y + height);
+      const float cx = (float)x + width * 0.5f;
+      g.setColour(t.hairline);
+      for (int i = 0; i <= 10; i += 2) {
+        float yPos = endY - ((float)i / 10.0f) * (float)height;
+        g.drawLine(cx - trackW - 6.0f, yPos, cx - trackW - 1.0f, yPos, 1.0f);
+      }
+      juce::Rectangle<float> track(cx - trackW * 0.5f, (float)y, trackW, (float)height);
+      g.setColour(t.sunken);
+      g.fillRoundedRectangle(track, 2.0f);
+      float fillTop = juce::jlimit((float)y, endY, sliderPos);
+      if (endY - fillTop > 1.0f) {
+        g.setColour(busCol.withAlpha(0.75f));
+        g.fillRoundedRectangle(track.withTop(fillTop), 2.0f);
+      }
+      return;
+    }
     const float trackW = 6.0f;
     const float endY = (float)(y + height);
 
@@ -915,6 +1248,17 @@ void BoutiqueLookAndFeel::drawLinearSliderBackground(juce::Graphics &g, int x, i
     juce::Rectangle<float> trackArea((float)x,
                                      (float)y + ((float)height - trackH) * 0.5f,
                                      (float)width, trackH);
+    if (t.isStudio()) {
+      auto thin = trackArea.withSizeKeepingCentre(trackArea.getWidth(), 4.0f);
+      g.setColour(t.sunken);
+      g.fillRoundedRectangle(thin, 2.0f);
+      float fw = juce::jlimit(0.0f, (float)width, sliderPos - (float)x);
+      if (fw > 1.0f) {
+        g.setColour(busCol.withAlpha(0.8f));
+        g.fillRoundedRectangle(thin.withWidth(fw), 2.0f);
+      }
+      return;
+    }
     Fanfare::ModalFrame::paintRecessedWell(g, trackArea, 2.0f);
 
     float fillW = juce::jlimit(0.0f, (float)width, sliderPos - (float)x);
@@ -934,6 +1278,22 @@ void BoutiqueLookAndFeel::drawScrollbar(
   const auto &t = ThemeManager::getInstance().active();
   auto trackBounds =
       juce::Rectangle<int>(x, y, width, height).toFloat().reduced(0.5f);
+
+  if (t.isStudio()) {
+    // Nota-style: no track chrome, slim rounded thumb that brightens on hover
+    if (thumbSize <= 0)
+      return;
+    auto thumb = isScrollbarVertical
+                     ? juce::Rectangle<float>((float)x + (float)width * 0.5f - 3.0f,
+                                              (float)thumbStartPosition + 2.0f, 6.0f,
+                                              juce::jmax(10.0f, (float)thumbSize - 4.0f))
+                     : juce::Rectangle<float>((float)thumbStartPosition + 2.0f,
+                                              (float)y + (float)height * 0.5f - 3.0f,
+                                              juce::jmax(10.0f, (float)thumbSize - 4.0f), 6.0f);
+    g.setColour(isMouseDown ? t.textDim : (isMouseOver ? t.borderStrong.brighter(0.2f) : t.borderStrong));
+    g.fillRoundedRectangle(thumb, 3.0f);
+    return;
+  }
 
   g.setColour(t.sunken);
   g.fillRoundedRectangle(trackBounds, 3.0f);
