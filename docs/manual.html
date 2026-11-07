@@ -132,9 +132,10 @@
 			.image.fit { background: var(--panel); border: solid 1px var(--border); }
 			.image.right img { border: solid 1px var(--border); }
 			#wrapper { background: var(--bg); }
-			#main #footer { color: var(--faint); background: var(--panel); border-top: 1px solid var(--border); }
-			#main #footer .icons a { color: var(--faint); border-bottom: none; }
-			#main #footer .icons a:hover { color: var(--accent); }
+			/* footer hangs off #wrapper, not #main - plain #footer selectors only */
+			#footer { color: var(--faint); background: var(--panel); border-top: 1px solid var(--border); }
+			#footer .icons a { color: var(--faint); border-bottom: none; }
+			#footer .icons a:hover { color: var(--accent); }
 
 			/* ---- hero + card grid (Nota landing style) ---- */
 			.manual-hero { padding: 2.5em 0 2em; margin-bottom: 2em; }
