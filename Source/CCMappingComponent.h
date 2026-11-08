@@ -47,6 +47,17 @@ class CCMappingComponent : public juce::Component,
 public:
   using LearnBus = Fanfare::MidiLearnBus;
 
+  static int parseOptionalCC(const juce::TextEditor &ed) {
+    auto txt = ed.getText().trim();
+    if (txt.isEmpty())
+      return -1;
+    return juce::jlimit(0, 127, txt.getIntValue());
+  }
+
+  static juce::String formatOptionalCC(int cc) {
+    return (cc >= 0 && cc <= 127) ? juce::String(cc) : juce::String();
+  }
+
   CCMappingComponent(RackSlot &s, int autoArmLearn = 0) : slot(s) {
     paramDetector.safeOwner = this;
     // --- Fader CC row ---
@@ -55,10 +66,10 @@ public:
     addAndMakeVisible(helpBtn);
     fohLabel.setText("FOH CC:", juce::dontSendNotification);
     addAndMakeVisible(fohCCEditor);
-    fohCCEditor.setText(juce::String(slot.getFohCC()));
+    fohCCEditor.setText(formatOptionalCC(slot.getFohCC()), juce::dontSendNotification);
     fohCCEditor.setInputRestrictions(3, "0123456789");
     fohCCEditor.onTextChange = [this] {
-      slot.setFohCC(fohCCEditor.getText().getIntValue());
+      slot.setFohCC(parseOptionalCC(fohCCEditor));
     };
     addAndMakeVisible(fohLearnBtn);
     fohLearnBtn.setButtonText("L");
@@ -70,10 +81,10 @@ public:
     addAndMakeVisible(iemLabel);
     iemLabel.setText("IEM CC:", juce::dontSendNotification);
     addAndMakeVisible(iemCCEditor);
-    iemCCEditor.setText(juce::String(slot.getIemCC()));
+    iemCCEditor.setText(formatOptionalCC(slot.getIemCC()), juce::dontSendNotification);
     iemCCEditor.setInputRestrictions(3, "0123456789");
     iemCCEditor.onTextChange = [this] {
-      slot.setIemCC(iemCCEditor.getText().getIntValue());
+      slot.setIemCC(parseOptionalCC(iemCCEditor));
     };
     addAndMakeVisible(iemLearnBtn);
     iemLearnBtn.setButtonText("L");
@@ -86,10 +97,10 @@ public:
     muteLabel.setText("Mute:", juce::dontSendNotification);
     muteLabel.setTooltip("Mute toggle CC: press = mute, press again = unmute");
     addAndMakeVisible(muteCCEditor);
-    muteCCEditor.setText(juce::String(slot.getMuteCC()));
+    muteCCEditor.setText(formatOptionalCC(slot.getMuteCC()), juce::dontSendNotification);
     muteCCEditor.setInputRestrictions(3, "0123456789");
     muteCCEditor.onTextChange = [this] {
-      slot.setMuteCC(muteCCEditor.getText().getIntValue());
+      slot.setMuteCC(parseOptionalCC(muteCCEditor));
     };
     addAndMakeVisible(muteLearnBtn);
     muteLearnBtn.setButtonText("L");
@@ -457,7 +468,7 @@ public:
     fill(swapBCombo, "Pick B");
     swapACombo.setSelectedId(slot.getSwapA() + 1, juce::dontSendNotification);
     swapBCombo.setSelectedId(slot.getSwapB() + 1, juce::dontSendNotification);
-    swapCCEditor.setText(juce::String(slot.getSwapCC()),
+    swapCCEditor.setText(formatOptionalCC(slot.getSwapCC()),
                          juce::dontSendNotification);
   }
 
@@ -473,9 +484,11 @@ public:
                           juce::dontSendNotification);
       return;
     }
-    int cc = swapCCEditor.getText().getIntValue();
-    if (cc < 0 || cc > 127)
-      return; // half-typed or empty
+    int cc = parseOptionalCC(swapCCEditor);
+    if (cc < 0) {
+      slot.setSwapPair(-1, a, b);
+      return;
+    }
     slot.setSwapPair(cc, a, b);
     statusLabel.setText("Swap bound: CC" + juce::String(cc) + " toggles " +
                             slot.getPluginName(a) + " / " + slot.getPluginName(b),
@@ -514,14 +527,24 @@ public:
                           juce::dontSendNotification);
       return;
     }
-    float mn = minEditor.getText().getFloatValue();
-    float mx = maxEditor.getText().getFloatValue();
-    armParamLearn(chainIdx, paramIdx, mn, mx);
+    float mn = juce::jlimit(0.0f, 1.0f, minEditor.getText().getFloatValue());
+    float mx = juce::jlimit(0.0f, 1.0f, maxEditor.getText().getFloatValue());
+    armParamLearn(chainIdx, paramIdx, mn, mx, invBtn.getToggleState(),
+                  togBtn.getToggleState());
   }
 
-  void armParamLearn(int chainIdx, int paramIdx, float mn, float mx) {
+  void armParamLearn(int chainIdx, int paramIdx, float mn, float mx,
+                     bool inv = false, bool tog = false) {
+    auto names = slot.getParameterNames(chainIdx);
+    if (paramIdx < 0 || paramIdx >= names.size()) {
+      statusLabel.setText("Selected parameter is no longer available.",
+                          juce::dontSendNotification);
+      return;
+    }
+    mn = juce::jlimit(0.0f, 1.0f, mn);
+    mx = juce::jlimit(0.0f, 1.0f, mx);
     juce::String paramId = getParamId(chainIdx, paramIdx);
-    juce::String pname = slot.getParameterNames(chainIdx)[paramIdx];
+    juce::String pname = names[paramIdx];
 
     RackSlot *s = &slot;
     Fanfare::LearnTarget t;
@@ -531,10 +554,9 @@ public:
     t.parameterIndex = paramIdx;
 
     juce::Component::SafePointer<CCMappingComponent> safe(this);
-    bool tog = togBtn.getToggleState();
     std::function<void(int, int)> cb =
-        [s, chainIdx, paramIdx, paramId, mn, mx, tog, safe](int cc, int) {
-          s->mapCCToParameter(cc, chainIdx, paramId, paramIdx, mn, mx, false, tog);
+        [s, chainIdx, paramIdx, paramId, mn, mx, inv, tog, safe](int cc, int) {
+          s->mapCCToParameter(cc, chainIdx, paramId, paramIdx, mn, mx, inv, tog);
           juce::MessageManager::callAsync([safe, cc] {
             if (safe)
               safe->refreshAfterCapture(cc);
@@ -552,7 +574,9 @@ public:
     auto &m = mappings[row];
     if (m.type == MappingItem::Passthrough)
       return;
-    armParamLearn(m.mapping.chainIndex, m.mapping.parameterIndex, 0.0f, 1.0f);
+    armParamLearn(m.mapping.chainIndex, m.mapping.parameterIndex,
+                  m.mapping.minValue, m.mapping.maxValue,
+                  m.mapping.invert, m.mapping.toggle);
   }
 
   // ---- Quick Learn ----
@@ -697,9 +721,13 @@ public:
     disarmQuickLearn();
     updateMappingList();
     mappingList.updateContent();
+    auto paramNames = slot.getParameterNames(chainIdx);
+    const juce::String boundParamName =
+        (paramIdx >= 0 && paramIdx < paramNames.size()) ? paramNames[paramIdx]
+                                                        : "Unknown";
     statusLabel.setText("QUICK LEARN bound: CC" + juce::String(cc) + " -> " +
                             slot.getPluginName(chainIdx) + " :" +
-                            slot.getParameterNames(chainIdx)[paramIdx] +
+                            boundParamName +
                             (inv ? " [INV]" : "") + (tog ? " [TOG]" : ""),
                         juce::dontSendNotification);
   }
@@ -739,8 +767,7 @@ public:
 
   void paintListBoxItem(int rowNumber, juce::Graphics &g, int width, int height,
                         bool rowIsSelected) override {
-    (void)rowIsSelected;
-    if (rowNumber >= (int)mappings.size())
+    if (rowNumber < 0 || rowNumber >= (int)mappings.size())
       return;
     auto &m = mappings[rowNumber];
     g.setColour(rowIsSelected ? ThemeManager::get(Theme::Role::accent).withAlpha(0.18f)
@@ -763,7 +790,8 @@ public:
     } else {
       juce::String pluginName = slot.getPluginName(m.mapping.chainIndex);
       auto params = slot.getParameterNames(m.mapping.chainIndex);
-      juce::String paramName = (m.mapping.parameterIndex < params.size())
+      juce::String paramName = (m.mapping.parameterIndex >= 0 &&
+                                m.mapping.parameterIndex < params.size())
                                    ? params[m.mapping.parameterIndex]
                                    : "Unknown";
       juce::String text = ccDesc + "   " + pluginName + " : " + paramName +
@@ -808,10 +836,13 @@ public:
   }
 
   void addManualMapping() {
-    int cc = ccEditor.getText().getIntValue();
+    const auto ccTxt = ccEditor.getText().trim();
+    int cc = ccTxt.isEmpty() ? -1 : ccTxt.getIntValue();
     int chainIdx = pluginSelector.getSelectedId() - 1;
     int paramIdx = paramSelector.getSelectedId() - 1;
-    if (cc < 0 || cc > 127 || chainIdx < 0 || paramIdx < 0) {
+    auto params = (chainIdx >= 0) ? slot.getParameterNames(chainIdx) : juce::StringArray{};
+    if (cc < 0 || cc > 127 || chainIdx < 0 || paramIdx < 0 ||
+        paramIdx >= params.size()) {
       statusLabel.setText("Select plugin, parameter, and a valid CC (0-127).",
                           juce::dontSendNotification);
       return;
@@ -833,8 +864,10 @@ public:
   }
 
   void addPassthroughMapping() {
-    int inCC = passFromEditor.getText().getIntValue();
-    int outCC = passToEditor.getText().getIntValue();
+    const auto inTxt = passFromEditor.getText().trim();
+    const auto outTxt = passToEditor.getText().trim();
+    int inCC = inTxt.isEmpty() ? -1 : inTxt.getIntValue();
+    int outCC = outTxt.isEmpty() ? -1 : outTxt.getIntValue();
     if (inCC < 0 || inCC > 127 || outCC < 0 || outCC > 127) {
       statusLabel.setText("Enter valid CC numbers (0-127) for passthrough.",
                           juce::dontSendNotification);
@@ -859,7 +892,8 @@ public:
     }
     for (int cc : ccs)
       slot.allowCC(cc);
-    const juce::String label = prof.name.isNotEmpty() ? prof.name : "Controller profile";
+    const auto profName = prof.getName();
+    const juce::String label = profName.isNotEmpty() ? profName : "Controller profile";
     statusLabel.setText(label + ": allowed " + juce::String((int)ccs.size()) +
                             " controls on this strip (right-click Profile or press Edit to customize).",
                         juce::dontSendNotification);
@@ -927,13 +961,13 @@ public:
   void refreshAfterCapture(int boundCC) {
     updateMappingList();
     mappingList.updateContent();
-    fohCCEditor.setText(juce::String(slot.getFohCC()),
+    fohCCEditor.setText(formatOptionalCC(slot.getFohCC()),
                         juce::dontSendNotification);
-    iemCCEditor.setText(juce::String(slot.getIemCC()),
+    iemCCEditor.setText(formatOptionalCC(slot.getIemCC()),
                         juce::dontSendNotification);
-    muteCCEditor.setText(juce::String(slot.getMuteCC()),
+    muteCCEditor.setText(formatOptionalCC(slot.getMuteCC()),
                          juce::dontSendNotification);
-    swapCCEditor.setText(juce::String(slot.getSwapCC()),
+    swapCCEditor.setText(formatOptionalCC(slot.getSwapCC()),
                          juce::dontSendNotification);
 
     juce::String msg = "Learned CC" + juce::String(boundCC) + ".";

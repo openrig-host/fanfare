@@ -93,6 +93,9 @@ private:
   // Routes clicks on the note-range Label to onShowNoteRangeDialog.
   struct NoteRangeLabelListener : public juce::MouseListener {
     RackSlotComponent *owner = nullptr;
+    bool leftPressArmed = false;
+    juce::int64 lastOpenMs = 0;
+    void mouseDown(const juce::MouseEvent &e) override;
     void mouseUp(const juce::MouseEvent &e) override;
   } noteRangeLabelListener;
 
@@ -141,6 +144,7 @@ private:
   juce::Label noteRangeLabel;
 
   LEDIndicator midiLed{ThemeManager::get(Theme::Role::midiNote)};
+  LEDIndicator mp3Led{ThemeManager::get(Theme::Role::accent)};
 
   float curLeft = 0.0f;
   float curRight = 0.0f;
@@ -161,6 +165,8 @@ private:
   int prevHighNote = -1;
   bool cachedHasAnyPlugin = false;
   bool prevUnusedEmpty = false;
+  bool prevMp3Loaded = false;
+  bool prevMp3Playing = false;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RackSlotComponent)
 };

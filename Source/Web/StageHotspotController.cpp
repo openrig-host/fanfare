@@ -2,29 +2,77 @@
 
 namespace OpenRig {
 
+namespace {
+    juce::String sanitizeHotspotField(const juce::String& input, int maxChars) {
+        juce::String cleaned;
+        cleaned.preallocateBytes((size_t)maxChars * 2);
+        int count = 0;
+        for (juce::juce_wchar ch : input) {
+            if (count >= maxChars)
+                break;
+            if (ch < 0x20 || ch == 0x7f)
+                continue;
+            cleaned += juce::String::charToString(ch);
+            ++count;
+        }
+        return cleaned.trim();
+    }
+
+    juce::String escapePsSingleQuoted(const juce::String& s) {
+        return s.replace("'", "''");
+    }
+}
+
 StageHotspotController::StageHotspotController()
     : juce::Thread("StageHotspotWorker") {
 }
 
 StageHotspotController::~StageHotspotController() {
-    stopThread(3000);
+    if (aliveToken)
+        aliveToken->store(false, std::memory_order_release);
+    signalThreadShouldExit();
+    notify();
+    stopThread(-1);
+
+    std::function<void(bool, juce::String)> leftoverCb;
+    {
+        std::lock_guard<std::mutex> lock(taskMutex);
+        leftoverCb = std::move(pendingCallback);
+        pendingCallback = nullptr;
+    }
+    if (leftoverCb)
+        leftoverCb(false, "Hotspot controller shut down.");
 }
 
 void StageHotspotController::startHotspot(const juce::String& ssid,
                                           const juce::String& password,
                                           std::function<void(bool, juce::String)> onFinished) {
+    std::function<void(bool, juce::String)> displacedCb;
     {
         std::lock_guard<std::mutex> lock(taskMutex);
-        activeSsid = ssid.isNotEmpty() ? ssid : "Fanfare-Stage";
-        activePassword = password.length() >= 8 ? password : "fanfare2026";
-        pendingCallback = onFinished;
+        const juce::String cleanSsid = sanitizeHotspotField(ssid, 32);
+        const juce::String cleanPass = sanitizeHotspotField(password, 63);
+        activeSsid = cleanSsid.isNotEmpty() ? cleanSsid : "Fanfare-Stage";
+        activePassword = cleanPass.length() >= 8 ? cleanPass : "fanfare2026";
+        displacedCb = std::move(pendingCallback);
+        pendingCallback = std::move(onFinished);
         pendingTask = TaskType::Start;
         currentState = State::Starting;
     }
 
+    if (displacedCb) {
+        juce::MessageManager::callAsync([displacedCb]() {
+            displacedCb(false, "Superseded by newer hotspot request.");
+        });
+    }
+
     if (onStateChanged) {
-        juce::MessageManager::callAsync([this]() {
-            if (onStateChanged) onStateChanged(State::Starting, "Starting Stage Wi-Fi Hotspot...");
+        auto alive = aliveToken;
+        juce::MessageManager::callAsync([this, alive]() {
+            if (!alive || !alive->load(std::memory_order_acquire))
+                return;
+            if (onStateChanged)
+                onStateChanged(State::Starting, "Starting Stage Wi-Fi Hotspot...");
         });
     }
 
@@ -36,16 +84,28 @@ void StageHotspotController::startHotspot(const juce::String& ssid,
 }
 
 void StageHotspotController::stopHotspot(std::function<void(bool, juce::String)> onFinished) {
+    std::function<void(bool, juce::String)> displacedCb;
     {
         std::lock_guard<std::mutex> lock(taskMutex);
-        pendingCallback = onFinished;
+        displacedCb = std::move(pendingCallback);
+        pendingCallback = std::move(onFinished);
         pendingTask = TaskType::Stop;
         currentState = State::Stopping;
     }
 
+    if (displacedCb) {
+        juce::MessageManager::callAsync([displacedCb]() {
+            displacedCb(false, "Superseded by newer hotspot request.");
+        });
+    }
+
     if (onStateChanged) {
-        juce::MessageManager::callAsync([this]() {
-            if (onStateChanged) onStateChanged(State::Stopping, "Stopping Stage Wi-Fi Hotspot...");
+        auto alive = aliveToken;
+        juce::MessageManager::callAsync([this, alive]() {
+            if (!alive || !alive->load(std::memory_order_acquire))
+                return;
+            if (onStateChanged)
+                onStateChanged(State::Stopping, "Stopping Stage Wi-Fi Hotspot...");
         });
     }
 
@@ -70,7 +130,7 @@ void StageHotspotController::run() {
             std::lock_guard<std::mutex> lock(taskMutex);
             currentSsid = activeSsid;
             currentPassword = activePassword;
-            cb = pendingCallback;
+            cb = std::move(pendingCallback);
             pendingCallback = nullptr;
         }
 
@@ -83,9 +143,14 @@ void StageHotspotController::run() {
         currentState = newState;
         lastMessage = outMessage;
 
-        juce::MessageManager::callAsync([this, newState, outMessage, cb, success]() {
-            if (onStateChanged) onStateChanged(newState, outMessage);
-            if (cb) cb(success, outMessage);
+        auto alive = aliveToken;
+        juce::MessageManager::callAsync([this, alive, newState, outMessage, cb, success]() {
+            if (alive && alive->load(std::memory_order_acquire)) {
+                if (onStateChanged)
+                    onStateChanged(newState, outMessage);
+            }
+            if (cb)
+                cb(success, outMessage);
         });
     }
 }
@@ -95,14 +160,17 @@ bool StageHotspotController::executeWindowsHotspotScript(bool enable,
                                                          const juce::String& password,
                                                          juce::String& outMessage) {
 #if JUCE_WINDOWS
+    const juce::String safeSsid = escapePsSingleQuoted(sanitizeHotspotField(ssid, 32));
+    const juce::String safePass = escapePsSingleQuoted(sanitizeHotspotField(password, 63));
+
     juce::File scriptFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                                .getChildFile("openrig_stage_hotspot.ps1");
+                                .getChildFile("openrig_stage_hotspot_" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt64()) + ".ps1");
 
     juce::String psScript;
     psScript << "[CmdletBinding()]\n";
     psScript << "param([string]$Action = '" << (enable ? "start" : "stop") << "',\n";
-    psScript << "      [string]$SSID = '" << ssid << "',\n";
-    psScript << "      [string]$Password = '" << password << "')\n\n";
+    psScript << "      [string]$SSID = '" << safeSsid << "',\n";
+    psScript << "      [string]$Password = '" << safePass << "')\n\n";
 
     psScript << "Add-Type -AssemblyName System.Runtime.WindowsRuntime\n";
     psScript << "$asTaskGeneric = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }[0]\n\n";
@@ -150,15 +218,63 @@ bool StageHotspotController::executeWindowsHotspotScript(bool enable,
     psScript << "    exit 0\n";
     psScript << "}\n";
 
-    scriptFile.replaceWithText(psScript);
+    if (!scriptFile.replaceWithText(psScript)) {
+        outMessage = "Could not write temporary PowerShell script.";
+        return false;
+    }
 
     juce::ChildProcess proc;
-    juce::String command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + scriptFile.getFullPathName() + "\"";
-    if (proc.start(command)) {
-        juce::String output = proc.readAllProcessOutput().trim();
-        proc.waitForProcessToFinish(15000);
+    juce::StringArray args;
+    args.add("powershell.exe");
+    args.add("-NoProfile");
+    args.add("-ExecutionPolicy");
+    args.add("Bypass");
+    args.add("-WindowStyle");
+    args.add("Hidden");
+    args.add("-File");
+    args.add(scriptFile.getFullPathName());
+
+    if (proc.start(args, juce::ChildProcess::wantStdOut | juce::ChildProcess::wantStdErr)) {
+        juce::MemoryOutputStream outBuf;
+        const juce::uint32 startMs = juce::Time::getMillisecondCounter();
+        constexpr juce::uint32 kTimeoutMs = 15000;
+        bool timedOutOrAborted = false;
+
+        char chunk[1024];
+        while (proc.isRunning()) {
+            for (;;) {
+                const int n = proc.readProcessOutput(chunk, (int)sizeof(chunk));
+                if (n <= 0)
+                    break;
+                outBuf.write(chunk, (size_t)n);
+            }
+
+            if (threadShouldExit() || (juce::Time::getMillisecondCounter() - startMs) >= kTimeoutMs) {
+                timedOutOrAborted = true;
+                proc.kill();
+                proc.waitForProcessToFinish(1000);
+                break;
+            }
+            juce::Thread::sleep(50);
+        }
+
+        if (!timedOutOrAborted) {
+            for (;;) {
+                const int n = proc.readProcessOutput(chunk, (int)sizeof(chunk));
+                if (n <= 0)
+                    break;
+                outBuf.write(chunk, (size_t)n);
+            }
+        }
+
         scriptFile.deleteFile();
 
+        if (timedOutOrAborted) {
+            outMessage = threadShouldExit() ? "Hotspot operation cancelled." : "Timed out waiting for Windows Mobile Hotspot.";
+            return false;
+        }
+
+        const juce::String output = outBuf.toString().trim();
         if (output.containsIgnoreCase("SUCCESS")) {
             outMessage = output;
             return true;
@@ -168,6 +284,7 @@ bool StageHotspotController::executeWindowsHotspotScript(bool enable,
         }
     }
 
+    scriptFile.deleteFile();
     outMessage = "Could not launch PowerShell process.";
     return false;
 #else

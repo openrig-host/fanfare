@@ -3,18 +3,18 @@
 #include <JuceHeader.h>
 #include <vector>
 
-// Theme.h - role-based color system.
+// Theme.h - role-based color system (7 themes):
 //
-//   - Studio (default): Nota-style flat neutral greys, single orange accent
-//     (#FFA02F), FOH green / IEM blue. Rendered flat by BoutiqueLookAndFeel.
+//   - Studio (default) + Studio Scarlett / Sapphire / Emerald / Violet:
+//     Nota-style flat neutral greys or subtle tinted studio surfaces with a
+//     single hardware accent, FOH green / IEM blue. Rendered flat by BoutiqueLookAndFeel.
 //
 // Shared source of truth with the Tablet HUD (`Source/Web/static/style.css`):
 //   - Front Panel Dark: charcoal metal (#1B1F22), hairline borders, engraved
 //     labels, single teal decorative accent (#3FD0C9), gold FOH (#D9A441),
 //     cyan IEM (#53B9D6), guarded red PANIC (#D63B32).
 //   - Front Panel Bright: warm paper (#ECEBE5) + deep teal (#0E7C6B) for
-//     sunlit outdoor stages.
-//   - High Contrast: maximum contrast outdoor/accessibility skin.
+//     high-legibility sunlit outdoor stages.
 
 struct Theme {
     juce::String id;

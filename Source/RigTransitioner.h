@@ -52,10 +52,17 @@ public:
         jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
         if (isThreadRunning())
             return;
-        sourceFile = file;
-        sourceJson.clear();
-        useFile = true;
-        callbacks = std::move(cbs);
+        auto st = std::make_shared<RunState>();
+        st->engine = &engine;
+        st->engineAlive = engine.getAliveToken();
+        st->alive = aliveFlag;
+        st->useFile = true;
+        st->sourceFile = file;
+        st->callbacks = std::move(cbs);
+        {
+            juce::ScopedLock sl(stateLock);
+            currentRun = st;
+        }
         startThread();
     }
 
@@ -64,40 +71,57 @@ public:
         jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
         if (isThreadRunning())
             return;
-        sourceJson = json;
-        useFile = false;
-        callbacks = std::move(cbs);
+        auto st = std::make_shared<RunState>();
+        st->engine = &engine;
+        st->engineAlive = engine.getAliveToken();
+        st->alive = aliveFlag;
+        st->useFile = false;
+        st->sourceJson = json;
+        st->callbacks = std::move(cbs);
+        {
+            juce::ScopedLock sl(stateLock);
+            currentRun = st;
+        }
         startThread();
     }
 
     void stopTransition() {
         if (isThreadRunning()) {
             signalThreadShouldExit();
-            waitForThreadToExit(5000);
+            waitForThreadToExit(-1);
         }
         if (aliveFlag->load(std::memory_order_acquire))
             engine.clearStagingCache();
     }
 
     void run() override {
+        std::shared_ptr<RunState> st;
+        {
+            juce::ScopedLock sl(stateLock);
+            st = currentRun;
+        }
+        if (!st || !st->engine || (st->engineAlive && !st->engineAlive->load(std::memory_order_acquire)))
+            return;
+
+        FanfareEngine &eng = *st->engine;
         logToFile("TRACE: RigTransitioner run() started.");
-        if (engine.hasPreloadedPlugins()) {
+        if (eng.hasPreloadedPlugins()) {
             logToFile("TRACE: Promoting preloaded plugins to staging cache.");
-            engine.promotePreloadedToStaged();
+            eng.promotePreloadedToStaged();
         } else {
-            engine.clearStagingCache();
+            eng.clearStagingCache();
         }
 
         // 1. Load + migrate.
-        postProgress("Loading rig...");
+        postProgress(st, "Loading rig...");
         logToFile("TRACE: RigTransitioner loading setup data.");
         RigSerializer::LoadResult loaded =
-            useFile ? RigSerializer::load(sourceFile)
-                    : RigSerializer::loadFromString(sourceJson);
+            st->useFile ? RigSerializer::load(st->sourceFile)
+                        : RigSerializer::loadFromString(st->sourceJson);
 
         if (!loaded.ok) {
             logToFile("TRACE: RigTransitioner load failed: " + loaded.errorMessage);
-            postComplete(false, loaded.errorMessage, 0);
+            postComplete(st, false, loaded.errorMessage, 0);
             return;
         }
 
@@ -107,30 +131,30 @@ public:
         bool isFreshBuild = (bool)loaded.rig.getProperty("freshBuild", false);
         if (isFreshBuild) {
             logToFile("TRACE: RigTransitioner freshBuild=true detected. Unloading all current plugins before build.");
-            postProgress("Unloading previous rig (Clean Slate)...");
-            engine.clearStagingCache();
-            engine.clearPreloadedCache();
+            postProgress(st, "Unloading previous rig (Clean Slate)...");
+            eng.clearStagingCache();
+            eng.clearPreloadedCache();
 
             auto clearDone = std::make_shared<juce::WaitableEvent>();
-            auto alive = aliveFlag;
-            juce::MessageManager::getInstance()->callAsync([this, alive, clearDone]() {
-                if (alive->load(std::memory_order_acquire))
-                    engine.clearAllRacks();
+            juce::MessageManager::getInstance()->callAsync([st, clearDone]() {
+                if (st->alive->load(std::memory_order_acquire) &&
+                    (!st->engineAlive || st->engineAlive->load(std::memory_order_acquire)))
+                    st->engine->clearAllRacks();
                 clearDone->signal();
             });
             bool cleared = false;
             for (int w = 0; w < 150; ++w) {
                 if (clearDone->wait(200)) { cleared = true; break; }
-                if (threadShouldExit()) break;
+                if (threadShouldExit() || !st->alive->load(std::memory_order_acquire)) break;
             }
             if (!cleared && !threadShouldExit()) {
                 logToFile("WARNING: clearAllRacks timed out (30s) waiting on message thread.");
             }
         }
 
-        if (threadShouldExit()) {
+        if (threadShouldExit() || !st->alive->load(std::memory_order_acquire)) {
             logToFile("TRACE: RigTransitioner exit requested after clear.");
-            postComplete(false, "Cancelled", 0, {});
+            postComplete(st, false, "Cancelled", 0, {});
             return;
         }
 
@@ -138,12 +162,12 @@ public:
         //    like Kontakt won't freeze the app). Reuse-by-path ensures we
         //    never create a second instance of the same plugin. Exception
         //    guards in buildPluginFromVar catch any plugin that throws.
-        postProgress("Building plugins...");
+        postProgress(st, "Building plugins...");
         RigBuilder::Result build = RigBuilder::build(
-            engine, loaded.rig,
-            [this](const juce::String &msg) { postProgress(msg); },
+            eng, loaded.rig,
+            [st](const juce::String &msg) { postProgress(st, msg); },
             false,
-            [this]() { return threadShouldExit() || !aliveFlag->load(std::memory_order_acquire); });
+            [this, st]() { return threadShouldExit() || !st->alive->load(std::memory_order_acquire); });
         logToFile("TRACE: RigBuilder finished. ok=" + juce::String((int)build.ok) +
                   ", built=" + juce::String(build.builtCount) +
                   ", reused=" + juce::String(build.reusedCount) +
@@ -158,55 +182,65 @@ public:
                       " plugin(s) failed to build: " + build.error);
         }
 
-        if (threadShouldExit()) {
+        if (threadShouldExit() || !st->alive->load(std::memory_order_acquire)) {
             logToFile("TRACE: RigTransitioner exit requested before apply.");
-            postComplete(false, "Cancelled", 0, {});
+            postComplete(st, false, "Cancelled", 0, {});
             return;
         }
 
         // 4. Atomic apply under the callback lock on the message thread.
         //    Timeout prevents hanging if a plugin blocks during state restore.
-        postProgress("Applying...");
+        postProgress(st, "Applying...");
         logToFile("TRACE: RigTransitioner dispatching applyRig to main thread.");
         auto sharedRig = std::make_shared<juce::var>(std::move(loaded.rig));
         auto doneEvent = std::make_shared<juce::WaitableEvent>();
-        auto alive = aliveFlag;
-        juce::MessageManager::getInstance()->callAsync([this, alive, sharedRig, doneEvent]() {
-            if (alive->load(std::memory_order_acquire)) {
+        juce::MessageManager::getInstance()->callAsync([st, sharedRig, doneEvent]() {
+            if (st->alive->load(std::memory_order_acquire) &&
+                (!st->engineAlive || st->engineAlive->load(std::memory_order_acquire))) {
                 logToFile("TRACE: RigTransitioner applying rig on main thread.");
-                engine.applyRig(*sharedRig);
+                st->engine->applyRig(*sharedRig);
             }
             doneEvent->signal();
         });
         bool applied = false;
         for (int w = 0; w < 600; ++w) {
             if (doneEvent->wait(200)) { applied = true; break; }
-            if (threadShouldExit() || !aliveFlag->load(std::memory_order_acquire)) break;
+            if (threadShouldExit() || !st->alive->load(std::memory_order_acquire)) break;
         }
         if (!applied) {
-            if (threadShouldExit() || !aliveFlag->load(std::memory_order_acquire))
+            if (threadShouldExit() || !st->alive->load(std::memory_order_acquire))
                 return;
             logToFile("ERROR: applyRig timed out (120s)");
-            engine.clearStagingCache();
-            postComplete(false, "Apply timed out (120s) - possible plugin hang", 0, {});
+            eng.clearStagingCache();
+            postComplete(st, false, "Apply timed out (120s) - possible plugin hang", 0, {});
             return;
         }
         logToFile("TRACE: RigTransitioner applyRig finished.");
 
         // 5. Clean up and notify.
-        engine.clearStagingCache();
+        eng.clearStagingCache();
         int total = build.builtCount + build.reusedCount;
         juce::String msg = "Loaded (" + juce::String(build.builtCount) + " built, " +
                            juce::String(build.reusedCount) + " reused)";
         logToFile("TRACE: RigTransitioner completed successfully: " + msg);
-        postComplete(true, msg, total, build.failedEntries);
+        postComplete(st, true, msg, total, build.failedEntries);
     }
 
 private:
-    void postProgress(const juce::String &msg) {
-        if (callbacks.onProgress && aliveFlag->load(std::memory_order_acquire)) {
-            auto cb = callbacks.onProgress;
-            auto alive = aliveFlag;
+    struct RunState {
+        FanfareEngine *engine = nullptr;
+        std::shared_ptr<std::atomic<bool>> engineAlive;
+        std::shared_ptr<std::atomic<bool>> alive;
+        bool useFile = true;
+        juce::File sourceFile;
+        juce::String sourceJson;
+        Callbacks callbacks;
+    };
+
+    static void postProgress(const std::shared_ptr<RunState> &st, const juce::String &msg) {
+        if (st && st->callbacks.onProgress && st->alive->load(std::memory_order_acquire)) {
+            auto cb = st->callbacks.onProgress;
+            auto alive = st->alive;
             juce::MessageManager::callAsync([alive, cb, msg]() {
                 if (alive->load(std::memory_order_acquire))
                     cb(msg);
@@ -214,10 +248,11 @@ private:
         }
     }
 
-    void postComplete(bool ok, const juce::String &msg, int builtCount, const std::vector<RigBuilder::FailedEntry>& failed = {}) {
-        if (callbacks.onComplete && aliveFlag->load(std::memory_order_acquire)) {
-            auto cb = callbacks.onComplete;
-            auto alive = aliveFlag;
+    static void postComplete(const std::shared_ptr<RunState> &st, bool ok, const juce::String &msg,
+                             int builtCount, const std::vector<RigBuilder::FailedEntry> &failed = {}) {
+        if (st && st->callbacks.onComplete && st->alive->load(std::memory_order_acquire)) {
+            auto cb = st->callbacks.onComplete;
+            auto alive = st->alive;
             juce::MessageManager::callAsync([alive, cb, ok, msg, builtCount, failed]() {
                 if (alive->load(std::memory_order_acquire))
                     cb(ok, msg, builtCount, failed);
@@ -227,11 +262,8 @@ private:
 
     std::shared_ptr<std::atomic<bool>> aliveFlag = std::make_shared<std::atomic<bool>>(true);
     FanfareEngine &engine;
-    Callbacks callbacks;
-
-    juce::File sourceFile;
-    juce::String sourceJson;
-    bool useFile = true;
+    juce::CriticalSection stateLock;
+    std::shared_ptr<RunState> currentRun;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RigTransitioner)
 };

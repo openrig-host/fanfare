@@ -171,17 +171,19 @@ public:
       auto &bus = Fanfare::MidiLearnBus::getInstance();
       juce::String newArmed = bus.armedLabel();
       auto newCap = bus.lastCapture();
+      const juce::int64 nowMs = juce::Time::getCurrentTime().toMilliseconds();
+      const bool boundBannerVisible =
+          newArmed.isEmpty() && newCap.ccNum >= 0 && (nowMs - newCap.timestamp < 2500);
       if (newArmed != armedLabelNow ||
-          (newCap.ccNum != lastCap.ccNum) ||
-          (newCap.ccNum >= 0 &&
-           juce::Time::getCurrentTime().toMilliseconds() - newCap.timestamp < 2500)) {
-        armedLabelNow = newArmed;
-        lastCap = newCap;
+          newCap.ccNum != lastCap.ccNum ||
+          newCap.timestamp != lastCap.timestamp ||
+          boundBannerVisible ||
+          wasBoundBannerVisible != boundBannerVisible) {
         changed = true;
-      } else {
-        armedLabelNow = newArmed;
-        lastCap = newCap;
       }
+      armedLabelNow = newArmed;
+      lastCap = newCap;
+      wasBoundBannerVisible = boundBannerVisible;
     }
 
     if (changed)
@@ -202,6 +204,7 @@ private:
 
   juce::String armedLabelNow;
   Fanfare::MidiLearnBus::Capture lastCap;
+  bool wasBoundBannerVisible = false;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MidiMonitorComponent)
 };

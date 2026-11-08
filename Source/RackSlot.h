@@ -46,6 +46,11 @@ public:
     scratchBuffer.setSize(32, allocSize);
     scratchBuffer.setSize(32, juce::jmax(1, maxBlockSize), false, false, true);
     filteredMidiScratch.ensureSize(2048);
+    harmonyScratch.ensureSize(2048);
+    passthroughScratch.ensureSize(2048);
+    mixerCCScratch.ensureSize(2048);
+    for (int i = 0; i < 3; ++i)
+      midiOutChain[i].ensureSize(1024);
     scratchBuffer.clear();
   }
 
@@ -105,10 +110,20 @@ public:
                            const juce::String &deviceName) {
     if (i < 0 || i >= 3)
       return;
-    // Ensure no plugin occupies this slot (mutually exclusive).
-    if (i < (int)pluginChain.size() && pluginChain[i]) {
-      pluginChain[i]->releaseResources();
-      pluginChain[i].reset();
+    invalidateCachedCCParams(i);
+    chainIsInstrument[i].store(false);
+    // Ensure no plugin occupies this slot (mutually exclusive), swapping out under pluginLock.
+    std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
+    {
+      juce::SpinLock::ScopedLockType sl(pluginLock);
+      if (i < (int)pluginChain.size())
+        oldPlugin = std::move(pluginChain[i]);
+    }
+    if (oldPlugin) {
+      FanfareLog::safeExecutePluginCall([&]() {
+        oldPlugin->releaseResources();
+        oldPlugin.reset();
+      }, "setChainSlotMidiOut releaseResources/reset");
     }
     chainMidiOut[i].isMidiOut.store(true);
     chainMidiOut[i].deviceIndex.store(deviceIndex);
@@ -149,11 +164,30 @@ public:
       }
       for (int i = 0; i < 3; ++i)
         midiOutChain[i].clear();
+      // Preserve panic requests across bypass so un-bypass never resurrects held voices.
+      for (const auto metadata : midiMessages) {
+        const auto m = metadata.getMessage();
+        if (m.isController() && (m.getControllerNumber() == 120 || m.getControllerNumber() == 123)) {
+          unbypassPanicPending.store(true);
+          for (int i = 0; i < 3; ++i) {
+            if (chainMidiOut[i].isMidiOut.load() && chainSettings[i].enabled.load()) {
+              const int outCh = chainMidiOut[i].channel.load();
+              midiOutChain[i].addEvent(juce::MidiMessage::controllerEvent(outCh, 64, 0), 0);
+              midiOutChain[i].addEvent(juce::MidiMessage::controllerEvent(outCh, 123, 0), 0);
+              midiOutChain[i].addEvent(juce::MidiMessage::controllerEvent(outCh, 120, 0), 0);
+            }
+          }
+          break;
+        }
+      }
       return;
     }
 
     auto startTime = juce::Time::getHighResolutionTicks();
     double totalBlockSecs = (double)slotBuffer.getNumSamples() / lastSampleRate;
+
+    if (unbypassPanicPending.exchange(false))
+      appendPanic(midiMessages, 0);
 
     // 1. Merge injected MIDI from harmony routers (thread-safe)
     {
@@ -185,14 +219,14 @@ public:
     // MP3 Player audio streaming
     mp3Player.processBlock(slotBuffer);
 
-    // Harmonizer with redirection support: generated harmony notes go to harmonyBuffer
-    juce::MidiBuffer harmonyBuffer;
+    // Harmonizer with redirection support: generated harmony notes go to harmonyScratch
+    harmonyScratch.clear();
     harmonizer.processBlock(midiMessages, slotBuffer.getNumSamples(),
-                            &harmonyBuffer, getTransposeSemis());
+                            &harmonyScratch, getTransposeSemis());
 
     int target = harmonizer.harmonyTargetSlot.load();
-    if (target >= 0 && !harmonyBuffer.isEmpty() && midiRouteCallback)
-      midiRouteCallback(target, harmonyBuffer);
+    if (target >= 0 && !harmonyScratch.isEmpty() && midiRouteCallback)
+      midiRouteCallback(target, harmonyScratch);
 
     // 1. Process VST Chain — instruments are summed in parallel, effects run in series.
     // A chain slot may also be a MIDI OUT target (no plugin); its filtered MIDI
@@ -309,17 +343,9 @@ public:
                 }, "processBlock (slot instrument)");
 
                 // One-shot MIDI flow trace: fires on the first block that
-                // actually carries events, proving notes reach this plugin.
+                // actually carries events, proving notes reach this plugin (lock-free RT flight ring).
                 if (filteredMidiScratch.getNumEvents() > 0 && !midiTraceLogged.exchange(true)) {
-                  // log first non-empty MIDI block reaching this plugin
-                  logToFile("TRACE: MIDI -> slot '" + slotName + "' chain " +
-                            juce::String(i) + " (" + plugin->getName() +
-                            "): " +
-                            juce::String(filteredMidiScratch.getNumEvents()) +
-                            " event(s) this block, noteWindow " +
-                            juce::String(low) + "-" + juce::String(high) +
-                            ", inst=" +
-                            juce::String(chainIsInstrument[i].load() ? 1 : 0));
+                  recordFlightEvent(i, "TRACE: first non-empty MIDI block reached slot instrument");
                 }
                 scratchBuffer.applyGain(instGain);
 
@@ -354,9 +380,7 @@ public:
               int errs = consecutivePluginErrors.fetch_add(1) + 1;
               if (errs >= FanfareConstants::kMaxPluginExceptionsBeforeBypass) {
                 bypassed.store(true);
-                logToFile("ERROR: Slot '" + slotName + "' plugin '" + plugin->getName() +
-                          "' threw " + juce::String(errs) +
-                          " consecutive exceptions in processBlock — AUTO-BYPASSED for stability.");
+                recordFlightEvent(i, "ERROR: Plugin threw max consecutive exceptions in processBlock -> AUTO-BYPASSED");
               }
             }
 
@@ -615,7 +639,15 @@ public:
   }
   float getIemOffset() const { return iemOffset.load(); }
 
-  void setBypass(bool shouldBypass) { bypassed.store(shouldBypass); }
+  void setBypass(bool shouldBypass) {
+    const bool prev = bypassed.exchange(shouldBypass);
+    if (prev != shouldBypass) {
+      arpeggiator.reset();
+      harmonizer.reset();
+      sampler.reset();
+      unbypassPanicPending.store(true);
+    }
+  }
   bool isBypassed() const { return bypassed.load(); }
 
   // CC to Level mapping
@@ -668,8 +700,14 @@ public:
   void setInputChannelIndex(int index) { inputChannelIndex.store(index); }
   int getInputChannelIndex() const { return inputChannelIndex.load(); }
 
-  juce::String getName() const { return slotName; }
-  void setName(const juce::String &newName) { slotName = newName; }
+  juce::String getName() const {
+    juce::SpinLock::ScopedLockType sl(nameLock);
+    return slotName;
+  }
+  void setName(const juce::String &newName) {
+    juce::SpinLock::ScopedLockType sl(nameLock);
+    slotName = newName;
+  }
 
   // Channel icon type (for visual identification)
   void setIconIndex(int index) { iconIndex = index; }
@@ -771,8 +809,14 @@ public:
     }
   }
 
-  bool hasPlugins() const { return !pluginChain.empty(); }
+  bool hasPlugins() const {
+    juce::SpinLock::ScopedLockType pcl(pluginLock);
+    return !pluginChain.empty();
+  }
   bool hasActivePlugins() const {
+    juce::SpinLock::ScopedTryLockType pcl(pluginLock);
+    if (!pcl.isLocked())
+      return false;
     for (const auto &p : pluginChain) {
       if (p != nullptr)
         return true;
@@ -781,6 +825,7 @@ public:
   }
 
   juce::String getPluginName(int chainIndex) const {
+    juce::SpinLock::ScopedLockType pcl(pluginLock);
     if (chainIndex >= 0 && chainIndex < (int)pluginChain.size()) {
       if (const auto *p = pluginChain[chainIndex].get())
         return p->getName();
@@ -789,12 +834,14 @@ public:
   }
 
   juce::AudioPluginInstance *getPluginInstance(int chainIndex) {
+    juce::SpinLock::ScopedLockType pcl(pluginLock);
     if (chainIndex >= 0 && chainIndex < (int)pluginChain.size())
       return pluginChain[chainIndex].get();
     return nullptr;
   }
 
   juce::String getPluginPath(int chainIndex) const {
+    juce::SpinLock::ScopedLockType pcl(pluginLock);
     if (chainIndex >= 0 && chainIndex < (int)pluginChain.size()) {
       if (const auto *p = pluginChain[chainIndex].get()) {
         auto desc = p->getPluginDescription();
@@ -807,7 +854,11 @@ public:
   int getChainSize() const {
     // Effective chain length: covers populated plugin slots AND midi-out slots
     // so serialization/UI/export include midi-out destinations past pluginChain.
-    int sz = (int)pluginChain.size();
+    int sz = 0;
+    {
+      juce::SpinLock::ScopedLockType pcl(pluginLock);
+      sz = (int)pluginChain.size();
+    }
     for (int i = 0; i < 3; ++i) {
       if (chainMidiOut[i].isMidiOut.load() && i >= sz)
         sz = i + 1;
@@ -1006,6 +1057,7 @@ public:
 
   juce::StringArray getParameterNames(int chainIndex) const {
     juce::StringArray names;
+    juce::SpinLock::ScopedLockType pcl(pluginLock);
     if (chainIndex >= 0 && chainIndex < (int)pluginChain.size()) {
       if (auto *plugin = pluginChain[chainIndex].get()) {
         for (auto *param : plugin->getParameters())
@@ -1162,6 +1214,8 @@ public:
   // all-notes-off panic so stale voices can't ring), fade `victimIdx` out
   // over ~80ms while panicking it, then it stays disabled. Audio thread.
   void beginSwap(int activeIdx, int victimIdx) {
+    if (activeIdx < 0 || activeIdx >= 3)
+      return;
     if (drainSlot.load() == activeIdx)
       drainSlot.store(-1); // re-enabling a slot that was still fading out
     chainSettings[activeIdx].enabled.store(true);
@@ -1170,8 +1224,8 @@ public:
       drainSlot.store(victimIdx);
       drainGain.store(1.0f);
       drainPanicSent.store(false);
+      chainSettings[victimIdx].enabled.store(false);
     }
-    chainSettings[victimIdx].enabled.store(false);
   }
 
   // Sustain off + all-notes-off + all-sound-off on every channel, so the
@@ -1186,12 +1240,18 @@ public:
 
   // --- Midi Mapping ---
   int getFohCC() const { return fohCC.load(); }
-  void setFohCC(int cc) { fohCC.store(cc); }
+  void setFohCC(int cc) {
+    fohCC.store(cc);
+    if (cc >= 0 && cc < 128)
+      allowedCCs[cc].store(true);
+  }
 
   int getMuteCC() const { return muteCC.load(); }
   void setMuteCC(int cc) {
     muteCC.store(cc);
     muteCCArmed.store(false);
+    if (cc >= 0 && cc < 128)
+      allowedCCs[cc].store(true);
   }
 
   // Instrument swap: one CC alternates which of two chain slots is enabled
@@ -1215,7 +1275,11 @@ public:
   }
 
   int getIemCC() const { return iemCC.load(); }
-  void setIemCC(int cc) { iemCC.store(cc); }
+  void setIemCC(int cc) {
+    iemCC.store(cc);
+    if (cc >= 0 && cc < 128)
+      allowedCCs[cc].store(true);
+  }
 
   // Per-slot MIDI channel override. -1 means "use the engine's global
   // default channel". 0 means Omni (accepts every channel). 1..16 pins this
@@ -1226,6 +1290,7 @@ public:
   }
 
 private:
+  mutable juce::SpinLock nameLock;
   juce::String slotName;
   int iconIndex = 0; // ChannelIcon cast to int for persistence
   juce::Colour channelColor{0xff2a2a2a}; // Default zebra color (even slots)
@@ -1245,6 +1310,7 @@ private:
   std::atomic<bool> fohEnabled{true};
   std::atomic<bool> iemEnabled{true};
   std::atomic<bool> bypassed{false};
+  std::atomic<bool> unbypassPanicPending{false};
   std::atomic<bool> midiTraceLogged{false}; // one-shot MIDI flow trace
   std::atomic<bool> fadersLinked{true}; // Faders move together by default
 
@@ -1297,9 +1363,10 @@ private:
 
   FanfareDSP::ChannelStripProcessor strip;
 
-  juce::SpinLock pluginLock;
+  mutable juce::SpinLock pluginLock;
   juce::SpinLock injectedMidiLock;
   juce::MidiBuffer injectedMidi;
+  juce::MidiBuffer harmonyScratch;
   std::function<void(int, const juce::MidiBuffer &)> midiRouteCallback;
   std::atomic<bool> chainIsInstrument[3]{false, false, false};
   juce::MidiBuffer filteredMidiScratch;

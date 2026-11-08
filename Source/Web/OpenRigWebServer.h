@@ -26,7 +26,7 @@ struct LiveTelemetry {
     float cpuLoad = 0.0f;
     int ramUsageMb = 0;
     int underruns = 0;
-    
+
     struct SlotMeter {
         int index = 0;
         float peakL = 0.0f;
@@ -50,7 +50,8 @@ public:
     void stopServer();
     bool isRunning() const { return serverRunning.load(); }
     int getPort() const { return serverPort; }
-    
+    const juce::String& getSessionToken() const noexcept { return sessionToken; }
+
     // IP Addresses helper for UI display (e.g., http://192.168.1.50:8080)
     static juce::StringArray getLocalIpAddresses();
     static juce::String getPrimaryUrl(int port);
@@ -66,14 +67,32 @@ public:
     void broadcastWebSocket(const juce::String& jsonMessage);
 
 private:
+    struct LifetimeState {
+        std::atomic<bool> alive{true};
+    };
+
+    struct ClientWorker {
+        std::thread thread;
+        std::atomic<bool> finished{false};
+    };
+
     void run() override; // Worker thread listening for incoming TCP connections
     void timerCallback() override; // ~30Hz Telemetry & VU broadcast timer
 
     // HTTP / WebSocket connection handling
     void handleClientConnection(void* socketHandle);
-    bool handleHttpRequest(void* socketHandle, const juce::String& requestMethod, const juce::String& requestPath, const juce::String& requestHeaders, const juce::String& requestBody);
+    bool handleHttpRequest(void* socketHandle,
+                           const juce::String& requestMethod,
+                           const juce::String& requestPath,
+                           const juce::String& requestQuery,
+                           const juce::String& requestHeaders,
+                           const juce::String& requestBody);
     bool handleWebSocketHandshake(void* socketHandle, const juce::String& secWebSocketKey);
     void handleWebSocketSession(void* socketHandle);
+
+    // Auth & Origin validation
+    bool isAuthorizedRequest(const juce::String& headers, const juce::String& query) const;
+    bool isOriginAllowed(const juce::String& headers, bool requireOrigin) const;
 
     // REST API Handlers
     juce::var buildStatusJson();
@@ -83,7 +102,7 @@ private:
     juce::var buildNotepadJson();
     juce::var buildMixerJson();
     juce::var buildMp3Json();
-    
+
     juce::String handleApiPost(const juce::String& path, const juce::var& jsonPayload);
 
     // WebSocket Message Dispatch
@@ -91,9 +110,9 @@ private:
 
     // Static Asset Serving
     juce::String getMimeType(const juce::String& filePath);
-    bool serveStaticFile(void* socketHandle, const juce::String& relativePath);
-    void sendHttpResponse(void* socketHandle, int statusCode, const juce::String& contentType, const juce::String& body);
-    void sendHttpDataResponse(void* socketHandle, int statusCode, const juce::String& contentType, const void* data, size_t dataSize);
+    bool serveStaticFile(void* socketHandle, const juce::String& relativePath, const juce::String& extraHeader = {});
+    void sendHttpResponse(void* socketHandle, int statusCode, const juce::String& contentType, const juce::String& body, const juce::String& extraHeader = {});
+    void sendHttpDataResponse(void* socketHandle, int statusCode, const juce::String& contentType, const void* data, size_t dataSize, const juce::String& extraHeader = {});
 
     // Embedded Fallback Assets (used if files are not on disk)
     static juce::String getEmbeddedHtml();
@@ -103,13 +122,22 @@ private:
     FanfareEngine& engine;
     MainComponent* mainComponent;
 
+    juce::String sessionToken;
+    std::shared_ptr<LifetimeState> lifetime = std::make_shared<LifetimeState>();
+
     std::atomic<bool> serverRunning{false};
     int serverPort = 8080;
     void* listenSocket = nullptr; // Raw socket descriptor (SOCKET / int)
 
-    // Active WebSocket clients set
+    // Active HTTP and WebSocket clients (closed ONLY by their owning worker thread;
+    // stopServer() calls shutdown() on them to unblock recv/send without handle reuse races)
     std::mutex clientSocketsMutex;
+    std::unordered_set<void*> activeHttpSockets;
     std::unordered_set<void*> activeWsClients;
+
+    // Joinable per-connection threads
+    std::mutex workersMutex;
+    std::vector<std::shared_ptr<ClientWorker>> clientWorkers;
 
     // Telemetry throttling
     int telemetryThrottleCount = 0;

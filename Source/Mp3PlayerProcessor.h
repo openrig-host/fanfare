@@ -1484,6 +1484,8 @@ public:
 
     // --- State Accessors & Controls ---
     bool isPlaying() const { return playing.load(); }
+
+    bool hasLoadedTrack() const { return isDeckLoaded(0) || isDeckLoaded(1); }
     
     double getPosition() const {
         return getDeckPosition(activeDeckIndex.load());

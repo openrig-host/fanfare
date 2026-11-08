@@ -51,7 +51,10 @@ public:
         }
         if (version == 0) {
             version = 10;
-            utf8.resize((size_t)byteCapM[10]);
+            int cut = byteCapM[10];
+            while (cut > 0 && (static_cast<uint8_t>(utf8[(size_t)cut]) & 0xC0) == 0x80)
+                --cut;
+            utf8.resize((size_t)cut);
         }
 
         const int actualLen = (int)utf8.size();

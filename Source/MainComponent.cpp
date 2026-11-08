@@ -360,20 +360,15 @@ MainComponent::MainComponent() {
   LOG_INFO("OpenRig initialized successfully");
   setWantsKeyboardFocus (true);
   addKeyListener (this);
+}
 
-  // Startup Welcome window (respects "Show on startup" toggle; includes 1-click
-  // VST3 scan when no plugins have been scanned yet).
+void MainComponent::onStartupSplashFinished() {
+  // Triggered after the startup splash finishes fading out so the Welcome
+  // modal (or first-run scan prompt) never overlaps the splash screen.
   if (Fanfare::WelcomePrefs::getShowOnStartup()) {
-    juce::Timer::callAfterDelay(520, [safeThis = juce::Component::SafePointer<MainComponent>(this)]() {
-      if (safeThis != nullptr)
-        safeThis->showWelcomeModal();
-    });
+    showWelcomeModal();
   } else if (!engine.hasEverScannedPlugins()) {
-    juce::Timer::callAfterDelay(650, [safeThis = juce::Component::SafePointer<MainComponent>(this)]() {
-      if (safeThis != nullptr && !safeThis->engine.hasEverScannedPlugins()) {
-        safeThis->showQuickStartDialog(true);
-      }
-    });
+    showQuickStartDialog(true);
   }
 }
 
@@ -510,28 +505,6 @@ void MainComponent::setupSlotComponents() {
   std::vector<std::pair<juce::String, int>> inputItems;
   inputItems.push_back({"No Input", -1});
   auto *device = deviceManager.getCurrentAudioDevice();
-  if (false) {
-
-  juce::ScopedValueSetter<bool> recoveryGuard(isRecoveringAudioDevice, true);
-  auto *device = deviceManager.getCurrentAudioDevice();
-  auto setup = (device != nullptr && device->isOpen())
-                   ? deviceManager.getAudioDeviceSetup()
-                   : (hasDesiredAudioSetup ? desiredAudioSetup : deviceManager.getAudioDeviceSetup());
-  deviceManager.closeAudioDevice();
-  if (desiredAudioDeviceType.isNotEmpty() &&
-      deviceManager.getCurrentAudioDeviceType() != desiredAudioDeviceType) {
-    deviceManager.setCurrentAudioDeviceType(desiredAudioDeviceType, true);
-  }
-  deviceManager.setAudioDeviceSetup(setup, true);
-  syncHotplugMidiInputs(false);
-  if (auto *newDev = deviceManager.getCurrentAudioDevice()) {
-    if (newDev->isOpen() && newDev->isPlaying()) {
-      inAudioRecoveryMode = false;
-      audioRecoveryAttemptCount = 0;
-    }
-  }
-  if (false) {
-  } }
   if (device != nullptr) {
     auto inputs = device->getInputChannelNames();
     for (int hw = 0; hw < inputs.size(); ++hw) {
@@ -616,47 +589,56 @@ void MainComponent::setupSlotComponents() {
       menu.addItem(-2, "Send MIDI OUT...", slot != nullptr && !slot->isChainSlotMidiOut(chainIndex));
       menu.addItem(-1, "(No Plugin)");
 
-      menu.showMenuAsync(juce::PopupMenu::Options(), [this, i, slot, comp,
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::Component::SafePointer<RackSlotComponent> safeComp(comp);
+      menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis, i, slot, safeComp,
                                                       chainIndex](int result) {
+        if (safeThis == nullptr)
+          return;
         if (result == -3) {
-          if (scanButton.onClick)
-            scanButton.onClick();
+          if (safeThis->scanButton.onClick)
+            safeThis->scanButton.onClick();
           return;
         }
         if (result == -2) {
-          showSlotMidiOutDialog(i, chainIndex);
+          safeThis->showSlotMidiOutDialog(i, chainIndex);
           return;
         }
         if (result > 0 || result == -1) {
-          if (auto *oldInstance = slot->getPluginInstance(chainIndex)) {
-            closePluginWindowForInstance(oldInstance);
+          if (slot != nullptr) {
+            if (auto *oldInstance = slot->getPluginInstance(chainIndex)) {
+              safeThis->closePluginWindowForInstance(oldInstance);
+            }
           }
         }
         if (result > 0) {
-          loadingOverlay.reset(new LoadingOverlay());
-          addAndMakeVisible(loadingOverlay.get());
+          safeThis->loadingOverlay.reset(new LoadingOverlay());
+          safeThis->addAndMakeVisible(safeThis->loadingOverlay.get());
 
-          engine.loadPluginIntoSlot(
+          safeThis->engine.loadPluginIntoSlot(
               i, chainIndex, result - 1,
-              [this, comp](bool success, const juce::String &err) {
-                loadingOverlay.reset();
+              [safeThis, safeComp](bool success, const juce::String &err) {
+                if (safeThis == nullptr)
+                  return;
+                safeThis->loadingOverlay.reset();
                 if (!success)
                   juce::AlertWindow::showMessageBoxAsync(
                       juce::MessageBoxIconType::WarningIcon,
                       "Plugin Load Failed", err);
-                else {
-                  if (comp->getIsCollapsed()) {
-                    comp->setCollapsed(false);
-                    resized();
+                else if (safeComp != nullptr) {
+                  if (safeComp->getIsCollapsed()) {
+                    safeComp->setCollapsed(false);
+                    safeThis->resized();
                   }
-                  comp->repaint();
+                  safeComp->repaint();
                 }
               });
-        } else if (result == -1) {
-          engine.clearSlotChainMidiOut(i, chainIndex);
-          juce::ScopedLock sl(engine.getCallbackLock());
+        } else if (result == -1 && slot != nullptr) {
+          safeThis->engine.clearSlotChainMidiOut(i, chainIndex);
+          juce::ScopedLock sl(safeThis->engine.getCallbackLock());
           slot->setPluginInChain(chainIndex, nullptr);
-          comp->repaint();
+          if (safeComp != nullptr)
+            safeComp->repaint();
         }
       });
     };
@@ -1132,24 +1114,12 @@ void MainComponent::setupHeaderButtons() {
   midiMonitorLabel.setFont(BoutiqueLookAndFeel::monoFont(11.5f, true));
   midiMonitorLabel.setJustificationType(juce::Justification::centredLeft);
 
-  // MIDI Monitor toggle button
-  addAndMakeVisible(midiMonitorToggle);
-  Fanfare::setButtonRole(midiMonitorToggle, Fanfare::ButtonRole::Standard);
+  // Legacy midiMonitorToggle hidden by Studio shell; route via setSidebarContext
+  midiMonitorToggle.setVisible(false);
   midiMonitorToggle.onClick = [this] {
-    midiMonitorVisible = !midiMonitorVisible;
-    if (midiMonitorVisible) {
-      if (!midiMonitorPanel) {
-        midiMonitorPanel = std::make_unique<MidiMonitorComponent>();
-        addChildComponent(midiMonitorPanel.get());
-      }
-      midiMonitorPanel->setVisible(true);
-      midiMonitorToggle.setToggleState(true, juce::dontSendNotification);
-    } else {
-      if (midiMonitorPanel)
-        midiMonitorPanel->setVisible(false);
-      midiMonitorToggle.setToggleState(false, juce::dontSendNotification);
-    }
-    resized();
+    setSidebarContext(sidebarContext == Fanfare::ToolRail::Midi
+                          ? -1
+                          : Fanfare::ToolRail::Midi);
   };
 
   // Legacy aboutBtn replaced by clickable Fanfare logo
@@ -1197,15 +1167,18 @@ void MainComponent::setupHeaderButtons() {
     for (int ch = 1; ch <= 16; ++ch)
       menu.addItem(100 + ch, "Channel " + juce::String(ch), true, curCh == ch);
 
-    menu.showMenuAsync(juce::PopupMenu::Options(), [this](int result) {
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis](int result) {
+      if (safeThis == nullptr)
+        return;
       if (result >= 1 && result <= 4) {
-        engine.setFohOutputOffset((result - 1) * 2);
+        safeThis->engine.setFohOutputOffset((result - 1) * 2);
       } else if (result >= 11 && result <= 14) {
-        engine.setIemOutputOffset((result - 11) * 2);
+        safeThis->engine.setIemOutputOffset((result - 11) * 2);
       } else if (result == 100) {
-        engine.setDefaultMidiChannel(0);
+        safeThis->engine.setDefaultMidiChannel(0);
       } else if (result >= 101 && result <= 116) {
-        engine.setDefaultMidiChannel(result - 100);
+        safeThis->engine.setDefaultMidiChannel(result - 100);
       }
     });
   };
@@ -1219,21 +1192,24 @@ void MainComponent::setupHeaderButtons() {
         Fanfare::RigLibrary::getSongsDirectory(),
         "*.json");
 
+    juce::Component::SafePointer<MainComponent> safeThis(this);
     chooser->launchAsync(
         juce::FileBrowserComponent::saveMode |
             juce::FileBrowserComponent::canSelectFiles,
-        [this, chooser](const juce::FileChooser &fc) {
+        [safeThis, chooser](const juce::FileChooser &fc) {
+          if (safeThis == nullptr)
+            return;
           auto file = fc.getResult();
           if (file != juce::File()) {
             if (file.getFileExtension() != ".json")
               file = file.withFileExtension(".json");
 
-            juce::String json = engine.exportRigToJson();
+            juce::String json = safeThis->engine.exportRigToJson();
             SaveHistory::recordSave(file);
             if (Fanfare::RigSerializer::save(file, json)) {
               SaveHistory::recordSave(file);
-              currentRigFile = file;
-              setupNameLabel.setText(file.getFileNameWithoutExtension(), juce::dontSendNotification);
+              safeThis->currentRigFile = file;
+              safeThis->setupNameLabel.setText(file.getFileNameWithoutExtension(), juce::dontSendNotification);
               Fanfare::RecentSongs::record(file);
               LOG_INFO("Rig saved to: " + file.getFullPathName());
             } else {
@@ -1251,12 +1227,15 @@ void MainComponent::setupHeaderButtons() {
         Fanfare::RigLibrary::getSongsDirectory(),
         "*.json");
 
+    juce::Component::SafePointer<MainComponent> safeThis(this);
     chooser->launchAsync(juce::FileBrowserComponent::openMode |
                              juce::FileBrowserComponent::canSelectFiles,
-                          [this, chooser](const juce::FileChooser &fc) {
+                          [safeThis, chooser](const juce::FileChooser &fc) {
+                            if (safeThis == nullptr)
+                              return;
                             auto file = fc.getResult();
                             if (file.existsAsFile())
-                              loadRigAsync(file);
+                              safeThis->loadRigAsync(file);
                          });
   };
 
@@ -1618,30 +1597,36 @@ void MainComponent::refreshSceneButtons() {
         menu.addItem(4, "Clear MIDI Trigger");
 
       auto* b = sceneButtons[sceneIdx];
+      juce::Component::SafePointer<MainComponent> safeThis(this);
       menu.showMenuAsync(juce::PopupMenu::Options{}.withTargetComponent(b),
-        [this, sceneIdx](int result) {
+        [safeThis, sceneIdx](int result) {
+          if (safeThis == nullptr)
+            return;
           if (result == 1) {
             auto fileChooser = std::make_shared<juce::FileChooser>(
               "Select Song File...", Fanfare::RigLibrary::getSongsDirectory(), "*.json");
             fileChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-              [this, sceneIdx, fileChooser](const juce::FileChooser& fc) {
+              [safeThis, sceneIdx, fileChooser](const juce::FileChooser& fc) {
+                if (safeThis == nullptr)
+                  return;
                 auto file = fc.getResult();
                 if (file.existsAsFile()) {
-                  while (sceneSetupFilePaths.size() <= sceneIdx) sceneSetupFilePaths.add("");
-                  sceneSetupFilePaths.set(sceneIdx, file.getFullPathName());
-                  saveButtonMappings();
-                  refreshSceneButtons();
+                  while (safeThis->sceneSetupFilePaths.size() <= sceneIdx)
+                    safeThis->sceneSetupFilePaths.add("");
+                  safeThis->sceneSetupFilePaths.set(sceneIdx, file.getFullPathName());
+                  safeThis->saveButtonMappings();
+                  safeThis->refreshSceneButtons();
                 }
               });
           } else if (result == 2) {
-            if (sceneIdx < sceneSetupFilePaths.size())
-              sceneSetupFilePaths.set(sceneIdx, "");
-            saveButtonMappings();
-            refreshSceneButtons();
+            if (sceneIdx < safeThis->sceneSetupFilePaths.size())
+              safeThis->sceneSetupFilePaths.set(sceneIdx, "");
+            safeThis->saveButtonMappings();
+            safeThis->refreshSceneButtons();
           } else if (result == 3) {
-            if (sceneLearnAlert != nullptr) {
-              sceneLearnAlert->exitModalState(0);
-              sceneLearnAlert = nullptr;
+            if (safeThis->sceneLearnAlert != nullptr) {
+              safeThis->sceneLearnAlert->exitModalState(0);
+              safeThis->sceneLearnAlert = nullptr;
             }
             auto* alert = new juce::AlertWindow(
               "MIDI Learn",
@@ -1649,19 +1634,18 @@ void MainComponent::refreshSceneButtons() {
               juce::AlertWindow::InfoIcon);
             alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
-            sceneMidiLearnArmed.store(sceneIdx, std::memory_order_release);
-            juce::Component::SafePointer<MainComponent> safeThis(this);
+            safeThis->sceneMidiLearnArmed.store(sceneIdx, std::memory_order_release);
             alert->enterModalState(true,
               juce::ModalCallbackFunction::create([safeThis](int) {
                 if (safeThis != nullptr)
                   safeThis->sceneMidiLearnArmed.store(-1, std::memory_order_release);
               }),
               true);
-            sceneLearnAlert = alert;
+            safeThis->sceneLearnAlert = alert;
           } else if (result == 4) {
-            engine.clearSceneMidiTrigger(sceneIdx);
-            saveButtonMappings();
-            refreshSceneButtons();
+            safeThis->engine.clearSceneMidiTrigger(sceneIdx);
+            safeThis->saveButtonMappings();
+            safeThis->refreshSceneButtons();
           }
         });
     };
@@ -3202,9 +3186,17 @@ void MainComponent::resized() {
     sr.removeFromRight(8);
     if (!sceneButtons.isEmpty()) {
       const int n = sceneButtons.size();
+      const int minW = 56;
       const int maxW = 180;
       for (int i = 0; i < n; ++i) {
-        int w = juce::jmin(maxW, sr.getWidth() / (n - i));
+        if (sr.getWidth() < minW) {
+          sceneButtons[i]->setVisible(false);
+          sceneButtons[i]->setBounds({});
+          continue;
+        }
+        sceneButtons[i]->setVisible(true);
+        const int fitCount = juce::jmax(1, juce::jmin(n - i, sr.getWidth() / minW));
+        const int w = juce::jlimit(minW, maxW, sr.getWidth() / fitCount);
         sceneButtons[i]->setBounds(sr.removeFromLeft(w).reduced(2, 0));
       }
     }
@@ -3428,6 +3420,8 @@ void MainComponent::resized() {
     resourceInspectorOverlay->centreWithSize(740, 520);
   if (engineTuningModal)
     engineTuningModal->centreWithSize(juce::jmin(getWidth() - 32, 640), juce::jmin(getHeight() - 32, 560));
+  if (configOverlay)
+    configOverlay->centreWithSize(configOverlay->getWidth(), configOverlay->getHeight());
   if (stageRemoteOverlay)
     stageRemoteOverlay->setBounds(getLocalBounds());
   if (welcomeOverlay)
@@ -3508,44 +3502,51 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
 
   // Defer the transition slightly to guarantee that the message thread paints
   // the LoadingOverlay before heavy VST builds block the event loop.
-  juce::Timer::callAfterDelay(50, [this, file, highlight, targetSetlistIndex]() {
-    if (!transitioner)
+  juce::Component::SafePointer<MainComponent> safeThis(this);
+  juce::Timer::callAfterDelay(50, [safeThis, file, highlight, targetSetlistIndex]() {
+    if (safeThis == nullptr || !safeThis->transitioner)
       return;
 
-    transitioner->transitionToFile(file,
+    safeThis->transitioner->transitionToFile(file,
         Fanfare::RigTransitioner::Callbacks{
-            [this](juce::String progress) { setLoadingMessage(progress); },
-            [this, highlight, file, targetSetlistIndex, fileName = file.getFileNameWithoutExtension()](bool ok, juce::String message, int builtCount, const std::vector<Fanfare::RigBuilder::FailedEntry>& failed) {
-                hideLoadingOverlay();
-                closeOrphanedPluginWindows();
+            [safeThis](juce::String progress) {
+                if (safeThis != nullptr)
+                    safeThis->setLoadingMessage(progress);
+            },
+            [safeThis, highlight, file, targetSetlistIndex, fileName = file.getFileNameWithoutExtension()](bool ok, juce::String message, int builtCount, const std::vector<Fanfare::RigBuilder::FailedEntry>& failed) {
+                juce::ignoreUnused(highlight, builtCount);
+                if (safeThis == nullptr)
+                    return;
+                safeThis->hideLoadingOverlay();
+                safeThis->closeOrphanedPluginWindows();
                 if (ok) {
-                    suppressGlitchDetectionForMs(500);
-                    audioUnderrunCount.store(0);
-                    engineStallCount.store(0);
-                    currentRigFile = file;
+                    safeThis->suppressGlitchDetectionForMs(500);
+                    safeThis->audioUnderrunCount.store(0);
+                    safeThis->engineStallCount.store(0);
+                    safeThis->currentRigFile = file;
                     Fanfare::RecentSongs::record(file);
-                    setupNameLabel.setText(fileName, juce::dontSendNotification);
-                    freshBuildToggle.setToggleState(engine.isCurrentRigFreshBuild(), juce::dontSendNotification);
-                    for (auto *comp : rackSlotComponents) {
+                    safeThis->setupNameLabel.setText(fileName, juce::dontSendNotification);
+                    safeThis->freshBuildToggle.setToggleState(safeThis->engine.isCurrentRigFreshBuild(), juce::dontSendNotification);
+                    for (auto *comp : safeThis->rackSlotComponents) {
                         comp->updateOutputSelector();
                         comp->repaint();
                     }
-                    repaint();
-                    refreshSceneButtons();
-                    if (autoCollapseToggle.getToggleState()) {
-                        updateStripCollapseStates();
+                    safeThis->repaint();
+                    safeThis->refreshSceneButtons();
+                    if (safeThis->autoCollapseToggle.getToggleState()) {
+                        safeThis->updateStripCollapseStates();
                     } else {
-                        for (auto *comp : rackSlotComponents)
+                        for (auto *comp : safeThis->rackSlotComponents)
                             comp->setCollapsed(false);
-                        resized();
+                        safeThis->resized();
                     }
                     // Active-queue highlighting is driven by updatePreloadStatus()
                     // via the SetlistManager change broadcaster (setActiveIndex).
-midiMonitorLabel.setText("SONG: " + message,
-                                             juce::dontSendNotification);
+                    safeThis->midiMonitorLabel.setText("SONG: " + message,
+                                                       juce::dontSendNotification);
 
                     if (!failed.empty()) {
-                        showMissingPluginsWarning(failed);
+                        safeThis->showMissingPluginsWarning(failed);
                     }
 
                     // Update active index in SetlistManager if this file belongs to the setlist
@@ -3576,23 +3577,28 @@ midiMonitorLabel.setText("SONG: " + message,
 }
 
 void MainComponent::assignJsonToButton(int buttonIndex) {
+  if (buttonIndex < 0 || buttonIndex >= numSetupButtons)
+    return;
   auto setupsDir = Fanfare::RigLibrary::getSongsDirectory();
   setupsDir.createDirectory();
 
   auto chooser = std::make_shared<juce::FileChooser>("Select JSON Song File",
                                                      setupsDir, "*.json");
 
+  juce::Component::SafePointer<MainComponent> safeThis(this);
   chooser->launchAsync(
       juce::FileBrowserComponent::openMode |
           juce::FileBrowserComponent::canSelectFiles,
-      [this, buttonIndex, chooser](const juce::FileChooser &fc) {
+      [safeThis, buttonIndex, chooser](const juce::FileChooser &fc) {
+        if (safeThis == nullptr || buttonIndex < 0 || buttonIndex >= numSetupButtons)
+          return;
         auto file = fc.getResult();
         if (file.existsAsFile()) {
-          setupFilePaths[buttonIndex] = file.getFullPathName();
-          saveButtonMappings();
+          safeThis->setupFilePaths[buttonIndex] = file.getFullPathName();
+          safeThis->saveButtonMappings();
           auto& sm = Fanfare::SetlistManager::getInstance();
           sm.setSlotSetup(buttonIndex, file);
-          updatePreloadStatus();
+          safeThis->updatePreloadStatus();
         }
       });
 }
@@ -3792,26 +3798,31 @@ void MainComponent::showMasterPluginMenu(bool isFoh, int chainIndex) {
   menu.addSeparator();
   menu.addItem(-1, "(No Plugin)");
 
-  menu.showMenuAsync(juce::PopupMenu::Options(), [this, isFoh, chainIndex](int result) {
+  juce::Component::SafePointer<MainComponent> safeThis(this);
+  menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis, isFoh, chainIndex](int result) {
+    if (safeThis == nullptr)
+      return;
     if (result > 0 || result == -1) {
-      if (auto *oldInstance = engine.getMasterPluginInstance(isFoh, chainIndex)) {
-        closePluginWindowForInstance(oldInstance);
+      if (auto *oldInstance = safeThis->engine.getMasterPluginInstance(isFoh, chainIndex)) {
+        safeThis->closePluginWindowForInstance(oldInstance);
       }
     }
     if (result > 0) {
-      loadingOverlay.reset(new LoadingOverlay());
-      addAndMakeVisible(loadingOverlay.get());
+      safeThis->loadingOverlay.reset(new LoadingOverlay());
+      safeThis->addAndMakeVisible(safeThis->loadingOverlay.get());
 
-      engine.loadPluginIntoMasterBus(isFoh, chainIndex, result - 1,
-          [this, isFoh, chainIndex](bool success, const juce::String &err) {
-            loadingOverlay.reset();
+      safeThis->engine.loadPluginIntoMasterBus(isFoh, chainIndex, result - 1,
+          [safeThis, isFoh, chainIndex](bool success, const juce::String &err) {
+            if (safeThis == nullptr)
+              return;
+            safeThis->loadingOverlay.reset();
             if (!success) {
               juce::AlertWindow::showMessageBoxAsync(
                   juce::MessageBoxIconType::WarningIcon,
                   "Plugin Load Failed", err);
             } else {
-              auto name = engine.getMasterPluginName(isFoh, chainIndex);
-              auto &btn = isFoh ? fohFxBtns[chainIndex] : iemFxBtns[chainIndex];
+              auto name = safeThis->engine.getMasterPluginName(isFoh, chainIndex);
+              auto &btn = isFoh ? safeThis->fohFxBtns[chainIndex] : safeThis->iemFxBtns[chainIndex];
               bool hasPlugin = !name.isEmpty();
               btn.getProperties().set("isPluginSlot", true);
               btn.getProperties().set("hasPlugin", hasPlugin);
@@ -3819,8 +3830,10 @@ void MainComponent::showMasterPluginMenu(bool isFoh, int chainIndex) {
             }
           });
     } else if (result == -1) {
-      engine.loadPluginIntoMasterBus(isFoh, chainIndex, -1, [this, isFoh, chainIndex](bool, const juce::String &) {
-        auto &btn = isFoh ? fohFxBtns[chainIndex] : iemFxBtns[chainIndex];
+      safeThis->engine.loadPluginIntoMasterBus(isFoh, chainIndex, -1, [safeThis, isFoh, chainIndex](bool, const juce::String &) {
+        if (safeThis == nullptr)
+          return;
+        auto &btn = isFoh ? safeThis->fohFxBtns[chainIndex] : safeThis->iemFxBtns[chainIndex];
         btn.getProperties().set("isPluginSlot", true);
         btn.getProperties().set("hasPlugin", false);
         btn.setButtonText((isFoh ? "FOH " : "IEM ") + juce::String(chainIndex + 1));
@@ -3861,9 +3874,9 @@ void MainComponent::openMasterPluginEditor(bool isFoh, int chainIndex) {
 }
 
 void MainComponent::loadRigFile(int index) {
-  if (index >= 0 && index < numSetupButtons) {
-    currentSetupIndex = index;
-  }
+  if (index < 0 || index >= numSetupButtons)
+    return;
+  currentSetupIndex = index;
   if (setupFilePaths[index].isEmpty()) {
     assignJsonToButton(index);
     return;
@@ -3901,36 +3914,33 @@ void MainComponent::saveSetToFile() {
       "Save Set...",
       Fanfare::RigLibrary::getSetsDirectory(),
       "*.orset");
+  juce::Component::SafePointer<MainComponent> safeThis(this);
   fileChooser->launchAsync(
       juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-      [this](const juce::FileChooser &fc) {
+      [safeThis](const juce::FileChooser &fc) {
+          if (safeThis == nullptr)
+              return;
           auto file = fc.getResult();
           if (file == juce::File{})
               return;
           if (file.getFileExtension() != ".orset")
               file = file.withFileExtension(".orset");
-          
+
           juce::DynamicObject::Ptr obj = new juce::DynamicObject();
           for (int i = 0; i < numSetupButtons; ++i) {
-              if (!setupFilePaths[i].isEmpty())
-                  obj->setProperty("setup_" + juce::String(i), setupFilePaths[i]);
+              if (!safeThis->setupFilePaths[i].isEmpty())
+                  obj->setProperty("setup_" + juce::String(i), safeThis->setupFilePaths[i]);
           }
-          
+
           SaveHistory::recordSave(file);
-          file.getParentDirectory().createDirectory();
-          bool wroteOk = false;
-          {
-              juce::FileOutputStream fos(file);
-              if (fos.openedOk()) {
-                  fos.setPosition(0);
-                  fos.truncate();
-                  juce::JSON::writeToStream(fos, juce::var(obj.get()));
-                  fos.flush();
-                  wroteOk = true;
-              }
-          }
-          if (wroteOk)
+          const juce::String json = juce::JSON::toString(juce::var(obj.get()));
+          if (Fanfare::RigSerializer::save(file, json)) {
               SaveHistory::recordSave(file);
+          } else {
+              juce::AlertWindow::showMessageBoxAsync(
+                  juce::MessageBoxIconType::WarningIcon, "Save Failed",
+                  "Could not save queue map to:\n" + file.getFullPathName());
+          }
       });
 }
 
@@ -3939,10 +3949,12 @@ void MainComponent::loadSetFromFile() {
       "Load Set...",
       Fanfare::RigLibrary::getSetsDirectory(),
       "*.orset");
+  juce::Component::SafePointer<MainComponent> safeThis(this);
   fileChooser->launchAsync(
       juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-      [this](const juce::FileChooser &fc) {
-          applySetlistFromFile(fc.getResult());
+      [safeThis](const juce::FileChooser &fc) {
+          if (safeThis != nullptr)
+              safeThis->applySetlistFromFile(fc.getResult());
       });
 }
 
@@ -4246,7 +4258,9 @@ void MainComponent::showWebRemoteDialog() {
   if (hotspotController == nullptr) {
     hotspotController = std::make_unique<OpenRig::StageHotspotController>();
   }
-  stageRemoteOverlay = std::make_unique<OpenRig::StageRemoteModalOverlay>(*hotspotController, 8080);
+  const int port = webServer ? webServer->getPort() : 8080;
+  const juce::String token = webServer ? webServer->getSessionToken() : juce::String();
+  stageRemoteOverlay = std::make_unique<OpenRig::StageRemoteModalOverlay>(*hotspotController, port, token);
   stageRemoteOverlay->onClose = [this]() {
     stageRemoteOverlay.reset();
     repaint();
@@ -4343,9 +4357,9 @@ void MainComponent::setupStudioShell() {
 
 void MainComponent::setSidebarContext(int ctx) {
   sidebarContext = ctx;
-  libraryVisible = ctx >= 0;
-  if (ctx == Fanfare::ToolRail::Midi && !midiMonitorPanel) {
-    midiMonitorPanel = std::make_unique<MidiMonitorComponent>();
+  if (ctx == Fanfare::ToolRail::Midi && libraryPanel != nullptr) {
+    if (!midiMonitorPanel)
+      midiMonitorPanel = std::make_unique<MidiMonitorComponent>();
     libraryPanel->setMidiMonitorContent(midiMonitorPanel.get());
   }
   midiMonitorVisible = (ctx == Fanfare::ToolRail::Midi);
@@ -4382,14 +4396,16 @@ void MainComponent::showSceneMenu() {
   m.addItem(2, "Rename scene...", valid);
   m.addSeparator();
   m.addItem(3, "Delete scene...", valid && engine.getNumScenes() > 1);
+  juce::Component::SafePointer<MainComponent> safeThis(this);
   m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&sceneMenuBtn),
-                  [this, name](int r) {
-    if (r == 1 && saveSceneBtn.onClick) {
-      saveSceneBtn.onClick();
-    } else if (r == 2 && renameSceneBtn.onClick) {
-      renameSceneBtn.onClick();
+                  [safeThis, name](int r) {
+    if (safeThis == nullptr)
+      return;
+    if (r == 1 && safeThis->saveSceneBtn.onClick) {
+      safeThis->saveSceneBtn.onClick();
+    } else if (r == 2 && safeThis->renameSceneBtn.onClick) {
+      safeThis->renameSceneBtn.onClick();
     } else if (r == 3) {
-      juce::Component::SafePointer<MainComponent> safeThis(this);
       juce::AlertWindow::showAsync(
           juce::MessageBoxOptions()
               .withIconType(juce::MessageBoxIconType::WarningIcon)
@@ -4475,7 +4491,9 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
       m.addItem(menuItem(miNotepad, "Gig notepad", "Ctrl+N"));
       m.addItem(menuItem(miInspector, "Resource inspector"));
       m.addItem(menuItem(miRemote, "Tablet remote..."));
-      m.addItem(menuItem(miViewContextBase + Fanfare::ToolRail::Midi, "MIDI monitor"));
+      m.addItem(menuItem(miViewContextBase + Fanfare::ToolRail::Midi,
+                         "MIDI monitor", {},
+                         sidebarContext == Fanfare::ToolRail::Midi));
       m.addSeparator();
       m.addItem(menuItem(miSettings, "Settings..."));
       break;
@@ -4500,7 +4518,8 @@ void MainComponent::menuItemSelected(int id, int) {
       b.onClick();
   };
   if (id >= miViewContextBase && id < miViewContextBase + Fanfare::ToolRail::kNumContexts) {
-    setSidebarContext(id - miViewContextBase);
+    const int targetCtx = id - miViewContextBase;
+    setSidebarContext(sidebarContext == targetCtx ? -1 : targetCtx);
     return;
   }
   if (id >= miWidthBase && id < miWidthBase + 4) {

@@ -32,18 +32,41 @@ public:
         return instance;
     }
 
-    juce::String name;
-    std::vector<ControllerControl> controls;
-
     static juce::File file() {
         return FanfareConstants::getAppDirectory().getChildFile("settings")
             .getChildFile("controller_profile.json");
     }
 
+    juce::String getName() const {
+        const juce::SpinLock::ScopedLockType sl(profileLock);
+        return name;
+    }
+
+    std::vector<ControllerControl> getControls() const {
+        const juce::SpinLock::ScopedLockType sl(profileLock);
+        return controls;
+    }
+
+    void setProfile(const juce::String& newName,
+                    const std::vector<ControllerControl>& newControls) {
+        std::vector<ControllerControl> normalized;
+        normalized.reserve(newControls.size());
+        for (const auto& c : newControls) {
+            ControllerControl clean;
+            clean.name = c.name;
+            clean.cc = (c.cc >= 0 && c.cc <= 127) ? c.cc : -1;
+            normalized.push_back(std::move(clean));
+        }
+        const juce::SpinLock::ScopedLockType sl(profileLock);
+        name = newName;
+        controls = std::move(normalized);
+    }
+
     void seedDefaults() {
+        const juce::SpinLock::ScopedLockType sl(profileLock);
         name = "Roland CK88";
         controls = {
-            {"Mod wheel", 9}, {"Sustain pedal", 64}, {"Chorus / delay knob", 93},
+            {"Mod wheel", 1}, {"Sustain pedal", 64}, {"Chorus / delay knob", 93},
             {"Reverb knob", 92}, {"Drawbar 16'", 77}, {"Drawbar 5-1/3'", 78},
             {"Drawbar 8'", 79}, {"Drawbar 4'", 80}, {"Drawbar 2-2/3'", 81},
             {"Drawbar 2'", 82}, {"Drawbar 1-3/5'", 83}, {"Drawbar 1-1/3'", 85},
@@ -63,39 +86,71 @@ public:
             seedDefaults();
             return;
         }
-        name = obj->getProperty("name").toString();
-        controls.clear();
+        juce::String loadedName = obj->getProperty("name").toString();
+        std::vector<ControllerControl> loadedControls;
         if (auto* arr = obj->getProperty("controls").getArray()) {
             for (auto& v : *arr) {
                 if (auto* c = v.getDynamicObject()) {
                     ControllerControl cc;
                     cc.name = c->getProperty("name").toString();
-                    cc.cc = (int)c->getProperty("cc");
-                    controls.push_back(cc);
+                    if (c->hasProperty("cc")) {
+                        const int raw = (int)c->getProperty("cc");
+                        cc.cc = (raw >= 0 && raw <= 127) ? raw : -1;
+                    } else {
+                        cc.cc = -1;
+                    }
+                    loadedControls.push_back(std::move(cc));
                 }
             }
         }
+        const juce::SpinLock::ScopedLockType sl(profileLock);
+        name = std::move(loadedName);
+        controls = std::move(loadedControls);
     }
 
-    void save() {
+    bool save() {
+        juce::String snapshotName;
+        std::vector<ControllerControl> snapshotControls;
+        {
+            const juce::SpinLock::ScopedLockType sl(profileLock);
+            snapshotName = name;
+            snapshotControls = controls;
+        }
+
         juce::DynamicObject::Ptr obj = new juce::DynamicObject();
-        obj->setProperty("name", name);
+        obj->setProperty("version", 1);
+        obj->setProperty("name", snapshotName);
         juce::Array<juce::var> arr;
-        for (const auto& c : controls) {
+        for (const auto& c : snapshotControls) {
             juce::DynamicObject::Ptr co = new juce::DynamicObject();
             co->setProperty("name", c.name);
-            co->setProperty("cc", c.cc);
+            co->setProperty("cc", (c.cc >= 0 && c.cc <= 127) ? c.cc : -1);
             arr.add(juce::var(co.get()));
         }
         obj->setProperty("controls", arr);
+
         auto f = file();
         f.getParentDirectory().createDirectory();
-        f.replaceWithText(juce::JSON::toString(juce::var(obj.get())));
+        juce::TemporaryFile tmp(f);
+        bool ok = false;
+        {
+            juce::FileOutputStream fos(tmp.getFile());
+            if (fos.openedOk()) {
+                ok = fos.writeText(juce::JSON::toString(juce::var(obj.get())), false, false, nullptr);
+                fos.flush();
+                ok = ok && !fos.getStatus().failed();
+            }
+        }
+        if (!ok || !tmp.overwriteTargetFileWithTemporary())
+            return false;
+
         sendChangeMessage();
+        return true;
     }
 
     // CCs that are actually assigned (0..127), de-duplicated
     std::vector<int> assignedCCs() const {
+        const juce::SpinLock::ScopedLockType sl(profileLock);
         std::vector<int> out;
         for (const auto& c : controls)
             if (c.cc >= 0 && c.cc <= 127 &&
@@ -106,6 +161,7 @@ public:
 
     // "Drawbar 8' (CC79)" if the CC is in the profile, else "CC79"
     juce::String describeCC(int cc) const {
+        const juce::SpinLock::ScopedLockType sl(profileLock);
         for (const auto& c : controls)
             if (c.cc == cc && c.name.isNotEmpty())
                 return c.name + " (CC" + juce::String(cc) + ")";
@@ -114,6 +170,10 @@ public:
 
 private:
     ControllerProfile() { load(); }
+
+    mutable juce::SpinLock profileLock;
+    juce::String name;
+    std::vector<ControllerControl> controls;
 };
 
 //==============================================================================
@@ -124,10 +184,10 @@ public:
 
     ControllerProfileEditor() {
         auto& p = ControllerProfile::get();
-        working = p.controls;
+        working = p.getControls();
 
         addAndMakeVisible(nameEditor);
-        nameEditor.setText(p.name, false);
+        nameEditor.setText(p.getName(), false);
         nameEditor.setTextToShowWhenEmpty("Controller name (e.g. Roland CK88)",
                                           ThemeManager::get(Theme::Role::textFaint));
 
@@ -157,10 +217,14 @@ public:
         saveBtn.setToggleState(true, juce::dontSendNotification);
         saveBtn.onClick = [this] {
             auto& prof = ControllerProfile::get();
-            prof.name = nameEditor.getText().trim();
-            prof.controls = working;
-            prof.save();
-            close();
+            prof.setProfile(nameEditor.getText().trim(), working);
+            if (prof.save()) {
+                close();
+            } else {
+                juce::AlertWindow::showMessageBoxAsync(
+                    juce::MessageBoxIconType::WarningIcon, "Save Failed",
+                    "Could not write controller_profile.json. Check disk space and folder permissions.");
+            }
         };
         addAndMakeVisible(saveBtn);
 
@@ -299,6 +363,7 @@ private:
 
     void removeControl(int index) {
         if (index < 0 || index >= (int)working.size()) return;
+        MidiLearnBus::getInstance().disarmIfOwner(this);
         working.erase(working.begin() + index);
         learningIndex = -1;
         list.updateContent();

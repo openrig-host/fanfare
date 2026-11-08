@@ -12,7 +12,7 @@ namespace OpenRig {
  */
 class StageRemoteModalOverlay : public juce::Component, public juce::Timer {
 public:
-    StageRemoteModalOverlay(StageHotspotController& hotspotCtrl, int webServerPort = 8080);
+    StageRemoteModalOverlay(StageHotspotController& hotspotCtrl, int webServerPort = 8080, const juce::String& authToken = {});
     ~StageRemoteModalOverlay() override;
 
     void paint(juce::Graphics& g) override;
@@ -27,6 +27,7 @@ private:
 
     StageHotspotController& hotspotController;
     int port = 8080;
+    juce::String sessionToken;
 
     juce::TextButton closeBtn{"CLOSE"};
     juce::TextButton helpBtn{"HAAALP!"};

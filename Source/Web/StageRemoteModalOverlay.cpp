@@ -6,8 +6,8 @@
 
 namespace OpenRig {
 
-StageRemoteModalOverlay::StageRemoteModalOverlay(StageHotspotController& hotspotCtrl, int webServerPort)
-    : hotspotController(hotspotCtrl), port(webServerPort) {
+StageRemoteModalOverlay::StageRemoteModalOverlay(StageHotspotController& hotspotCtrl, int webServerPort, const juce::String& authToken)
+    : hotspotController(hotspotCtrl), port(webServerPort), sessionToken(authToken) {
     setOpaque(false);
     const auto& t = ThemeManager::getInstance().active();
 
@@ -150,6 +150,8 @@ void StageRemoteModalOverlay::updateQrCodes() {
     juce::String primaryIp = ips[0];
     if (hotspotController.isActive()) primaryIp = "192.168.137.1";
     juce::String url = "http://" + primaryIp + ":" + juce::String(port);
+    if (sessionToken.isNotEmpty())
+        url += "/?token=" + juce::URL::addEscapeChars(sessionToken, true);
 
     primaryUrlLabel.setText(url, juce::dontSendNotification);
     webQrComponent.setPayload(url);

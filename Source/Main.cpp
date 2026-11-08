@@ -55,8 +55,17 @@ public:
                                     "  [Build: " + juce::String(__DATE__) + " " + juce::String(__TIME__) + "]"));
 
     if (splashScreen) {
-      splashScreen->onFinished = [this] { splashScreen.reset(); };
+      splashScreen->onFinished = [this] {
+        splashScreen.reset();
+        if (mainWindow != nullptr) {
+          if (auto *mc = dynamic_cast<MainComponent *>(mainWindow->getContentComponent()))
+            mc->onStartupSplashFinished();
+        }
+      };
       splashScreen->finishAndDismiss();
+    } else if (mainWindow != nullptr) {
+      if (auto *mc = dynamic_cast<MainComponent *>(mainWindow->getContentComponent()))
+        mc->onStartupSplashFinished();
     }
   }
 
@@ -65,6 +74,7 @@ public:
     FanfareLog::flushLog();
     splashScreen = nullptr;
     mainWindow = nullptr; // (deletes our window)
+    SaveHistory::waitForPendingSnapshots(2500);
 
 #ifdef _WIN32
     // Restore default Windows timer resolution
@@ -229,8 +239,14 @@ public:
       auto f =
           FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
       juce::var v;
-      if (f.existsAsFile())
-        v = juce::JSON::parse(f.loadFileAsString());
+      if (f.existsAsFile()) {
+        const auto raw = f.loadFileAsString().trim();
+        if (raw.isNotEmpty()) {
+          v = juce::JSON::parse(raw);
+          if (!v.isObject())
+            return; // Corrupt ui_settings.json — abort rather than wiping unrelated settings
+        }
+      }
       if (!v.isObject())
         v = juce::var(new juce::DynamicObject());
       if (auto *obj = v.getDynamicObject()) {
@@ -242,7 +258,9 @@ public:
         }
       }
       f.getParentDirectory().createDirectory();
-      f.replaceWithText(juce::JSON::toString(v));
+      juce::TemporaryFile tmp(f);
+      if (tmp.getFile().replaceWithText(juce::JSON::toString(v)))
+        tmp.overwriteTargetFileWithTemporary();
 #endif
     }
 

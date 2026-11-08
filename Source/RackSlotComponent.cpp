@@ -540,6 +540,8 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   stripMenuBtn.onClick = [this] { showStripActionsMenu(); };
 
   addAndMakeVisible(midiLed);
+  addAndMakeVisible(mp3Led);
+  mp3Led.setTooltip("MP3 loaded on this strip (blinking = playing)");
 
   addAndMakeVisible(noteRangeLabel);
   noteRangeLabel.setJustificationType(juce::Justification::centred);
@@ -603,6 +605,19 @@ void RackSlotComponent::timerCallback() {
 
   if (slot.getAndClearMidiActivity())
     midiLed.flash();
+
+  // MP3 indicator: blinking bright = playing, steady dim = loaded, dark = empty
+  if (kMp3DecksEnabled) {
+    auto &mp3 = slot.getMp3Player();
+    const bool mp3Loaded = mp3.hasLoadedTrack();
+    const bool mp3Playing = mp3Loaded && mp3.isPlaying();
+    prevMp3Loaded = mp3Loaded;
+    prevMp3Playing = mp3Playing;
+    if (mp3Playing)
+      mp3Led.setIntensity((juce::Time::getMillisecondCounter() % 800) < 400 ? 1.0f : 0.25f);
+    else
+      mp3Led.setIntensity(mp3Loaded ? 0.5f : 0.0f);
+  }
 
   const auto rangeStr = getActiveNoteRangeString();
   noteRangeLabel.setText(rangeStr, juce::dontSendNotification);
@@ -966,6 +981,8 @@ void RackSlotComponent::resized() {
 
     midiLed.setVisible(true);
     midiLed.setBounds(getWidth() / 2 - 4, 27, 8, 8);
+    mp3Led.setVisible(kMp3DecksEnabled);
+    mp3Led.setBounds(getWidth() / 2 - 15, 27, 8, 8);
     cachedMeterArea = juce::Rectangle<int>(getWidth() - 7, 38, 5, juce::jmax(0, getHeight() - 68));
     return;
   }
@@ -1517,11 +1534,27 @@ void RackSlotComponent::SlotBtnMouseListener::mouseDown(const juce::MouseEvent &
   }
 }
 
+void RackSlotComponent::NoteRangeLabelListener::mouseDown(const juce::MouseEvent &e) {
+  leftPressArmed = (owner != nullptr &&
+                    e.originalComponent == &owner->noteRangeLabel &&
+                    e.mods.isLeftButtonDown() &&
+                    !e.mods.isPopupMenu() &&
+                    e.getNumberOfClicks() == 1);
+}
+
 void RackSlotComponent::NoteRangeLabelListener::mouseUp(const juce::MouseEvent &e) {
-  if (owner && e.originalComponent == &owner->noteRangeLabel &&
-      !e.mods.isRightButtonDown() && owner->onShowNoteRangeDialog) {
-    owner->onShowNoteRangeDialog();
-  }
+  const bool wasArmed = leftPressArmed;
+  leftPressArmed = false;
+  if (!wasArmed || owner == nullptr || !owner->onShowNoteRangeDialog)
+    return;
+  const auto rel = e.getEventRelativeTo(&owner->noteRangeLabel);
+  if (!owner->noteRangeLabel.getLocalBounds().contains(rel.getPosition()))
+    return;
+  const juce::int64 nowMs = juce::Time::getCurrentTime().toMilliseconds();
+  if (nowMs - lastOpenMs < 300)
+    return;
+  lastOpenMs = nowMs;
+  owner->onShowNoteRangeDialog();
 }
 
 void RackSlotComponent::LongPressMouseListener::mouseDown(const juce::MouseEvent &e) {
@@ -1548,6 +1581,18 @@ void RackSlotComponent::LongPressMouseListener::mouseDrag(const juce::MouseEvent
 void RackSlotComponent::LongPressMouseListener::mouseUp(const juce::MouseEvent &e) {
   (void)e;
   stopTimer();
+  // Component::mouseUp (and any synchronous Button::onClick) has already run
+  // before MouseListener::mouseUp. If the pointer was released outside the
+  // button so onClick did not fire, clear suppressLongPressClick and resync
+  // button toggle states so the flag never eats a subsequent click.
+  if (owner != nullptr && owner->suppressLongPressClick) {
+    owner->suppressLongPressClick = false;
+    owner->fohRoutingBtn.setToggleState(owner->slot.isFohEnabled(), juce::dontSendNotification);
+    owner->iemRoutingBtn.setToggleState(owner->slot.isIemEnabled(), juce::dontSendNotification);
+    owner->bypassButton.setToggleState(owner->slot.isBypassed(), juce::dontSendNotification);
+    owner->collapsedMuteBtn.setToggleState(owner->slot.isBypassed(), juce::dontSendNotification);
+  }
+  fired = false;
 }
 
 void RackSlotComponent::LongPressMouseListener::timerCallback() {

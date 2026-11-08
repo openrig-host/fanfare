@@ -34,6 +34,8 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
                                           FanfareConstants::kDefaultFohOutputOffset);
     out.iemOutputOffset = rig.getProperty("iemOutputOffset",
                                           FanfareConstants::kDefaultIemOutputOffset);
+    out.defaultMidiChannel = rig.getProperty("defaultMidiChannel",
+                                             FanfareConstants::kDefaultMidiChannel);
 
     auto readPluginState = [](const juce::var& v) {
         PluginState ps;
@@ -75,6 +77,7 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
             slot.level = (float)cv.getProperty("level", 0.8);
             slot.fohEnabled = cv.getProperty("foh", true);
             slot.iemEnabled = cv.getProperty("iem", true);
+            slot.fadersLinked = cv.getProperty("fadersLinked", true);
             slot.bypassed = cv.getProperty("mute", false);
             slot.inputChannelIndex = cv.getProperty("inputIndex", -1);
             slot.aux1Send = (float)cv.getProperty("aux1", 0.0);
@@ -132,6 +135,25 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
                             slot.sampler.slots[sIdx].volume = (float)slo.getProperty("volume", 1.0);
                             slot.sampler.slots[sIdx].startRatio = (float)slo.getProperty("startRatio", 0.0);
                             slot.sampler.slots[sIdx].endRatio = (float)slo.getProperty("endRatio", 1.0);
+                            slot.sampler.slots[sIdx].isLooping = slo.getProperty("isLooping", false);
+                            slot.sampler.slots[sIdx].volumeCC = slo.getProperty("volumeCC", -1);
+                        }
+                    }
+                }
+            }
+            if (auto* mp3Obj = cv.getProperty("mp3Player", juce::var()).getDynamicObject()) {
+                slot.mp3Player.loopMode = mp3Obj->hasProperty("loopMode") ? (int)mp3Obj->getProperty("loopMode") : 0;
+                slot.mp3Player.shuffle = mp3Obj->hasProperty("shuffle") ? (bool)mp3Obj->getProperty("shuffle") : false;
+                slot.mp3Player.gain = mp3Obj->hasProperty("gain") ? (float)mp3Obj->getProperty("gain") : 1.0f;
+                slot.mp3Player.tracks.clear();
+                if (auto* arr = mp3Obj->getProperty("tracks").getArray()) {
+                    for (const auto& tv : *arr) {
+                        if (auto* to = tv.getDynamicObject()) {
+                            Mp3TrackSettings ts;
+                            ts.path = to->hasProperty("path") ? to->getProperty("path").toString() : "";
+                            ts.title = to->hasProperty("title") ? to->getProperty("title").toString() : "";
+                            ts.duration = to->hasProperty("duration") ? (double)to->getProperty("duration") : 0.0;
+                            slot.mp3Player.tracks.push_back(ts);
                         }
                     }
                 }
@@ -220,16 +242,73 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
             const auto& sv = scs->getReference(i);
             if (!sv.isObject())
                 continue;
-            Scene sc;
-            sc.name = sv.getProperty("name", "Scene").toString();
+            Scene sc(sv.getProperty("name", "Scene").toString());
+            sc.midiProgramChange = sv.getProperty("midiProgramChange", -1);
+            sc.midiChannel = sv.getProperty("midiChannel", 0);
             if (auto* sts = sv.getProperty("states", juce::var()).getArray()) {
                 for (int s = 0; s < sts->size(); ++s) {
                     const auto& stv = sts->getReference(s);
                     SlotState st;
                     st.bypassed = stv.getProperty("bypassed", false);
-                    st.channelLevel = (float)stv.getProperty("level", 0.8);
+                    st.fohLevel = (float)stv.getProperty("fohLevel", stv.getProperty("level", 0.8));
+                    st.iemLevel = (float)stv.getProperty("iemLevel", st.fohLevel);
                     st.fohEnabled = stv.getProperty("foh", true);
                     st.iemEnabled = stv.getProperty("iem", true);
+                    st.fadersLinked = stv.getProperty("fadersLinked", true);
+                    st.aux1Send = (float)stv.getProperty("aux1Send", 0.0);
+                    st.aux2Send = (float)stv.getProperty("aux2Send", 0.0);
+                    st.iemOffset = (float)stv.getProperty("iemOffset", 1.0);
+                    st.transposeOctaves = stv.getProperty("transposeOctaves", 0);
+                    st.transposeSemitones = stv.getProperty("transposeSemitones", 0);
+                    st.lowNote = stv.getProperty("lowNote", 0);
+                    st.highNote = stv.getProperty("highNote", 127);
+
+                    st.gateEnabled = stv.getProperty("gateEnabled", false);
+                    st.gateThreshold = (float)stv.getProperty("gateThreshold", -60.0);
+                    st.eqEnabled = stv.getProperty("eqEnabled", false);
+                    st.eqCurveMode = stv.getProperty("eqCurveMode", false);
+                    st.hpfFreq = (float)stv.getProperty("hpfFreq", 20.0);
+                    st.lowShelfGain = (float)stv.getProperty("eqLow", 0.0);
+                    st.highShelfGain = (float)stv.getProperty("eqHigh", 0.0);
+                    st.eqVolGain = (float)stv.getProperty("eqVolGain", 0.0);
+                    st.eqMasterGain = (float)stv.getProperty("eqMasterGain", 0.0);
+                    if (auto* bandsArr = stv.getProperty("eqBands", juce::var()).getArray()) {
+                        for (int b = 0; b < 10 && b < bandsArr->size(); ++b)
+                            st.eqBands[b] = (float)bandsArr->getReference(b);
+                    }
+                    st.compEnabled = stv.getProperty("compEnabled", false);
+                    st.compAmount = (float)stv.getProperty("compAmount", 0.0);
+                    st.chorusEnabled = stv.getProperty("chorusEnabled", false);
+                    st.chorusRate = (float)stv.getProperty("chorusRate", 1.0);
+                    st.chorusMix = (float)stv.getProperty("chorusMix", 0.0);
+                    st.delayEnabled = stv.getProperty("delayEnabled", false);
+                    st.delayMode = stv.getProperty("delayMode", 0);
+                    st.delayTimeMs = (float)stv.getProperty("delayTimeMs", 375.0);
+                    st.delayFeedback = (float)stv.getProperty("delayFeedback", 0.35);
+                    st.delayTone = (float)stv.getProperty("delayTone", 6500.0);
+                    st.delayMix = (float)stv.getProperty("delayMix", 0.25);
+                    st.reverbEnabled = stv.getProperty("reverbEnabled", false);
+                    st.reverbSize = (float)stv.getProperty("reverbSize", 0.5);
+                    st.reverbMix = (float)stv.getProperty("reverbMix", 0.0);
+                    st.irEnabled = stv.getProperty("irEnabled", false);
+                    st.irMix = (float)stv.getProperty("irMix", 0.3);
+                    st.irPath = stv.getProperty("irPath", juce::String()).toString();
+
+                    st.arpEnabled = stv.getProperty("arpEnabled", false);
+                    st.arpBpm = (float)stv.getProperty("arpBpm", 120.0);
+                    st.arpOctavesUp = stv.getProperty("arpOctavesUp", 1);
+                    st.arpOctavesDown = stv.getProperty("arpOctavesDown", 0);
+                    st.arpGate = (float)stv.getProperty("arpGate", 0.9);
+                    st.arpPatternIdx = stv.getProperty("arpPatternIdx", 0);
+
+                    st.harmEnabled = stv.getProperty("harmEnabled", false);
+                    st.harmOctavesUp = stv.getProperty("harmOctavesUp", 1);
+                    st.harmOctavesDown = stv.getProperty("harmOctavesDown", 0);
+                    st.harmAfricaMode = stv.getProperty("harmAfricaMode", 0);
+                    st.harmTargetSlot = stv.getProperty("harmTargetSlot", -1);
+
+                    st.samplerEnabled = stv.getProperty("samplerEnabled", false);
+
                     sc.slotStates.push_back(st);
                 }
             }
@@ -238,6 +317,10 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
     }
 
     out.currentSceneIndex = rig.getProperty("currentSceneIndex", 0);
+    if (out.scenes.empty())
+        out.currentSceneIndex = 0;
+    else
+        out.currentSceneIndex = juce::jlimit(0, (int)out.scenes.size() - 1, out.currentSceneIndex);
 
     // Notes / Gig Notepad tabs
     if (auto* noteArr = rig.getProperty("notes", juce::var()).getArray()) {
@@ -267,6 +350,7 @@ juce::var RigSerializer::songToVar(const Song& song) {
     rig->setProperty("iemMasterLevel", (double)song.iemMasterLevel);
     rig->setProperty("fohOutputOffset", song.fohOutputOffset);
     rig->setProperty("iemOutputOffset", song.iemOutputOffset);
+    rig->setProperty("defaultMidiChannel", song.defaultMidiChannel);
 
     auto writePluginState = [](const PluginState& ps) {
         auto* o = new juce::DynamicObject();
@@ -311,6 +395,7 @@ juce::var RigSerializer::songToVar(const Song& song) {
         st->setProperty("level", (double)s.level);
         st->setProperty("foh", s.fohEnabled);
         st->setProperty("iem", s.iemEnabled);
+        st->setProperty("fadersLinked", s.fadersLinked);
         st->setProperty("mute", s.bypassed);
         st->setProperty("inputIndex", s.inputChannelIndex);
         st->setProperty("aux1", (double)s.aux1Send);
@@ -466,13 +551,74 @@ juce::var RigSerializer::songToVar(const Song& song) {
     for (const auto& scene : song.scenes) {
         auto* so = new juce::DynamicObject();
         so->setProperty("name", scene.name);
+        so->setProperty("midiProgramChange", scene.midiProgramChange);
+        so->setProperty("midiChannel", scene.midiChannel);
         juce::Array<juce::var> states;
         for (const auto& ss : scene.slotStates) {
             auto* sso = new juce::DynamicObject();
             sso->setProperty("bypassed", ss.bypassed);
-            sso->setProperty("level", (double)ss.channelLevel);
+            sso->setProperty("level", (double)ss.fohLevel);
+            sso->setProperty("fohLevel", (double)ss.fohLevel);
+            sso->setProperty("iemLevel", (double)ss.iemLevel);
             sso->setProperty("foh", ss.fohEnabled);
             sso->setProperty("iem", ss.iemEnabled);
+            sso->setProperty("fadersLinked", ss.fadersLinked);
+            sso->setProperty("aux1Send", (double)ss.aux1Send);
+            sso->setProperty("aux2Send", (double)ss.aux2Send);
+            sso->setProperty("iemOffset", (double)ss.iemOffset);
+            sso->setProperty("transposeOctaves", ss.transposeOctaves);
+            sso->setProperty("transposeSemitones", ss.transposeSemitones);
+            sso->setProperty("lowNote", ss.lowNote);
+            sso->setProperty("highNote", ss.highNote);
+
+            sso->setProperty("gateEnabled", ss.gateEnabled);
+            sso->setProperty("gateThreshold", (double)ss.gateThreshold);
+            sso->setProperty("eqEnabled", ss.eqEnabled);
+            sso->setProperty("eqCurveMode", ss.eqCurveMode);
+            sso->setProperty("hpfFreq", (double)ss.hpfFreq);
+            sso->setProperty("eqLow", (double)ss.lowShelfGain);
+            sso->setProperty("eqHigh", (double)ss.highShelfGain);
+            sso->setProperty("eqVolGain", (double)ss.eqVolGain);
+            sso->setProperty("eqMasterGain", (double)ss.eqMasterGain);
+            {
+                juce::Array<juce::var> bandsArr;
+                for (int b = 0; b < 10; ++b)
+                    bandsArr.add((double)ss.eqBands[b]);
+                sso->setProperty("eqBands", bandsArr);
+            }
+            sso->setProperty("compEnabled", ss.compEnabled);
+            sso->setProperty("compAmount", (double)ss.compAmount);
+            sso->setProperty("chorusEnabled", ss.chorusEnabled);
+            sso->setProperty("chorusRate", (double)ss.chorusRate);
+            sso->setProperty("chorusMix", (double)ss.chorusMix);
+            sso->setProperty("delayEnabled", ss.delayEnabled);
+            sso->setProperty("delayMode", ss.delayMode);
+            sso->setProperty("delayTimeMs", (double)ss.delayTimeMs);
+            sso->setProperty("delayFeedback", (double)ss.delayFeedback);
+            sso->setProperty("delayTone", (double)ss.delayTone);
+            sso->setProperty("delayMix", (double)ss.delayMix);
+            sso->setProperty("reverbEnabled", ss.reverbEnabled);
+            sso->setProperty("reverbSize", (double)ss.reverbSize);
+            sso->setProperty("reverbMix", (double)ss.reverbMix);
+            sso->setProperty("irEnabled", ss.irEnabled);
+            sso->setProperty("irMix", (double)ss.irMix);
+            sso->setProperty("irPath", ss.irPath);
+
+            sso->setProperty("arpEnabled", ss.arpEnabled);
+            sso->setProperty("arpBpm", (double)ss.arpBpm);
+            sso->setProperty("arpOctavesUp", ss.arpOctavesUp);
+            sso->setProperty("arpOctavesDown", ss.arpOctavesDown);
+            sso->setProperty("arpGate", (double)ss.arpGate);
+            sso->setProperty("arpPatternIdx", ss.arpPatternIdx);
+
+            sso->setProperty("harmEnabled", ss.harmEnabled);
+            sso->setProperty("harmOctavesUp", ss.harmOctavesUp);
+            sso->setProperty("harmOctavesDown", ss.harmOctavesDown);
+            sso->setProperty("harmAfricaMode", ss.harmAfricaMode);
+            sso->setProperty("harmTargetSlot", ss.harmTargetSlot);
+
+            sso->setProperty("samplerEnabled", ss.samplerEnabled);
+
             states.add(juce::var(sso));
         }
         so->setProperty("states", states);
@@ -522,6 +668,7 @@ juce::String RigSerializer::serializeStrip(const SongSlot& slot) {
     st->setProperty("level", (double)slot.level);
     st->setProperty("foh", slot.fohEnabled);
     st->setProperty("iem", slot.iemEnabled);
+    st->setProperty("fadersLinked", slot.fadersLinked);
     st->setProperty("mute", slot.bypassed);
     st->setProperty("inputIndex", slot.inputChannelIndex);
     st->setProperty("aux1", (double)slot.aux1Send);
@@ -691,6 +838,7 @@ bool RigSerializer::readStripFromFile(const juce::File& file, SongSlot& outSlot)
     outSlot.level = (float)cv.getProperty("level", 0.8);
     outSlot.fohEnabled = cv.getProperty("foh", true);
     outSlot.iemEnabled = cv.getProperty("iem", true);
+    outSlot.fadersLinked = cv.getProperty("fadersLinked", true);
     outSlot.bypassed = cv.getProperty("mute", false);
     outSlot.inputChannelIndex = cv.getProperty("inputIndex", -1);
     outSlot.aux1Send = (float)cv.getProperty("aux1", 0.0);

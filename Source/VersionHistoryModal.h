@@ -184,15 +184,21 @@ private:
                 .withTitle("Restore version")
                 .withMessage("Restore \"" + item.getFileNameWithoutExtension() +
                              "\" to snapshot from " + desc +
-                             "?\n\nThe current version is saved in history first so nothing is lost.")
+                             "?\n\nThe current saved file on disk is backed up in history first. "
+                             "Any unsaved in-memory mixer changes will be replaced when the restored version loads.")
                 .withButton("Restore")
                 .withButton("Cancel"),
             [safeThis, versionFile](int result) {
                 if (result != 1 || safeThis == nullptr)
                     return;
-                SaveHistory::recordSave(safeThis->item);
-                versionFile.copyFileTo(safeThis->item);
-                SaveHistory::recordSave(safeThis->item);
+                juce::String restoreErr;
+                if (!SaveHistory::restoreVersion(versionFile, safeThis->item, restoreErr)) {
+                    juce::AlertWindow::showMessageBoxAsync(
+                        juce::MessageBoxIconType::WarningIcon,
+                        "Restore failed",
+                        restoreErr);
+                    return;
+                }
 
                 auto cb = safeThis->onRestore;
                 const auto restoredItem = safeThis->item;

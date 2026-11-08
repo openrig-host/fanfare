@@ -1,6 +1,7 @@
 #include "LibraryPanel.h"
 #include "BoutiqueLookAndFeel.h"
 #include "ButtonRoles.h"
+#include "FanfareConstants.h"
 #include "SetupMidiTriggers.h"
 #include "SetlistManager.h"
 #include "ThemeManager.h"
@@ -93,15 +94,17 @@ void LibraryList::createNewFolder() {
   aw->addButton("Create", 1, juce::KeyPress(juce::KeyPress::returnKey));
   aw->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
-  aw->enterModalState(true, juce::ModalCallbackFunction::create([this, aw](int result) {
-    if (result == 1) {
-      juce::String text = aw->getTextEditorContents("folderName").trim();
+  juce::Component::SafePointer<LibraryList> safeThis(this);
+  juce::Component::SafePointer<juce::AlertWindow> safeAw(aw);
+  aw->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, safeAw](int result) {
+    if (result == 1 && safeThis != nullptr && safeAw != nullptr) {
+      juce::String text = safeAw->getTextEditorContents("folderName").trim();
       if (text.isNotEmpty()) {
         juce::String cleanName = juce::File::createLegalFileName(text);
-        juce::File newDir = directory.getChildFile(cleanName);
+        juce::File newDir = safeThis->directory.getChildFile(cleanName);
         if (!newDir.exists())
           newDir.createDirectory();
-        refresh();
+        safeThis->refresh();
       }
     }
   }), true);
@@ -325,18 +328,23 @@ void LibraryList::listBoxItemClicked(int row, const juce::MouseEvent &e) {
       menu.addItem(3, "Reveal in Explorer");
       menu.addItem(4, "Delete Empty Folder");
 
-      menu.showMenuAsync(juce::PopupMenu::Options(), [this, item](int result) {
+      juce::Component::SafePointer<LibraryList> safeThis(this);
+      const juce::String cat = item.category;
+      const juce::File folderDir = item.folderDir;
+      menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis, cat, folderDir](int result) {
+        if (safeThis == nullptr)
+          return;
         if (result == 1) {
-          toggleFolderCollapsed(item.category);
+          safeThis->toggleFolderCollapsed(cat);
         } else if (result == 2) {
-          createNewFolder();
+          safeThis->createNewFolder();
         } else if (result == 3) {
-          if (item.folderDir.exists())
-            item.folderDir.startAsProcess();
+          if (folderDir.exists())
+            folderDir.startAsProcess();
         } else if (result == 4) {
-          if (item.folderDir.exists() && item.folderDir.findChildFiles(juce::File::findFiles, false).isEmpty()) {
-            item.folderDir.deleteRecursively();
-            refresh();
+          if (folderDir.exists() && folderDir.findChildFiles(juce::File::findFiles, false).isEmpty()) {
+            folderDir.deleteRecursively();
+            safeThis->refresh();
           } else {
             juce::AlertWindow::showMessageBoxAsync(
                 juce::MessageBoxIconType::WarningIcon, "Folder Not Empty",
@@ -686,7 +694,13 @@ void LibraryPanel::resized() {
   queueContainer.setBounds(content);
   auto q = queueContainer.getLocalBounds();
   if (queueTiles != nullptr) {
-    const int tilesH = juce::jmin(q.getHeight() * 2 / 3, 10 * 30 + 40);
+    const int nTiles = FanfareConstants::kNumSetupButtons;
+    const int minTilesH = nTiles * 22 + 32;
+    const int maxTilesH = nTiles * 30 + 36;
+    const int availForTiles = juce::jmax(120, q.getHeight() - 96);
+    const int tilesH = juce::jmin(
+        maxTilesH,
+        juce::jmax(q.getHeight() * 2 / 3, juce::jmin(minTilesH, availForTiles)));
     queueTiles->setBounds(q.removeFromTop(tilesH).reduced(8, 0));
   }
   q.removeFromTop(6);

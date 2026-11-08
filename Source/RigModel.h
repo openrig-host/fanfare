@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Scene.h"
 #include <JuceHeader.h>
 #include <vector>
 #include <set>
@@ -116,6 +117,7 @@ struct SongSlot {
     float level = 0.8f;
     bool fohEnabled = true;
     bool iemEnabled = true;
+    bool fadersLinked = true;
     bool bypassed = false;
     int inputChannelIndex = -1;
     float aux1Send = 0.0f;
@@ -164,17 +166,8 @@ struct HarmParams {
     std::vector<PluginState> chain;
 };
 
-struct SlotState {
-    bool bypassed = false;
-    float channelLevel = 0.8f;
-    bool fohEnabled = true;
-    bool iemEnabled = true;
-};
-
-struct Scene {
-    juce::String name;
-    std::vector<SlotState> slotStates;
-};
+using SlotState = ::SlotState;
+using Scene = ::Scene;
 
 struct NoteTab {
     juce::String title;
@@ -187,6 +180,7 @@ struct Song {
     float iemMasterLevel = 1.0f;
     int fohOutputOffset = 0;
     int iemOutputOffset = 2;
+    int defaultMidiChannel = 1;
     std::vector<PluginState> fohFx;
     std::vector<PluginState> iemFx;
     std::vector<SongSlot> slots;

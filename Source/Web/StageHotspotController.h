@@ -73,6 +73,7 @@ private:
 
     std::function<void(bool, juce::String)> pendingCallback;
     std::mutex taskMutex;
+    std::shared_ptr<std::atomic<bool>> aliveToken = std::make_shared<std::atomic<bool>>(true);
 
     bool executeWindowsHotspotScript(bool enable, const juce::String& ssid, const juce::String& password, juce::String& outMessage);
 };

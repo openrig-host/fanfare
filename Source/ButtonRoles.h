@@ -50,7 +50,7 @@ inline juce::String toSentenceCase(const juce::String& s) {
     for (auto& w : words) {
         juce::String core = w.retainCharacters("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
         if (core.isEmpty() || core.containsAnyOf("0123456789") || acronyms.contains(core)) {
-            if (core.isNotEmpty())
+            if (core.containsAnyOf("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
                 firstAlphaDone = true;
             continue;
         }

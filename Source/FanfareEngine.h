@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Logger.h"
+#include "PluginBuildGate.h"
 #include "RackSlot.h"
 #include "Scene.h"
 #include "RigModel.h"
@@ -213,104 +214,132 @@ public:
   RackSlot *getAuxReturn(int index) { return auxReturns[index].get(); }
 
   void loadScene(int index) {
-    if (index >= 0 && index < (int)scenes.size()) {
-      panicTriggered.store(true); // Silence active notes so transpose changes don't cause stuck notes
-      auto &scene = scenes[index];
-      for (size_t i = 0; i < slots.size() && i < scene.slotStates.size(); ++i) {
-        auto* slot = slots[i].get();
-        const auto& st = scene.slotStates[i];
-        
-        slot->setBypass(st.bypassed);
-        slot->setFohLevel(st.fohLevel);
-        slot->setIemLevel(st.iemLevel);
-        slot->setFohEnabled(st.fohEnabled);
-        slot->setIemEnabled(st.iemEnabled);
-        slot->setFadersLinked(st.fadersLinked);
-        slot->setAux1Send(st.aux1Send);
-        slot->setAux2Send(st.aux2Send);
-        slot->setIemOffset(st.iemOffset);
-        slot->setTransposeOctaves(st.transposeOctaves);
-        slot->setTransposeSemitones(st.transposeSemitones);
-        slot->setNoteRange(st.lowNote, st.highNote);
-
-        // DSP
-        auto& dsp = slot->getStrip();
-        dsp.gateEnabled.store(st.gateEnabled);
-        dsp.gateThreshold.store(st.gateThreshold);
-        dsp.eqEnabled.store(st.eqEnabled);
-        dsp.eqCurveMode.store(st.eqCurveMode);
-        dsp.hpfFreq.store(st.hpfFreq);
-        dsp.lowShelfGain.store(st.lowShelfGain);
-        dsp.highShelfGain.store(st.highShelfGain);
-        dsp.eqVolGain.store(st.eqVolGain);
-        dsp.eqMasterGain.store(st.eqMasterGain);
-        for (int b = 0; b < 10; ++b)
-          dsp.eqBands[b].store(st.eqBands[b]);
-        dsp.compEnabled.store(st.compEnabled);
-        dsp.compAmount.store(st.compAmount);
-        dsp.chorusEnabled.store(st.chorusEnabled);
-        dsp.chorusRate.store(st.chorusRate);
-        dsp.chorusMix.store(st.chorusMix);
-        dsp.delayEnabled.store(st.delayEnabled);
-        dsp.delayMode.store(st.delayMode);
-        dsp.delayTimeMs.store(st.delayTimeMs);
-        dsp.delayFeedback.store(st.delayFeedback);
-        dsp.delayTone.store(st.delayTone);
-        dsp.delayMix.store(st.delayMix);
-        dsp.reverbEnabled.store(st.reverbEnabled);
-        dsp.reverbSize.store(st.reverbSize);
-        dsp.reverbMix.store(st.reverbMix);
-        dsp.irEnabled.store(st.irEnabled);
-        dsp.irMix.store(st.irMix);
-        if (st.irPath.isNotEmpty())
-          dsp.getIRReverb().loadPathOrPreset(st.irPath);
-
-        // Arpeggiator
-        auto& arp = slot->getArpeggiator();
-        arp.enabled.store(st.arpEnabled);
-        arp.bpm.store(st.arpBpm);
-        arp.octavesUp.store(st.arpOctavesUp);
-        arp.octavesDown.store(st.arpOctavesDown);
-        arp.gate.store(st.arpGate);
-        arp.patternIdx.store(st.arpPatternIdx);
-
-        // Harmonizer
-        auto& harm = slot->getHarmonizer();
-        harm.enabled.store(st.harmEnabled);
-        harm.octavesUp.store(st.harmOctavesUp);
-        harm.octavesDown.store(st.harmOctavesDown);
-        harm.africaMode.store(st.harmAfricaMode);
-        harm.harmonyTargetSlot.store(st.harmTargetSlot);
-
-        // Sampler
-        slot->getSampler().enabled.store(st.samplerEnabled);
-      }
+    Scene sceneCopy("");
+    {
+      juce::ScopedLock sl(scenesLock);
+      if (index < 0 || index >= (int)scenes.size())
+        return;
+      sceneCopy = scenes[index];
       currentSceneIndex = index;
+    }
+    panicTriggered.store(true); // Silence active notes so transpose changes don't cause stuck notes
+    for (size_t i = 0; i < slots.size() && i < sceneCopy.slotStates.size(); ++i) {
+      auto* slot = slots[i].get();
+      const auto& st = sceneCopy.slotStates[i];
+      
+      slot->setBypass(st.bypassed);
+      slot->setFohLevel(st.fohLevel);
+      slot->setIemLevel(st.iemLevel);
+      slot->setFohEnabled(st.fohEnabled);
+      slot->setIemEnabled(st.iemEnabled);
+      slot->setFadersLinked(st.fadersLinked);
+      slot->setAux1Send(st.aux1Send);
+      slot->setAux2Send(st.aux2Send);
+      slot->setIemOffset(st.iemOffset);
+      slot->setTransposeOctaves(st.transposeOctaves);
+      slot->setTransposeSemitones(st.transposeSemitones);
+      slot->setNoteRange(st.lowNote, st.highNote);
+
+      // DSP
+      auto& dsp = slot->getStrip();
+      dsp.gateEnabled.store(st.gateEnabled);
+      dsp.gateThreshold.store(st.gateThreshold);
+      dsp.eqEnabled.store(st.eqEnabled);
+      dsp.eqCurveMode.store(st.eqCurveMode);
+      dsp.hpfFreq.store(st.hpfFreq);
+      dsp.lowShelfGain.store(st.lowShelfGain);
+      dsp.highShelfGain.store(st.highShelfGain);
+      dsp.eqVolGain.store(st.eqVolGain);
+      dsp.eqMasterGain.store(st.eqMasterGain);
+      for (int b = 0; b < 10; ++b)
+        dsp.eqBands[b].store(st.eqBands[b]);
+      dsp.compEnabled.store(st.compEnabled);
+      dsp.compAmount.store(st.compAmount);
+      dsp.chorusEnabled.store(st.chorusEnabled);
+      dsp.chorusRate.store(st.chorusRate);
+      dsp.chorusMix.store(st.chorusMix);
+      dsp.delayEnabled.store(st.delayEnabled);
+      dsp.delayMode.store(st.delayMode);
+      dsp.delayTimeMs.store(st.delayTimeMs);
+      dsp.delayFeedback.store(st.delayFeedback);
+      dsp.delayTone.store(st.delayTone);
+      dsp.delayMix.store(st.delayMix);
+      dsp.reverbEnabled.store(st.reverbEnabled);
+      dsp.reverbSize.store(st.reverbSize);
+      dsp.reverbMix.store(st.reverbMix);
+      dsp.irEnabled.store(st.irEnabled);
+      dsp.irMix.store(st.irMix);
+      if (st.irPath.isNotEmpty())
+        dsp.getIRReverb().loadPathOrPreset(st.irPath);
+
+      // Arpeggiator
+      auto& arp = slot->getArpeggiator();
+      arp.enabled.store(st.arpEnabled);
+      arp.bpm.store(st.arpBpm);
+      arp.octavesUp.store(st.arpOctavesUp);
+      arp.octavesDown.store(st.arpOctavesDown);
+      arp.gate.store(st.arpGate);
+      arp.patternIdx.store(st.arpPatternIdx);
+
+      // Harmonizer
+      auto& harm = slot->getHarmonizer();
+      harm.enabled.store(st.harmEnabled);
+      harm.octavesUp.store(st.harmOctavesUp);
+      harm.octavesDown.store(st.harmOctavesDown);
+      harm.africaMode.store(st.harmAfricaMode);
+      harm.harmonyTargetSlot.store(st.harmTargetSlot);
+
+      // Sampler
+      slot->getSampler().enabled.store(st.samplerEnabled);
     }
   }
 
-  int getNumScenes() const { return (int)scenes.size(); }
-  juce::String getSceneName(int index) const { return scenes[index].name; }
-  int getCurrentSceneIndex() const { return currentSceneIndex; }
+  int getNumScenes() const {
+    juce::ScopedLock sl(scenesLock);
+    return (int)scenes.size();
+  }
+  juce::String getSceneName(int index) const {
+    juce::ScopedLock sl(scenesLock);
+    if (index < 0 || index >= (int)scenes.size())
+      return {};
+    return scenes[index].name;
+  }
+  int getCurrentSceneIndex() const {
+    juce::ScopedLock sl(scenesLock);
+    return currentSceneIndex;
+  }
+  std::vector<juce::String> getSceneNamesSnapshot(int &outCurrentIndex) const {
+    juce::ScopedLock sl(scenesLock);
+    outCurrentIndex = currentSceneIndex;
+    std::vector<juce::String> names;
+    names.reserve(scenes.size());
+    for (const auto &sc : scenes)
+      names.push_back(sc.name);
+    return names;
+  }
 
   // Per-scene MIDI trigger accessors
   int getSceneMidiPC(int index) const {
+    juce::ScopedLock sl(scenesLock);
     if (index >= 0 && index < (int)scenes.size())
       return scenes[index].midiProgramChange;
     return -1;
   }
   int getSceneMidiChannel(int index) const {
+    juce::ScopedLock sl(scenesLock);
     if (index >= 0 && index < (int)scenes.size())
       return scenes[index].midiChannel;
     return 0;
   }
   void setSceneMidiTrigger(int index, int pc, int channel) {
+    juce::ScopedLock sl(scenesLock);
     if (index >= 0 && index < (int)scenes.size()) {
       scenes[index].midiProgramChange = pc;
       scenes[index].midiChannel = channel;
     }
   }
   void clearSceneMidiTrigger(int index) {
+    juce::ScopedLock sl(scenesLock);
     if (index >= 0 && index < (int)scenes.size()) {
       scenes[index].midiProgramChange = -1;
       scenes[index].midiChannel = 0;
@@ -320,6 +349,7 @@ public:
   // Returns the scene index that has been assigned the given PC + channel,
   // or -1 if none found. channel 0 = match any channel.
   int findSceneForProgram(int pc, int channel) const {
+    juce::ScopedLock sl(scenesLock);
     for (int i = 0; i < (int)scenes.size(); ++i) {
       const auto& sc = scenes[i];
       if (sc.midiProgramChange == pc) {
@@ -331,82 +361,86 @@ public:
   }
 
   void saveCurrentStateToScene(int index) {
+    std::vector<SlotState> captured;
+    captured.reserve(slots.size());
+    for (auto &slot : slots) {
+      SlotState st;
+      st.bypassed = slot->isBypassed();
+      st.fohLevel = slot->getFohLevel();
+      st.iemLevel = slot->getIemLevel();
+      st.fohEnabled = slot->isFohEnabled();
+      st.iemEnabled = slot->isIemEnabled();
+      st.fadersLinked = slot->areFadersLinked();
+      st.aux1Send = slot->getAux1Send();
+      st.aux2Send = slot->getAux2Send();
+      st.iemOffset = slot->getIemOffset();
+      st.transposeOctaves = slot->getTransposeOctaves();
+      st.transposeSemitones = slot->getTransposeSemitones();
+      st.lowNote = slot->getLowNote();
+      st.highNote = slot->getHighNote();
+
+      // DSP
+      const auto& dsp = slot->getStrip();
+      st.gateEnabled = dsp.gateEnabled.load();
+      st.gateThreshold = dsp.gateThreshold.load();
+      st.eqEnabled = dsp.eqEnabled.load();
+      st.eqCurveMode = dsp.eqCurveMode.load();
+      st.hpfFreq = dsp.hpfFreq.load();
+      st.lowShelfGain = dsp.lowShelfGain.load();
+      st.highShelfGain = dsp.highShelfGain.load();
+      st.eqVolGain = dsp.eqVolGain.load();
+      st.eqMasterGain = dsp.eqMasterGain.load();
+      for (int b = 0; b < 10; ++b)
+        st.eqBands[b] = dsp.eqBands[b].load();
+      st.compEnabled = dsp.compEnabled.load();
+      st.compAmount = dsp.compAmount.load();
+      st.chorusEnabled = dsp.chorusEnabled.load();
+      st.chorusRate = dsp.chorusRate.load();
+      st.chorusMix = dsp.chorusMix.load();
+      st.delayEnabled = dsp.delayEnabled.load();
+      st.delayMode = dsp.delayMode.load();
+      st.delayTimeMs = dsp.delayTimeMs.load();
+      st.delayFeedback = dsp.delayFeedback.load();
+      st.delayTone = dsp.delayTone.load();
+      st.delayMix = dsp.delayMix.load();
+      st.reverbEnabled = dsp.reverbEnabled.load();
+      st.reverbSize = dsp.reverbSize.load();
+      st.reverbMix = dsp.reverbMix.load();
+      st.irEnabled = dsp.irEnabled.load();
+      st.irMix = dsp.irMix.load();
+      st.irPath = dsp.getIRReverb().getLoadedPath();
+
+      // Arpeggiator
+      const auto& arp = slot->getArpeggiator();
+      st.arpEnabled = arp.enabled.load();
+      st.arpBpm = arp.bpm.load();
+      st.arpOctavesUp = arp.octavesUp.load();
+      st.arpOctavesDown = arp.octavesDown.load();
+      st.arpGate = arp.gate.load();
+      st.arpPatternIdx = arp.patternIdx.load();
+
+      // Harmonizer
+      const auto& harm = slot->getHarmonizer();
+      st.harmEnabled = harm.enabled.load();
+      st.harmOctavesUp = harm.octavesUp.load();
+      st.harmOctavesDown = harm.octavesDown.load();
+      st.harmAfricaMode = harm.africaMode.load();
+      st.harmTargetSlot = harm.harmonyTargetSlot.load();
+
+      // Sampler
+      st.samplerEnabled = slot->getSampler().enabled.load();
+
+      captured.push_back(std::move(st));
+    }
+
+    juce::ScopedLock sl(scenesLock);
     if (index >= 0 && index < (int)scenes.size()) {
-      auto &scene = scenes[index];
-      scene.slotStates.clear();
-      for (auto &slot : slots) {
-        SlotState st;
-        st.bypassed = slot->isBypassed();
-        st.fohLevel = slot->getFohLevel();
-        st.iemLevel = slot->getIemLevel();
-        st.fohEnabled = slot->isFohEnabled();
-        st.iemEnabled = slot->isIemEnabled();
-        st.fadersLinked = slot->areFadersLinked();
-        st.aux1Send = slot->getAux1Send();
-        st.aux2Send = slot->getAux2Send();
-        st.iemOffset = slot->getIemOffset();
-        st.transposeOctaves = slot->getTransposeOctaves();
-        st.transposeSemitones = slot->getTransposeSemitones();
-        st.lowNote = slot->getLowNote();
-        st.highNote = slot->getHighNote();
-
-        // DSP
-        const auto& dsp = slot->getStrip();
-        st.gateEnabled = dsp.gateEnabled.load();
-        st.gateThreshold = dsp.gateThreshold.load();
-        st.eqEnabled = dsp.eqEnabled.load();
-        st.eqCurveMode = dsp.eqCurveMode.load();
-        st.hpfFreq = dsp.hpfFreq.load();
-        st.lowShelfGain = dsp.lowShelfGain.load();
-        st.highShelfGain = dsp.highShelfGain.load();
-        st.eqVolGain = dsp.eqVolGain.load();
-        st.eqMasterGain = dsp.eqMasterGain.load();
-        for (int b = 0; b < 10; ++b)
-          st.eqBands[b] = dsp.eqBands[b].load();
-        st.compEnabled = dsp.compEnabled.load();
-        st.compAmount = dsp.compAmount.load();
-        st.chorusEnabled = dsp.chorusEnabled.load();
-        st.chorusRate = dsp.chorusRate.load();
-        st.chorusMix = dsp.chorusMix.load();
-        st.delayEnabled = dsp.delayEnabled.load();
-        st.delayMode = dsp.delayMode.load();
-        st.delayTimeMs = dsp.delayTimeMs.load();
-        st.delayFeedback = dsp.delayFeedback.load();
-        st.delayTone = dsp.delayTone.load();
-        st.delayMix = dsp.delayMix.load();
-        st.reverbEnabled = dsp.reverbEnabled.load();
-        st.reverbSize = dsp.reverbSize.load();
-        st.reverbMix = dsp.reverbMix.load();
-        st.irEnabled = dsp.irEnabled.load();
-        st.irMix = dsp.irMix.load();
-        st.irPath = dsp.getIRReverb().getLoadedPath();
-
-        // Arpeggiator
-        const auto& arp = slot->getArpeggiator();
-        st.arpEnabled = arp.enabled.load();
-        st.arpBpm = arp.bpm.load();
-        st.arpOctavesUp = arp.octavesUp.load();
-        st.arpOctavesDown = arp.octavesDown.load();
-        st.arpGate = arp.gate.load();
-        st.arpPatternIdx = arp.patternIdx.load();
-
-        // Harmonizer
-        const auto& harm = slot->getHarmonizer();
-        st.harmEnabled = harm.enabled.load();
-        st.harmOctavesUp = harm.octavesUp.load();
-        st.harmOctavesDown = harm.octavesDown.load();
-        st.harmAfricaMode = harm.africaMode.load();
-        st.harmTargetSlot = harm.harmonyTargetSlot.load();
-
-        // Sampler
-        st.samplerEnabled = slot->getSampler().enabled.load();
-
-        scene.slotStates.push_back(st);
-      }
+      scenes[index].slotStates = std::move(captured);
     }
   }
 
   void renameScene(int index, const juce::String &newName) {
+    juce::ScopedLock sl(scenesLock);
     if (index >= 0 && index < (int)scenes.size()) {
       scenes[index].name = newName;
     }
@@ -483,23 +517,30 @@ public:
 
       newScene.slotStates.push_back(st);
     }
-    scenes.push_back(newScene);
+    juce::ScopedLock sl(scenesLock);
+    scenes.push_back(std::move(newScene));
   }
 
   void deleteScene(int index) {
-    if (scenes.size() <= 1)
-      return;
-    if (index >= 0 && index < (int)scenes.size()) {
-      const bool deletedActive = (index == currentSceneIndex);
-      scenes.erase(scenes.begin() + index);
-      if (index < currentSceneIndex) {
-        --currentSceneIndex;
-      } else if (currentSceneIndex >= (int)scenes.size()) {
-        currentSceneIndex = (int)scenes.size() - 1;
+    int toLoad = -1;
+    {
+      juce::ScopedLock sl(scenesLock);
+      if (scenes.size() <= 1)
+        return;
+      if (index >= 0 && index < (int)scenes.size()) {
+        const bool deletedActive = (index == currentSceneIndex);
+        scenes.erase(scenes.begin() + index);
+        if (index < currentSceneIndex) {
+          --currentSceneIndex;
+        } else if (currentSceneIndex >= (int)scenes.size()) {
+          currentSceneIndex = (int)scenes.size() - 1;
+        }
+        if (deletedActive)
+          toLoad = currentSceneIndex;
       }
-      if (deletedActive)
-        loadScene(currentSceneIndex);
     }
+    if (toLoad >= 0)
+      loadScene(toLoad);
   }
 
   // Lock-free, zero-allocation slot DSP execution used by both Sequential and
@@ -562,6 +603,8 @@ public:
     dummyAux1.setSize(2, samplesPerBlockExpected);
     dummyAux2.setSize(2, samplesPerBlockExpected);
     slotMidiBuffers.resize(slots.size());
+    for (auto &smb : slotMidiBuffers)
+      smb.ensureSize(2048);
   }
 
   struct ScanResults {
@@ -748,11 +791,27 @@ public:
     juce::ScopedNoDenormals noDenormals;
     FanfareLog::t_isRealtimeAudioThread = true;
     FanfareLog::g_audioThreadId.store((uint32_t)::GetCurrentThreadId(), std::memory_order_relaxed);
+
+    // CRITICAL: Clear hardware output buffers unconditionally first to prevent feedback
+    for (int i = 0; i < numOutputs; ++i)
+      if (outputData[i])
+        juce::FloatVectorOperations::clear(outputData[i], numSamples);
+
+    // Dekker quiet-window pair (part 1): bail out BEFORE setting isInProcessAudio
+    // if a rig/slot transition is active so ScopedAudioQuietWindow never starves.
+    if (isApplyingRig.load(std::memory_order_seq_cst))
+      return;
+
     isInProcessAudio.store(true, std::memory_order_seq_cst);
     struct ProcessAudioScope {
       std::atomic<bool> &flag;
-      ~ProcessAudioScope() { flag.store(false, std::memory_order_release); }
+      ~ProcessAudioScope() { flag.store(false, std::memory_order_seq_cst); }
     } activeAudioScope{isInProcessAudio};
+
+    // Dekker quiet-window pair (part 2): re-check after publishing isInProcessAudio.
+    if (isApplyingRig.load(std::memory_order_seq_cst))
+      return;
+
     // Inject stress test MIDI if active
     if (stressTestActive.load()) {
         double sr = currentSampleRate;
@@ -780,23 +839,12 @@ public:
         }
     }
 
-    // Real-time audio rendering runs completely lock-free during playback.
-    // When isApplyingRig is true, we output clean silence and return immediately.
-    // This keeps the audio pump cycling while avoiding worker contention during plugin state swaps.
-    const bool isSwitching = isApplyingRig.load(std::memory_order_acquire);
-
-    // CRITICAL: Clear all output buffers first to prevent feedback
-    for (int i = 0; i < numOutputs; ++i)
-      if (outputData[i])
-        juce::FloatVectorOperations::clear(outputData[i], numSamples);
+    const bool isSwitching = false;
 
     fohBus.clear();
     iemBus.clear();
     aux1Bus.clear();
     aux2Bus.clear();
-
-    if (isSwitching)
-      return; // Output clean silence while rig transition is applying
 
     if (slotMidiBuffers.size() != slots.size()) {
       // Pre-allocated in prepareToPlay(). A mismatch means prepareToPlay()
@@ -1316,7 +1364,7 @@ public:
 
   // --- Persistence (JSON / var) ---
   juce::String exportRigToJson() {
-    saveCurrentStateToScene(currentSceneIndex);
+    saveCurrentStateToScene(getCurrentSceneIndex());
 
     auto *rig = new juce::DynamicObject();
     rig->setProperty("version", 2);
@@ -1358,6 +1406,7 @@ public:
       st->setProperty("level", (double)s->getChannelLevel());
       st->setProperty("foh", s->isFohEnabled());
       st->setProperty("iem", s->isIemEnabled());
+      st->setProperty("fadersLinked", s->areFadersLinked());
       st->setProperty("mute", s->isBypassed());
       st->setProperty("inputIndex", s->getInputChannelIndex());
       st->setProperty("aux1", (double)s->getAux1Send());
@@ -1442,10 +1491,29 @@ public:
         slo->setProperty("volume", (double)cfg.volume);
         slo->setProperty("startRatio", (double)cfg.startRatio);
         slo->setProperty("endRatio", (double)cfg.endRatio);
+        slo->setProperty("isLooping", cfg.isLooping);
+        slo->setProperty("volumeCC", cfg.volumeCC);
         samplerSlots.add(juce::var(slo));
       }
       sampObj->setProperty("slots", samplerSlots);
       st->setProperty("sampler", sampObj);
+
+      // Save MP3 Player / Backing Track Settings
+      auto *mp3Obj = new juce::DynamicObject();
+      auto &mp3 = s->getMp3Player();
+      mp3Obj->setProperty("loopMode", (int)mp3.getLoopMode());
+      mp3Obj->setProperty("shuffle", mp3.isShuffleEnabled());
+      mp3Obj->setProperty("gain", (double)mp3.getGain());
+      juce::Array<juce::var> mp3Tracks;
+      for (const auto &t : mp3.getPlaylist()) {
+        auto *to = new juce::DynamicObject();
+        to->setProperty("path", t.file.getFullPathName());
+        to->setProperty("title", t.title);
+        to->setProperty("duration", t.durationSeconds);
+        mp3Tracks.add(juce::var(to));
+      }
+      mp3Obj->setProperty("tracks", mp3Tracks);
+      st->setProperty("mp3Player", mp3Obj);
 
       // Save Arpeggiator Settings
       auto *arpObj = new juce::DynamicObject();
@@ -1541,8 +1609,15 @@ public:
     rig->setProperty("auxReturns", auxReturnNodes);
 
     // Scenes (Presets)
+    std::vector<Scene> scenesSnapshot;
+    int sceneIdxSnapshot = 0;
+    {
+      juce::ScopedLock sl(scenesLock);
+      scenesSnapshot = scenes;
+      sceneIdxSnapshot = currentSceneIndex;
+    }
     juce::Array<juce::var> sceneNodes;
-    for (const auto &scene : scenes) {
+    for (const auto &scene : scenesSnapshot) {
       auto *sceneObj = new juce::DynamicObject();
       sceneObj->setProperty("name", scene.name);
       sceneObj->setProperty("midiProgramChange", scene.midiProgramChange);
@@ -1624,7 +1699,7 @@ public:
       sceneNodes.add(juce::var(sceneObj));
     }
     rig->setProperty("scenes", sceneNodes);
-    rig->setProperty("currentSceneIndex", currentSceneIndex);
+    rig->setProperty("currentSceneIndex", sceneIdxSnapshot);
 
     // Notes / Gig Notepad
     juce::Array<juce::var> noteNodes;
@@ -1654,31 +1729,37 @@ public:
   // is the shared implementation used by both the synchronous import path and
   // the async RigTransitioner (which has already pre-built plugins into the
   // staging cache, so this call stays fast).
+  // Dekker-synchronized quiet window: pauses processAudio cleanly (which outputs
+  // hardware silence and returns before touching engine buses/plugins) and waits
+  // unbounded until any in-flight real-time audio block + DSP helpers complete.
+  struct ScopedAudioQuietWindow {
+    FanfareEngine &eng;
+    bool owned = false;
+    explicit ScopedAudioQuietWindow(FanfareEngine &e) : eng(e) {
+      if (!eng.isApplyingRig.exchange(true, std::memory_order_seq_cst)) {
+        owned = true;
+        while (eng.isInProcessAudio.load(std::memory_order_seq_cst) ||
+               eng.dspInFlightWorkers.load(std::memory_order_seq_cst) != 0) {
+          juce::Thread::sleep(1);
+        }
+      }
+    }
+    ~ScopedAudioQuietWindow() {
+      if (owned) {
+        eng.lastRigApplyEndTicks.store(juce::Time::getHighResolutionTicks(),
+                                       std::memory_order_release);
+        eng.isApplyingRig.store(false, std::memory_order_seq_cst);
+      }
+    }
+  };
+
   void applyRig(const juce::var &rig) {
     if (!rig.isObject())
       return;
 
-    isApplyingRig.store(true, std::memory_order_seq_cst);
-    struct AutoReset {
-      std::atomic<bool> &flag;
-      std::atomic<juce::int64> &endTicks;
-      ~AutoReset() {
-        endTicks.store(juce::Time::getHighResolutionTicks(), std::memory_order_release);
-        flag.store(false, std::memory_order_release);
-      }
-    } resetFlag{isApplyingRig, lastRigApplyEndTicks};
+    ScopedAudioQuietWindow quietWindow(*this);
 
-    // Wait briefly (up to 50ms) for any in-flight real-time audio block + DSP helpers
-    // to finish cleanly before mutating plugin chains or states.
-    for (int waitIter = 0;
-         (isInProcessAudio.load(std::memory_order_acquire) ||
-          dspInFlightWorkers.load(std::memory_order_acquire) != 0) &&
-         waitIter < 50;
-         ++waitIter) {
-      juce::Thread::sleep(1);
-    }
-
-    // Note: isApplyingRig pauses audio processing cleanly without spinning or priority inversions.
+    // Note: ScopedAudioQuietWindow pauses audio processing cleanly without spinning or priority inversions.
     // We avoid holding the global audio lock across all plugin setStateInformation calls to prevent
     // deadlocks with internal VST3 engine threads (Kontakt, Roland Zenology, etc.).
 
@@ -1766,6 +1847,7 @@ public:
         s->setChannelLevel((float)v.getProperty("level", 0.8));
         s->setFohEnabled(v.getProperty("foh", true));
         s->setIemEnabled(v.getProperty("iem", true));
+        s->setFadersLinked(v.getProperty("fadersLinked", true));
         s->setBypass(v.getProperty("mute", false));
         s->setInputChannelIndex(v.getProperty("inputIndex", -1));
         s->setAux1Send((float)v.getProperty("aux1", 0.0));
@@ -1905,7 +1987,35 @@ public:
                 cfg.volume = (float)slo.getProperty("volume", 1.0f);
                 cfg.startRatio = (float)slo.getProperty("startRatio", 0.0f);
                 cfg.endRatio = (float)slo.getProperty("endRatio", 1.0f);
+                cfg.isLooping = (bool)slo.getProperty("isLooping", false);
+                cfg.volumeCC = (int)slo.getProperty("volumeCC", -1);
                 sampler.setSlotConfig(sIdx, cfg);
+              }
+            }
+          }
+        }
+
+        // Restore MP3 Player / Backing Track Settings
+        {
+          auto &mp3 = s->getMp3Player();
+          mp3.clearPlaylist();
+          if (auto *mp3Obj =
+                  v.getProperty("mp3Player", juce::var()).getDynamicObject()) {
+            if (mp3Obj->hasProperty("loopMode"))
+              mp3.setLoopMode((Mp3PlayerProcessor::LoopMode)(int)mp3Obj->getProperty("loopMode"));
+            if (mp3Obj->hasProperty("shuffle"))
+              mp3.setShuffleEnabled((bool)mp3Obj->getProperty("shuffle"));
+            if (mp3Obj->hasProperty("gain"))
+              mp3.setGain((float)mp3Obj->getProperty("gain"));
+            if (auto *trArr = mp3Obj->getProperty("tracks").getArray()) {
+              for (const auto &tv : *trArr) {
+                if (auto *to = tv.getDynamicObject()) {
+                  juce::String tp = to->getProperty("path").toString();
+                  juce::String tt = to->getProperty("title").toString();
+                  double td = (double)to->getProperty("duration");
+                  if (tp.isNotEmpty())
+                    mp3.addTrack(juce::File(tp), tt, td);
+                }
               }
             }
           }
@@ -2004,10 +2114,12 @@ public:
         s->setChannelLevel(0.0f);
         s->setFohEnabled(false);
         s->setIemEnabled(false);
+        s->setFadersLinked(true);
         s->setBypass(true);
         s->clearChain();
         s->clearAllCCMappings();
         s->clearAllCCPassthroughs();
+        s->getMp3Player().clearPlaylist();
       }
     }
 
@@ -2059,89 +2171,93 @@ public:
     }
 
     // Scenes (Presets)
-    if (auto *sceneArr = rig.getProperty("scenes", juce::var()).getArray()) {
-      scenes.clear();
-      for (int i = 0; i < sceneArr->size(); ++i) {
-        auto sv = sceneArr->getReference(i);
-        Scene newScene(sv.getProperty("name", "Scene").toString());
-        newScene.midiProgramChange = sv.getProperty("midiProgramChange", -1);
-        newScene.midiChannel = sv.getProperty("midiChannel", 0);
+    {
+      juce::ScopedLock sl(scenesLock);
+      if (auto *sceneArr = rig.getProperty("scenes", juce::var()).getArray()) {
+        scenes.clear();
+        for (int i = 0; i < sceneArr->size(); ++i) {
+          auto sv = sceneArr->getReference(i);
+          Scene newScene(sv.getProperty("name", "Scene").toString());
+          newScene.midiProgramChange = sv.getProperty("midiProgramChange", -1);
+          newScene.midiChannel = sv.getProperty("midiChannel", 0);
 
-        if (auto *stateArr = sv.getProperty("states", juce::var()).getArray()) {
-          for (int s = 0; s < stateArr->size(); ++s) {
-            auto stv = stateArr->getReference(s);
-            SlotState st;
-            st.bypassed = stv.getProperty("bypassed", false);
-            st.fohLevel = (float)stv.getProperty("fohLevel", stv.getProperty("level", 0.8));
-            st.iemLevel = (float)stv.getProperty("iemLevel", st.fohLevel);
-            st.fohEnabled = stv.getProperty("foh", true);
-            st.iemEnabled = stv.getProperty("iem", true);
-            st.fadersLinked = stv.getProperty("fadersLinked", true);
-            st.aux1Send = (float)stv.getProperty("aux1Send", 0.0);
-            st.aux2Send = (float)stv.getProperty("aux2Send", 0.0);
-            st.iemOffset = (float)stv.getProperty("iemOffset", 1.0);
-            st.transposeOctaves = stv.getProperty("transposeOctaves", 0);
-            st.transposeSemitones = stv.getProperty("transposeSemitones", 0);
-            st.lowNote = stv.getProperty("lowNote", 0);
-            st.highNote = stv.getProperty("highNote", 127);
+          if (auto *stateArr = sv.getProperty("states", juce::var()).getArray()) {
+            for (int s = 0; s < stateArr->size(); ++s) {
+              auto stv = stateArr->getReference(s);
+              SlotState st;
+              st.bypassed = stv.getProperty("bypassed", false);
+              st.fohLevel = (float)stv.getProperty("fohLevel", stv.getProperty("level", 0.8));
+              st.iemLevel = (float)stv.getProperty("iemLevel", st.fohLevel);
+              st.fohEnabled = stv.getProperty("foh", true);
+              st.iemEnabled = stv.getProperty("iem", true);
+              st.fadersLinked = stv.getProperty("fadersLinked", true);
+              st.aux1Send = (float)stv.getProperty("aux1Send", 0.0);
+              st.aux2Send = (float)stv.getProperty("aux2Send", 0.0);
+              st.iemOffset = (float)stv.getProperty("iemOffset", 1.0);
+              st.transposeOctaves = stv.getProperty("transposeOctaves", 0);
+              st.transposeSemitones = stv.getProperty("transposeSemitones", 0);
+              st.lowNote = stv.getProperty("lowNote", 0);
+              st.highNote = stv.getProperty("highNote", 127);
 
-            // DSP
-            st.gateEnabled = stv.getProperty("gateEnabled", false);
-            st.gateThreshold = (float)stv.getProperty("gateThreshold", -60.0);
-            st.eqEnabled = stv.getProperty("eqEnabled", false);
-            st.eqCurveMode = stv.getProperty("eqCurveMode", false);
-            st.hpfFreq = (float)stv.getProperty("hpfFreq", 20.0);
-            st.lowShelfGain = (float)stv.getProperty("eqLow", 0.0);
-            st.highShelfGain = (float)stv.getProperty("eqHigh", 0.0);
-            st.eqVolGain = (float)stv.getProperty("eqVolGain", 0.0);
-            st.eqMasterGain = (float)stv.getProperty("eqMasterGain", 0.0);
-            if (auto *bandsArr = stv.getProperty("eqBands", juce::var()).getArray()) {
-              for (int b = 0; b < 10 && b < bandsArr->size(); ++b)
-                st.eqBands[b] = (float)bandsArr->getReference(b);
+              // DSP
+              st.gateEnabled = stv.getProperty("gateEnabled", false);
+              st.gateThreshold = (float)stv.getProperty("gateThreshold", -60.0);
+              st.eqEnabled = stv.getProperty("eqEnabled", false);
+              st.eqCurveMode = stv.getProperty("eqCurveMode", false);
+              st.hpfFreq = (float)stv.getProperty("hpfFreq", 20.0);
+              st.lowShelfGain = (float)stv.getProperty("eqLow", 0.0);
+              st.highShelfGain = (float)stv.getProperty("eqHigh", 0.0);
+              st.eqVolGain = (float)stv.getProperty("eqVolGain", 0.0);
+              st.eqMasterGain = (float)stv.getProperty("eqMasterGain", 0.0);
+              if (auto *bandsArr = stv.getProperty("eqBands", juce::var()).getArray()) {
+                for (int b = 0; b < 10 && b < bandsArr->size(); ++b)
+                  st.eqBands[b] = (float)bandsArr->getReference(b);
+              }
+              st.compEnabled = stv.getProperty("compEnabled", false);
+              st.compAmount = (float)stv.getProperty("compAmount", 0.0);
+              st.chorusEnabled = stv.getProperty("chorusEnabled", false);
+              st.chorusRate = (float)stv.getProperty("chorusRate", 1.0);
+              st.chorusMix = (float)stv.getProperty("chorusMix", 0.0);
+              st.delayEnabled = stv.getProperty("delayEnabled", false);
+              st.delayMode = stv.getProperty("delayMode", 0);
+              st.delayTimeMs = (float)stv.getProperty("delayTimeMs", 375.0);
+              st.delayFeedback = (float)stv.getProperty("delayFeedback", 0.35);
+              st.delayTone = (float)stv.getProperty("delayTone", 6500.0);
+              st.delayMix = (float)stv.getProperty("delayMix", 0.25);
+              st.reverbEnabled = stv.getProperty("reverbEnabled", false);
+              st.reverbSize = (float)stv.getProperty("reverbSize", 0.5);
+              st.reverbMix = (float)stv.getProperty("reverbMix", 0.0);
+              st.irEnabled = stv.getProperty("irEnabled", false);
+              st.irMix = (float)stv.getProperty("irMix", 0.3);
+              st.irPath = stv.getProperty("irPath", juce::String()).toString();
+
+              // Arpeggiator
+              st.arpEnabled = stv.getProperty("arpEnabled", false);
+              st.arpBpm = (float)stv.getProperty("arpBpm", 120.0);
+              st.arpOctavesUp = stv.getProperty("arpOctavesUp", 1);
+              st.arpOctavesDown = stv.getProperty("arpOctavesDown", 0);
+              st.arpGate = (float)stv.getProperty("arpGate", 0.9);
+              st.arpPatternIdx = stv.getProperty("arpPatternIdx", 0);
+
+              // Harmonizer
+              st.harmEnabled = stv.getProperty("harmEnabled", false);
+              st.harmOctavesUp = stv.getProperty("harmOctavesUp", 1);
+              st.harmOctavesDown = stv.getProperty("harmOctavesDown", 0);
+              st.harmAfricaMode = stv.getProperty("harmAfricaMode", 0);
+              st.harmTargetSlot = stv.getProperty("harmTargetSlot", -1);
+
+              // Sampler
+              st.samplerEnabled = stv.getProperty("samplerEnabled", false);
+
+              newScene.slotStates.push_back(st);
             }
-            st.compEnabled = stv.getProperty("compEnabled", false);
-            st.compAmount = (float)stv.getProperty("compAmount", 0.0);
-            st.chorusEnabled = stv.getProperty("chorusEnabled", false);
-            st.chorusRate = (float)stv.getProperty("chorusRate", 1.0);
-            st.chorusMix = (float)stv.getProperty("chorusMix", 0.0);
-            st.delayEnabled = stv.getProperty("delayEnabled", false);
-            st.delayMode = stv.getProperty("delayMode", 0);
-            st.delayTimeMs = (float)stv.getProperty("delayTimeMs", 375.0);
-            st.delayFeedback = (float)stv.getProperty("delayFeedback", 0.35);
-            st.delayTone = (float)stv.getProperty("delayTone", 6500.0);
-            st.delayMix = (float)stv.getProperty("delayMix", 0.25);
-            st.reverbEnabled = stv.getProperty("reverbEnabled", false);
-            st.reverbSize = (float)stv.getProperty("reverbSize", 0.5);
-            st.reverbMix = (float)stv.getProperty("reverbMix", 0.0);
-            st.irEnabled = stv.getProperty("irEnabled", false);
-            st.irMix = (float)stv.getProperty("irMix", 0.3);
-            st.irPath = stv.getProperty("irPath", juce::String()).toString();
-
-            // Arpeggiator
-            st.arpEnabled = stv.getProperty("arpEnabled", false);
-            st.arpBpm = (float)stv.getProperty("arpBpm", 120.0);
-            st.arpOctavesUp = stv.getProperty("arpOctavesUp", 1);
-            st.arpOctavesDown = stv.getProperty("arpOctavesDown", 0);
-            st.arpGate = (float)stv.getProperty("arpGate", 0.9);
-            st.arpPatternIdx = stv.getProperty("arpPatternIdx", 0);
-
-            // Harmonizer
-            st.harmEnabled = stv.getProperty("harmEnabled", false);
-            st.harmOctavesUp = stv.getProperty("harmOctavesUp", 1);
-            st.harmOctavesDown = stv.getProperty("harmOctavesDown", 0);
-            st.harmAfricaMode = stv.getProperty("harmAfricaMode", 0);
-            st.harmTargetSlot = stv.getProperty("harmTargetSlot", -1);
-
-            // Sampler
-            st.samplerEnabled = stv.getProperty("samplerEnabled", false);
-
-            newScene.slotStates.push_back(st);
           }
+          scenes.push_back(newScene);
         }
-        scenes.push_back(newScene);
       }
+      int rawSceneIdx = (int)rig.getProperty("currentSceneIndex", 0);
+      currentSceneIndex = scenes.empty() ? 0 : juce::jlimit(0, (int)scenes.size() - 1, rawSceneIdx);
     }
-    currentSceneIndex = rig.getProperty("currentSceneIndex", 0);
 
     // Notes / Gig Notepad
     {
@@ -2232,6 +2348,8 @@ public:
     song.iemMasterLevel = iemMasterLevel;
     song.fohOutputOffset = fohOutputOffset;
     song.iemOutputOffset = iemOutputOffset;
+    song.defaultMidiChannel = defaultMidiChannel.load();
+    song.freshBuild = currentRigFreshBuild.load();
 
     // FOH FX
     for (auto& p : fohPluginChain) {
@@ -2267,141 +2385,15 @@ public:
 
     // Channels/Slots
     for (int i = 0; i < (int)slots.size(); ++i) {
-        auto* s = slots[i].get();
-        Fanfare::SongSlot slot;
-        slot.name = s->getName();
-        slot.iconIndex = s->getIconIndex();
-        slot.channelColor = s->getChannelColor();
-        slot.level = s->getChannelLevel();
-        slot.fohEnabled = s->isFohEnabled();
-        slot.iemEnabled = s->isIemEnabled();
-        slot.bypassed = s->isBypassed();
-        slot.inputChannelIndex = s->getInputChannelIndex();
-        slot.aux1Send = s->getAux1Send();
-        slot.aux2Send = s->getAux2Send();
-        slot.iemOffset = s->getIemOffset();
-        slot.transposeOctaves = s->getTransposeOctaves();
-        slot.transposeSemitones = s->getTransposeSemitones();
-        slot.lowNote = s->getLowNote();
-        slot.highNote = s->getHighNote();
-        slot.allowedCCs = s->getAllowedCCs();
-        slot.fohCC = s->getFohCC();
-        slot.iemCC = s->getIemCC();
-        slot.muteCC = s->getMuteCC();
-        slot.swapCC = s->getSwapCC();
-        slot.swapA = s->getSwapA();
-        slot.swapB = s->getSwapB();
-        slot.midiChannelOverride = s->getMidiChannelOverride();
-        slot.outputTarget = s->getOutputTarget();
-
-        auto& strip = s->getStrip();
-        slot.strip.gateEnabled = strip.gateEnabled;
-        slot.strip.gateThreshold = strip.gateThreshold;
-        slot.strip.eqEnabled = strip.eqEnabled;
-        slot.strip.eqCurveMode = strip.eqCurveMode.load();
-        slot.strip.hpfFreq = strip.hpfFreq;
-        slot.strip.lowShelfGain = strip.lowShelfGain;
-        slot.strip.highShelfGain = strip.highShelfGain;
-        slot.strip.eqVolGain = strip.eqVolGain.load();
-        slot.strip.eqMasterGain = strip.eqMasterGain.load();
-        for (int b = 0; b < 10; ++b)
-          slot.strip.eqBands[b] = strip.eqBands[b].load();
-        slot.strip.compEnabled = strip.compEnabled;
-        slot.strip.compAmount = strip.compAmount;
-
-        auto& arp = s->getArpeggiator();
-        slot.arpeggiator.enabled = arp.enabled.load();
-        slot.arpeggiator.bpm = arp.bpm.load();
-        slot.arpeggiator.octavesUp = arp.octavesUp.load();
-        slot.arpeggiator.octavesDown = arp.octavesDown.load();
-        slot.arpeggiator.gate = arp.gate.load();
-        slot.arpeggiator.patternIdx = arp.patternIdx.load();
-
-        auto& harm = s->getHarmonizer();
-        slot.harmonizer.enabled = harm.enabled.load();
-        slot.harmonizer.octavesUp = harm.octavesUp.load();
-        slot.harmonizer.octavesDown = harm.octavesDown.load();
-        slot.harmonizer.africaMode = harm.africaMode.load();
-        slot.harmonizer.harmonyTargetSlot = harm.harmonyTargetSlot.load();
-
-        auto& sampler = s->getSampler();
-        slot.sampler.enabled = sampler.enabled.load();
-        for (int sIdx = 0; sIdx < 8; ++sIdx) {
-          auto cfg = sampler.getSlotConfig(sIdx);
-          slot.sampler.slots[sIdx].wavPath = cfg.wavPath;
-          slot.sampler.slots[sIdx].rootNote = cfg.rootNote;
-          slot.sampler.slots[sIdx].keyLow = cfg.keyLow;
-          slot.sampler.slots[sIdx].keyHigh = cfg.keyHigh;
-          slot.sampler.slots[sIdx].pitchOffsetSemitones = cfg.pitchOffsetSemitones;
-          slot.sampler.slots[sIdx].volume = cfg.volume;
-          slot.sampler.slots[sIdx].startRatio = cfg.startRatio;
-          slot.sampler.slots[sIdx].endRatio = cfg.endRatio;
-        }
-
-        for (const auto& pair : s->getCCMappings()) {
-            Fanfare::CCMapping map;
-            map.cc = pair.first;
-            map.chainIndex = pair.second.chainIndex;
-            map.paramId = pair.second.paramId;
-            map.parameterIndex = pair.second.parameterIndex;
-            map.minValue = pair.second.minValue;
-            map.maxValue = pair.second.maxValue;
-            map.invert = pair.second.invert;
-            map.toggle = pair.second.toggle;
-            slot.ccMappings.push_back(map);
-        }
-
-        for (const auto& pair : s->getCCPassthroughMap()) {
-            Fanfare::CCPassthrough pt;
-            pt.incomingCC = pair.first;
-            pt.outgoingCC = pair.second;
-            slot.ccPassthroughs.push_back(pt);
-        }
-
-        for (int pIdx = 0; pIdx < s->getChainSize(); ++pIdx) {
-            auto plugin = s->getPluginInstance(pIdx);
-            Fanfare::PluginState ps;
-            if (plugin) {
-                ps.name = plugin->getName();
-                ps.path = plugin->getPluginDescription().fileOrIdentifier;
-                juce::MemoryBlock blob;
-                FanfareLog::safeExecutePluginCall([&]() {
-                    plugin->getStateInformation(blob);
-                }, "getStateInformation (" + plugin->getName() + ")");
-                ps.stateBase64 = blob.toBase64Encoding();
-                ps.uid = plugin->getPluginDescription().uniqueId;
-            }
-            // Per-instrument stacking settings
-            auto& cs = s->getChainSlotSettings(pIdx);
-            ps.lowNote = cs.lowNote.load();
-            ps.highNote = cs.highNote.load();
-            ps.level = cs.level.load();
-            ps.enabled = cs.enabled.load();
-            // MIDI OUT target (mutually exclusive with a plugin instance)
-            ps.isMidiOut = s->isChainSlotMidiOut(pIdx);
-            ps.midiOutDevice = s->getChainSlotMidiOutIdentifier(pIdx);
-            ps.midiOutChannel = s->getChainSlotMidiOutChannel(pIdx);
-            slot.chain.push_back(ps);
-        }
-
-        song.slots.push_back(slot);
+        song.slots.push_back(exportSlot(i));
     }
 
     // Scenes
-    for (const auto& scene : scenes) {
-        Fanfare::Scene sc;
-        sc.name = scene.name;
-        for (const auto& st : scene.slotStates) {
-            Fanfare::SlotState slotState;
-            slotState.bypassed = st.bypassed;
-            slotState.channelLevel = st.fohLevel;
-            slotState.fohEnabled = st.fohEnabled;
-            slotState.iemEnabled = st.iemEnabled;
-            sc.slotStates.push_back(slotState);
-        }
-        song.scenes.push_back(sc);
+    {
+        juce::ScopedLock scLock(scenesLock);
+        song.scenes = scenes;
+        song.currentSceneIndex = currentSceneIndex;
     }
-    song.currentSceneIndex = currentSceneIndex;
     {
         juce::ScopedLock nl(notesLock);
         song.notes = currentNotes;
@@ -2431,6 +2423,7 @@ public:
     songSlot.level = s->getChannelLevel();
     songSlot.fohEnabled = s->isFohEnabled();
     songSlot.iemEnabled = s->isIemEnabled();
+    songSlot.fadersLinked = s->areFadersLinked();
     songSlot.bypassed = s->isBypassed();
     songSlot.inputChannelIndex = s->getInputChannelIndex();
     songSlot.aux1Send = s->getAux1Send();
@@ -2582,6 +2575,7 @@ public:
   void importSlot(int slotIdx, const Fanfare::SongSlot& songSlot) {
     if (slotIdx < 0 || slotIdx >= (int)slots.size())
       return;
+    ScopedAudioQuietWindow quietWindow(*this);
     juce::ScopedLock sl(lock);
     auto *s = slots[slotIdx].get();
 
@@ -2591,6 +2585,7 @@ public:
     s->setChannelLevel(songSlot.level);
     s->setFohEnabled(songSlot.fohEnabled);
     s->setIemEnabled(songSlot.iemEnabled);
+    s->setFadersLinked(songSlot.fadersLinked);
     s->setBypass(songSlot.bypassed);
     s->setInputChannelIndex(songSlot.inputChannelIndex);
     s->setAux1Send(songSlot.aux1Send);
@@ -2766,17 +2761,15 @@ public:
 
   void saveRigToFile() {
     juce::File f = FanfareConstants::getAppDirectory().getChildFile("FanfareFullRig.json");
-    Fanfare::Song song = getSongRepresentation("Current Rig");
-    Fanfare::RigSerializer::writeSongToFile(f, song);
+    Fanfare::RigSerializer::save(f, exportRigToJson());
   }
 
   void loadRigFromFile() {
     juce::File f = FanfareConstants::getAppDirectory().getChildFile("FanfareFullRig.json");
     if (f.existsAsFile()) {
-      Fanfare::Song song;
-      if (Fanfare::RigSerializer::readSongFromFile(f, song)) {
-        importRigFromSong(song);
-      }
+      auto loaded = Fanfare::RigSerializer::load(f);
+      if (loaded.ok)
+        applyRig(loaded.rig);
     }
   }
 
@@ -2840,8 +2833,10 @@ public:
     // calling setStateInformation on the live instance under the callback lock.
     auto key = stagingKeyFor(slotIdx, chainIdx, isFohOrChannel);
     if (stagingHasKey(key)) {
-      loadPluginFromVar(slotIdx, chainIdx, vt, isFohOrChannel);
-      lastAppliedPluginStates[key] = newStateBase64;
+      if (loadPluginFromVar(slotIdx, chainIdx, vt, isFohOrChannel))
+        lastAppliedPluginStates[key] = newStateBase64;
+      else
+        lastAppliedPluginStates.erase(key);
       return;
     }
 
@@ -2892,21 +2887,24 @@ public:
       if (stateOk) {
         lastAppliedPluginStates[key] = newStateBase64;
       } else {
+        lastAppliedPluginStates.erase(key);
         logToFile("WARNING: setStateInformation faulted for reused plugin: " + currentPlugin->getName() + ", continuing");
       }
       return;
     }
 
     // Different plugin or no plugin - load new one
-    loadPluginFromVar(slotIdx, chainIdx, vt, isFohOrChannel);
-    lastAppliedPluginStates[key] = newStateBase64;
+    if (loadPluginFromVar(slotIdx, chainIdx, vt, isFohOrChannel))
+      lastAppliedPluginStates[key] = newStateBase64;
+    else
+      lastAppliedPluginStates.erase(key);
   }
 
-  void loadPluginFromVar(int slotIdx, int chainIdx, const juce::var &vt,
+  bool loadPluginFromVar(int slotIdx, int chainIdx, const juce::var &vt,
                          bool isFohOrChannel) {
     juce::String path = vt.getProperty("path", "").toString();
     if (path.isEmpty())
-      return;
+      return false;
 
     std::unique_ptr<juce::AudioPluginInstance> instance;
 
@@ -2914,14 +2912,32 @@ public:
     //    path). buildPluginFromVar already prepared it and restored state.
     auto key = stagingKeyFor(slotIdx, chainIdx, isFohOrChannel);
     if (!popStagedPlugin(key, instance)) {
+      const juce::String normPath = normalizePath(path);
+      if (Fanfare::isPathPoisoned(normPath)) {
+        logToFile("WARNING: cold-path plugin build skipped for key " + key +
+                  " — plugin path already stalled earlier this session (" + normPath + ").");
+        return false;
+      }
+      if (isStagedBuildFailed(key)) {
+        logToFile("WARNING: cold-path plugin build skipped for key " + key +
+                  " — already failed during staged transition build; leaving slot empty.");
+        return false;
+      }
+      if (!Fanfare::tryAcquirePathBuildGate(normPath, 60000)) {
+        logToFile("WARNING: cold-path plugin build skipped for key " + key +
+                  " — previous build of " + normPath + " is still wedged.");
+        return false;
+      }
+
       // 2. Fallback: cold path — build OFF-THREAD with a bounded wait (a
       // message-thread build hangs for engines whose init needs a pumping
       // thread: UVI Workstation, Sep 7; faults for HALion 7, Sep 6). On
-      // timeout: abandon, leave the slot without this plugin, rig continues.
+      // timeout: abandon, poison the path, leave the slot without this plugin.
       struct OffThreadVarBuild {
         FanfareEngine *engine;
         std::shared_ptr<std::atomic<bool>> alive;
         juce::var vt;
+        juce::String gatePath;
         std::unique_ptr<juce::AudioPluginInstance> inst;
         juce::String err;
         bool ok = false;
@@ -2932,6 +2948,7 @@ public:
       ctx->engine = this;
       ctx->alive = engineAlive;
       ctx->vt = vt;
+      ctx->gatePath = normPath;
 
       std::thread t([ctx]() {
 #ifdef _WIN32
@@ -2954,6 +2971,7 @@ public:
 #ifdef _WIN32
         ::CoUninitialize();
 #endif
+        Fanfare::releasePathBuildGate(ctx->gatePath);
         ctx->done.store(true, std::memory_order_release);
       });
 
@@ -2977,12 +2995,17 @@ public:
         instance = std::move(ctx->inst);
       } else {
         ctx->abandoned.store(true, std::memory_order_release);
-        logToFile("WARNING: cold-path plugin build timed out (120s) for key " + key +
+        Fanfare::poisonPath(normPath);
+        logToFile("WARNING: cold-path plugin build timed out (60s) for key " + key +
                   " — abandoning; the rig continues without it.");
         t.detach();
-        return;
+        return false;
       }
     }
+
+    const bool installedOk = (instance != nullptr);
+    if (!installedOk)
+      return false;
 
     if (slotIdx >= 100) {
       int r = slotIdx - 100;
@@ -3005,6 +3028,7 @@ public:
         displaced.reset();
       }
     }
+    return installedOk;
   }
 
   juce::AudioPluginFormat *findVst3Format() {
@@ -3280,11 +3304,11 @@ public:
 
   void resetScenesToDefault() {
     initializeDefaultScenes();
-    currentSceneIndex = 0;
   }
 
 private:
   void initializeDefaultScenes() {
+    juce::ScopedLock sl(scenesLock);
     scenes.clear();
     Scene s1("WARM PIANO");
     // Initialize 10 slots
@@ -3325,10 +3349,12 @@ private:
       s3.slotStates.push_back(st);
     }
     scenes.push_back(s3);
+    currentSceneIndex = 0;
   }
 
   std::vector<std::unique_ptr<RackSlot>> slots;
   std::vector<juce::MidiBuffer> slotMidiBuffers;
+  mutable juce::CriticalSection scenesLock;
   std::vector<Scene> scenes;
   int currentSceneIndex = 0;
 
@@ -3514,6 +3540,7 @@ public:
   juce::CriticalSection stagingLock;
   std::map<juce::String, std::unique_ptr<juce::AudioPluginInstance>> stagedPlugins;
   std::map<juce::String, std::unique_ptr<juce::AudioPluginInstance>> preloadedPlugins;
+  std::set<juce::String> stagedFailedKeys;
   std::map<juce::String, juce::String> lastAppliedPluginStates;
 
 public:
@@ -4035,6 +4062,15 @@ public:
   void clearStagingCache() {
     juce::ScopedLock sl(stagingLock);
     stagedPlugins.clear();
+    stagedFailedKeys.clear();
+  }
+  void markStagedBuildFailed(const juce::String &key) {
+    juce::ScopedLock sl(stagingLock);
+    stagedFailedKeys.insert(key);
+  }
+  bool isStagedBuildFailed(const juce::String &key) {
+    juce::ScopedLock sl(stagingLock);
+    return stagedFailedKeys.count(key) > 0;
   }
   bool stagingHasKey(const juce::String &key) {
     juce::ScopedLock sl(stagingLock);

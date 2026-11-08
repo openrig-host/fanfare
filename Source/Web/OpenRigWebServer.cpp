@@ -17,11 +17,16 @@
 #include "../SetlistManager.h"
 #include "../YoutubeDownloadManager.h"
 #include <sstream>
+#include <random>
+#include <cmath>
+#include <cctype>
+#include <cstring>
 
 #if JUCE_WINDOWS
   typedef SOCKET SocketType;
   #define INVALID_SOCKET_VAL INVALID_SOCKET
   #define SOCKET_CLOSE(s) closesocket(s)
+  #define SOCKET_SHUTDOWN_BOTH(s) ::shutdown(s, SD_BOTH)
 #else
   #include <sys/types.h>
   #include <sys/socket.h>
@@ -29,17 +34,343 @@
   #include <arpa/inet.h>
   #include <unistd.h>
   #include <fcntl.h>
+  #include <errno.h>
   typedef int SocketType;
   #define INVALID_SOCKET_VAL -1
   #define SOCKET_CLOSE(s) close(s)
+  #define SOCKET_SHUTDOWN_BOTH(s) ::shutdown(s, SHUT_RDWR)
 #endif
 
 namespace OpenRig {
 
 static const char* WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+namespace {
+    constexpr size_t kMaxHttpHeaderBytes = 16 * 1024;
+    constexpr size_t kMaxHttpBodyBytes   = 256 * 1024;
+    constexpr uint64_t kMaxWsPayloadBytes = 1024ULL * 1024ULL; // 1 MB hard cap per WebSocket frame
+
+    juce::String generateSessionTokenHex() {
+        std::random_device rd;
+        char buf[33] = {};
+        const uint32_t w0 = rd();
+        const uint32_t w1 = rd();
+        const uint32_t w2 = rd();
+        const uint32_t w3 = rd();
+        std::snprintf(buf, sizeof(buf), "%08x%08x%08x%08x", w0, w1, w2, w3);
+        return juce::String(buf);
+    }
+
+    bool constantTimeEquals(const juce::String& a, const juce::String& b) noexcept {
+        const auto* pa = a.toRawUTF8();
+        const auto* pb = b.toRawUTF8();
+        const size_t la = std::strlen(pa);
+        const size_t lb = std::strlen(pb);
+        if (la == 0 || la != lb)
+            return false;
+        unsigned char diff = 0;
+        for (size_t i = 0; i < la; ++i)
+            diff |= static_cast<unsigned char>(pa[i] ^ pb[i]);
+        return diff == 0;
+    }
+
+    void setSocketTimeoutsMs(SocketType sock, int recvMs, int sendMs) noexcept {
+    #if JUCE_WINDOWS
+        DWORD rcv = (DWORD)std::max(0, recvMs);
+        DWORD snd = (DWORD)std::max(0, sendMs);
+        ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&rcv), sizeof(rcv));
+        ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&snd), sizeof(snd));
+    #else
+        timeval rcv{ recvMs / 1000, (recvMs % 1000) * 1000 };
+        timeval snd{ sendMs / 1000, (sendMs % 1000) * 1000 };
+        ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof(rcv));
+        ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &snd, sizeof(snd));
+    #endif
+    }
+
+    bool isLastSocketErrorTimeout() noexcept {
+    #if JUCE_WINDOWS
+        const int err = ::WSAGetLastError();
+        return err == WSAETIMEDOUT || err == WSAEWOULDBLOCK;
+    #else
+        return errno == EAGAIN || errno == EWOULDBLOCK;
+    #endif
+    }
+
+    bool sendAll(SocketType sock, const void* data, size_t len) noexcept {
+        const char* ptr = static_cast<const char*>(data);
+        size_t sentTotal = 0;
+        while (sentTotal < len) {
+            const int chunk = static_cast<int>(std::min<size_t>(len - sentTotal, 65536));
+            const int n = ::send(sock, ptr + sentTotal, chunk, 0);
+            if (n <= 0)
+                return false;
+            sentTotal += static_cast<size_t>(n);
+        }
+        return true;
+    }
+
+    bool recvExactWs(SocketType sock, void* dst, size_t len, const std::atomic<bool>& running, bool allowIdleTimeout) noexcept {
+        uint8_t* ptr = static_cast<uint8_t*>(dst);
+        size_t total = 0;
+        int idleTimeouts = 0;
+        constexpr int kMaxIdleTimeouts = 30; // 30 * 2s = 60s max silence (HUD pings every 5s)
+        while (total < len) {
+            if (!running.load(std::memory_order_acquire))
+                return false;
+            const int chunk = static_cast<int>(std::min<size_t>(len - total, 65536));
+            const int n = ::recv(sock, reinterpret_cast<char*>(ptr + total), chunk, 0);
+            if (n > 0) {
+                total += static_cast<size_t>(n);
+                idleTimeouts = 0;
+                continue;
+            }
+            if (n < 0 && total == 0 && allowIdleTimeout && isLastSocketErrorTimeout()) {
+                if (++idleTimeouts <= kMaxIdleTimeouts && running.load(std::memory_order_acquire))
+                    continue;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    juce::String extractHeaderValue(const juce::String& headers, const juce::String& headerName) {
+        auto lines = juce::StringArray::fromLines(headers);
+        const juce::String prefix = headerName + ":";
+        for (int i = 1; i < lines.size(); ++i) {
+            const juce::String line = lines[i].trimEnd();
+            if (line.isEmpty())
+                break;
+            if (line.startsWithIgnoreCase(prefix))
+                return line.substring(prefix.length()).trim();
+        }
+        return {};
+    }
+
+    juce::String extractQueryParam(const juce::String& query, const juce::String& paramName) {
+        if (query.isEmpty())
+            return {};
+        auto pairs = juce::StringArray::fromTokens(query, "&", "");
+        const juce::String prefix = paramName + "=";
+        for (const auto& p : pairs) {
+            if (p.startsWith(prefix))
+                return juce::URL::removeEscapeChars(p.substring(prefix.length()));
+        }
+        return {};
+    }
+
+    juce::String extractCookieValue(const juce::String& headers, const juce::String& cookieName) {
+        const juce::String cookieHeader = extractHeaderValue(headers, "Cookie");
+        if (cookieHeader.isEmpty())
+            return {};
+        auto parts = juce::StringArray::fromTokens(cookieHeader, ";", "");
+        const juce::String prefix = cookieName + "=";
+        for (const auto& rawPart : parts) {
+            const juce::String part = rawPart.trim();
+            if (part.startsWith(prefix))
+                return juce::URL::removeEscapeChars(part.substring(prefix.length()).trim());
+        }
+        return {};
+    }
+
+    bool readHttpRequest(SocketType sock,
+                         juce::String& outMethod,
+                         juce::String& outPath,
+                         juce::String& outQuery,
+                         juce::String& outHeaders,
+                         juce::String& outBody,
+                         int& outErrorStatus) {
+        outErrorStatus = 0;
+        std::string raw;
+        raw.reserve(4096);
+        char chunk[4096];
+        size_t headerEndPos = std::string::npos;
+
+        while (headerEndPos == std::string::npos) {
+            if (raw.size() >= kMaxHttpHeaderBytes) {
+                outErrorStatus = 431;
+                return false;
+            }
+            const int n = ::recv(sock, chunk, (int)sizeof(chunk), 0);
+            if (n <= 0)
+                return false;
+            raw.append(chunk, (size_t)n);
+            headerEndPos = raw.find("\r\n\r\n");
+        }
+
+        const std::string headerPart = raw.substr(0, headerEndPos);
+        outHeaders = juce::String::fromUTF8(headerPart.data(), (int)headerPart.size());
+
+        int firstLineEnd = outHeaders.indexOf("\r\n");
+        if (firstLineEnd < 0)
+            firstLineEnd = outHeaders.indexOf("\n");
+        const juce::String requestLine = (firstLineEnd >= 0) ? outHeaders.substring(0, firstLineEnd) : outHeaders;
+        auto tokens = juce::StringArray::fromTokens(requestLine, " ", "");
+        if (tokens.size() < 2) {
+            outErrorStatus = 400;
+            return false;
+        }
+
+        outMethod = tokens[0].toUpperCase();
+        const juce::String rawTarget = tokens[1];
+        const int qIdx = rawTarget.indexOfChar('?');
+        if (qIdx >= 0) {
+            outPath  = rawTarget.substring(0, qIdx);
+            outQuery = rawTarget.substring(qIdx + 1);
+            const int hashIdx = outQuery.indexOfChar('#');
+            if (hashIdx >= 0)
+                outQuery = outQuery.substring(0, hashIdx);
+        } else {
+            const int hashIdx = rawTarget.indexOfChar('#');
+            outPath  = (hashIdx >= 0) ? rawTarget.substring(0, hashIdx) : rawTarget;
+            outQuery = {};
+        }
+
+        size_t contentLength = 0;
+        const juce::String clStr = extractHeaderValue(outHeaders, "Content-Length");
+        if (clStr.isNotEmpty()) {
+            for (int i = 0; i < clStr.length(); ++i) {
+                if (!juce::CharacterFunctions::isDigit(clStr[i])) {
+                    outErrorStatus = 400;
+                    return false;
+                }
+            }
+            const juce::int64 parsedLen = clStr.getLargeIntValue();
+            if (parsedLen < 0 || static_cast<uint64_t>(parsedLen) > kMaxHttpBodyBytes) {
+                outErrorStatus = 413;
+                return false;
+            }
+            contentLength = static_cast<size_t>(parsedLen);
+        }
+
+        const size_t bodyStart = headerEndPos + 4;
+        const size_t totalNeeded = bodyStart + contentLength;
+        while (raw.size() < totalNeeded) {
+            const size_t rem = totalNeeded - raw.size();
+            const int toRead = static_cast<int>(std::min<size_t>(rem, sizeof(chunk)));
+            const int n = ::recv(sock, chunk, toRead, 0);
+            if (n <= 0)
+                return false;
+            raw.append(chunk, (size_t)n);
+        }
+
+        if (contentLength > 0)
+            outBody = juce::String::fromUTF8(raw.data() + bodyStart, (int)contentLength);
+        else
+            outBody = {};
+
+        return true;
+    }
+
+    bool tryJsonInt(const juce::var& v, int& outVal, int minVal, int maxVal) noexcept {
+        if (v.isInt() || v.isInt64()) {
+            const juce::int64 n = static_cast<juce::int64>(v);
+            if (n < static_cast<juce::int64>(minVal) || n > static_cast<juce::int64>(maxVal))
+                return false;
+            outVal = static_cast<int>(n);
+            return true;
+        }
+        if (v.isDouble()) {
+            const double d = static_cast<double>(v);
+            if (!std::isfinite(d) || d < static_cast<double>(minVal) || d > static_cast<double>(maxVal))
+                return false;
+            outVal = static_cast<int>(d);
+            return true;
+        }
+        return false;
+    }
+
+    bool tryJsonFloat(const juce::var& v, float& outVal, float minVal, float maxVal) noexcept {
+        if (v.isDouble() || v.isInt() || v.isInt64()) {
+            const double d = static_cast<double>(v);
+            if (!std::isfinite(d))
+                return false;
+            outVal = juce::jlimit(minVal, maxVal, static_cast<float>(d));
+            return true;
+        }
+        return false;
+    }
+
+    bool isAllowedStaticExtension(const juce::String& path) noexcept {
+        static const char* const kExts[] = {
+            ".html", ".css", ".js", ".png", ".jpg", ".jpeg",
+            ".svg", ".ico", ".woff", ".woff2", ".ttf"
+        };
+        for (const char* ext : kExts) {
+            if (path.endsWithIgnoreCase(ext))
+                return true;
+        }
+        return false;
+    }
+
+    std::vector<juce::File> getAllowedSongDirectories() {
+        std::vector<juce::File> dirs;
+        auto primary = Fanfare::RigLibrary::getSongsDirectory();
+        if (primary != juce::File())
+            dirs.push_back(primary);
+        auto appData = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory);
+        auto altDir = appData.getChildFile("OpenRig").getChildFile("songs");
+        if (altDir.isDirectory() && altDir != primary)
+            dirs.push_back(altDir);
+        return dirs;
+    }
+
+    bool isValidSongCandidate(const juce::File& candidate, const std::vector<juce::File>& allowedDirs) {
+        if (candidate == juce::File() || candidate.isSymbolicLink() || !candidate.existsAsFile())
+            return false;
+        if (!candidate.hasFileExtension("json") && !candidate.hasFileExtension("orsong"))
+            return false;
+        for (const auto& dir : allowedDirs) {
+            if (dir.isDirectory() && candidate.isAChildOf(dir))
+                return true;
+        }
+        return false;
+    }
+
+    juce::File resolveAllowedSongFile(const juce::String& rawInput) {
+        const juce::String trimmed = rawInput.trim();
+        if (trimmed.isEmpty() || trimmed.contains("..") || trimmed.containsChar('\0'))
+            return {};
+
+        const auto allowedDirs = getAllowedSongDirectories();
+        if (allowedDirs.empty())
+            return {};
+
+        if (juce::File::isAbsolutePath(trimmed)) {
+            juce::File candidate(trimmed);
+            if (isValidSongCandidate(candidate, allowedDirs))
+                return candidate;
+            return {};
+        }
+
+        if (trimmed.containsChar(':') || trimmed.containsChar('\\') || trimmed.startsWithChar('/'))
+            return {};
+
+        for (const auto& dir : allowedDirs) {
+            if (!dir.isDirectory())
+                continue;
+            juce::File direct = dir.getChildFile(trimmed);
+            if (isValidSongCandidate(direct, allowedDirs))
+                return direct;
+
+            for (const char* ext : { ".json", ".orsong" }) {
+                juce::Array<juce::File> found;
+                dir.findChildFiles(found, juce::File::findFiles, true, trimmed + ext);
+                for (const auto& f : found) {
+                    if (isValidSongCandidate(f, allowedDirs))
+                        return f;
+                }
+            }
+        }
+        return {};
+    }
+}
+
 WebServer::WebServer(FanfareEngine& eng, MainComponent* mc)
-    : juce::Thread("OpenRigWebServerThread"), engine(eng), mainComponent(mc) {
+    : juce::Thread("OpenRigWebServerThread"),
+      engine(eng),
+      mainComponent(mc),
+      sessionToken(generateSessionTokenHex()) {
 #if JUCE_WINDOWS
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -56,6 +387,10 @@ WebServer::~WebServer() {
 bool WebServer::startServer(int port) {
     if (serverRunning.load())
         stopServer();
+
+    lifetime = std::make_shared<LifetimeState>();
+    if (sessionToken.isEmpty())
+        sessionToken = generateSessionTokenHex();
 
     serverPort = port;
 
@@ -87,7 +422,7 @@ bool WebServer::startServer(int port) {
     }
 
     listenSocket = (void*)(uintptr_t)sock;
-    serverRunning.store(true);
+    serverRunning.store(true, std::memory_order_release);
 
     startThread(juce::Thread::Priority::normal);
     startTimerHz(30); // 30fps real-time VU and telemetry stream
@@ -96,36 +431,58 @@ bool WebServer::startServer(int port) {
 }
 
 void WebServer::stopServer() {
-    serverRunning.store(false);
+    if (lifetime)
+        lifetime->alive.store(false, std::memory_order_release);
+    serverRunning.store(false, std::memory_order_release);
     stopTimer();
 
     if (listenSocket != nullptr) {
         SocketType s = (SocketType)(uintptr_t)listenSocket;
+        SOCKET_SHUTDOWN_BOTH(s);
         SOCKET_CLOSE(s);
         listenSocket = nullptr;
     }
 
-    // Close all connected client sockets
+    // Join accept thread first so no new client workers can be spawned
+    stopThread(-1);
+
+    // Unblock all active HTTP and WebSocket sockets via shutdown() ONLY.
+    // Never call closesocket() here — each worker thread exclusively closes its own socket!
     {
         std::lock_guard<std::mutex> lock(clientSocketsMutex);
+        for (void* client : activeHttpSockets) {
+            SocketType cs = (SocketType)(uintptr_t)client;
+            SOCKET_SHUTDOWN_BOTH(cs);
+        }
         for (void* client : activeWsClients) {
             SocketType cs = (SocketType)(uintptr_t)client;
-            SOCKET_CLOSE(cs);
+            SOCKET_SHUTDOWN_BOTH(cs);
         }
-        activeWsClients.clear();
     }
 
-    stopThread(2000);
+    // Join all per-connection worker threads before returning (and before WSACleanup in ~WebServer)
+    std::vector<std::shared_ptr<ClientWorker>> workersToJoin;
+    {
+        std::lock_guard<std::mutex> wlock(workersMutex);
+        workersToJoin.swap(clientWorkers);
+    }
+    for (auto& w : workersToJoin) {
+        if (w && w->thread.joinable())
+            w->thread.join();
+    }
 }
 
 juce::StringArray WebServer::getLocalIpAddresses() {
     juce::StringArray ips;
     auto addrs = juce::IPAddress::getAllAddresses();
     for (const auto& addr : addrs) {
-        juce::String s = addr.toString();
-        if (!addr.isNull() && s != "127.0.0.1" && s.contains(".")) {
-            ips.add(s);
-        }
+        if (addr.isNull() || addr.isIPv6)
+            continue;
+        const uint8_t a = addr.address[0];
+        const uint8_t b = addr.address[1];
+        if (a == 0 || a == 127 || (a == 169 && b == 254) || a >= 224)
+            continue;
+        ips.addIfNotAlreadyThere(addr.toString());
     }
     if (ips.isEmpty()) {
         ips.add("127.0.0.1");
@@ -138,10 +495,52 @@ juce::String WebServer::getPrimaryUrl(int port) {
     return "http://" + ips[0] + ":" + juce::String(port);
 }
 
+bool WebServer::isAuthorizedRequest(const juce::String& headers, const juce::String& query) const {
+    if (sessionToken.isEmpty())
+        return false;
+
+    const juce::String hdrToken = extractHeaderValue(headers, "X-Fanfare-Token");
+    if (hdrToken.isNotEmpty() && constantTimeEquals(hdrToken, sessionToken))
+        return true;
+
+    const juce::String qToken = extractQueryParam(query, "token");
+    if (qToken.isNotEmpty() && constantTimeEquals(qToken, sessionToken))
+        return true;
+
+    const juce::String cookieToken = extractCookieValue(headers, "fanfare_session");
+    if (cookieToken.isNotEmpty() && constantTimeEquals(cookieToken, sessionToken))
+        return true;
+
+    return false;
+}
+
+bool WebServer::isOriginAllowed(const juce::String& headers, bool requireOrigin) const {
+    juce::String origin = extractHeaderValue(headers, "Origin");
+    if (origin.isEmpty())
+        return !requireOrigin;
+
+    const juce::String host = extractHeaderValue(headers, "Host");
+    if (host.isEmpty())
+        return false;
+
+    if (origin.startsWithIgnoreCase("http://"))
+        origin = origin.substring(7);
+    else if (origin.startsWithIgnoreCase("https://"))
+        origin = origin.substring(8);
+    else
+        return false;
+
+    const int slashIdx = origin.indexOfChar('/');
+    if (slashIdx >= 0)
+        origin = origin.substring(0, slashIdx);
+
+    return origin.equalsIgnoreCase(host);
+}
+
 void WebServer::run() {
     SocketType lSock = (SocketType)(uintptr_t)listenSocket;
 
-    while (!threadShouldExit() && serverRunning.load()) {
+    while (!threadShouldExit() && serverRunning.load(std::memory_order_acquire)) {
         fd_set readSet;
         FD_ZERO(&readSet);
         FD_SET(lSock, &readSet);
@@ -157,14 +556,46 @@ void WebServer::run() {
 #endif
             SocketType clientSock = ::accept(lSock, (struct sockaddr*)&clientAddr, &clientLen);
             if (clientSock != INVALID_SOCKET_VAL) {
-                // Spawn a detached worker thread for each incoming connection
-                std::thread([this, clientSock]() {
-                    try {
-                        handleClientConnection((void*)(uintptr_t)clientSock);
-                    } catch (...) {
-                        SOCKET_CLOSE(clientSock);
+                if (!serverRunning.load(std::memory_order_acquire)) {
+                    SOCKET_CLOSE(clientSock);
+                    break;
+                }
+
+                setSocketTimeoutsMs(clientSock, 5000, 5000);
+                void* handle = (void*)(uintptr_t)clientSock;
+                {
+                    std::lock_guard<std::mutex> lock(clientSocketsMutex);
+                    activeHttpSockets.insert(handle);
+                }
+
+                auto worker = std::make_shared<ClientWorker>();
+                {
+                    std::lock_guard<std::mutex> wlock(workersMutex);
+                    for (auto it = clientWorkers.begin(); it != clientWorkers.end(); ) {
+                        if ((*it)->finished.load(std::memory_order_acquire)) {
+                            if ((*it)->thread.joinable())
+                                (*it)->thread.join();
+                            it = clientWorkers.erase(it);
+                        } else {
+                            ++it;
+                        }
                     }
-                }).detach();
+                    worker->thread = std::thread([this, handle, worker]() {
+                        try {
+                            handleClientConnection(handle);
+                        } catch (...) {
+                            SocketType s = (SocketType)(uintptr_t)handle;
+                            {
+                                std::lock_guard<std::mutex> lock(clientSocketsMutex);
+                                activeHttpSockets.erase(handle);
+                                activeWsClients.erase(handle);
+                            }
+                            SOCKET_CLOSE(s);
+                        }
+                        worker->finished.store(true, std::memory_order_release);
+                    });
+                    clientWorkers.push_back(worker);
+                }
             }
         }
     }
@@ -172,66 +603,55 @@ void WebServer::run() {
 
 void WebServer::handleClientConnection(void* socketHandle) {
     SocketType sock = (SocketType)(uintptr_t)socketHandle;
-    std::vector<char> buffer(8192, 0);
 
-    int bytesRead = ::recv(sock, buffer.data(), (int)buffer.size() - 1, 0);
-    if (bytesRead <= 0) {
+    auto closeOwnedSocket = [&]() {
+        {
+            std::lock_guard<std::mutex> lock(clientSocketsMutex);
+            activeHttpSockets.erase(socketHandle);
+            activeWsClients.erase(socketHandle);
+        }
         SOCKET_CLOSE(sock);
+    };
+
+    juce::String method, path, query, headers, body;
+    int parseErrorStatus = 0;
+    if (!readHttpRequest(sock, method, path, query, headers, body, parseErrorStatus)) {
+        if (parseErrorStatus == 413)
+            sendHttpResponse(socketHandle, 413, "text/plain", "413 Payload Too Large");
+        else if (parseErrorStatus == 431)
+            sendHttpResponse(socketHandle, 431, "text/plain", "431 Request Header Fields Too Large");
+        else if (parseErrorStatus == 400)
+            sendHttpResponse(socketHandle, 400, "text/plain", "400 Bad Request");
+        closeOwnedSocket();
         return;
     }
-
-    buffer[bytesRead] = '\0';
-    juce::String requestText(buffer.data());
-
-    // Parse HTTP request line
-    int firstLineEnd = requestText.indexOf("\r\n");
-    if (firstLineEnd <= 0) firstLineEnd = requestText.indexOf("\n");
-    if (firstLineEnd <= 0) {
-        SOCKET_CLOSE(sock);
-        return;
-    }
-
-    juce::String requestLine = requestText.substring(0, firstLineEnd);
-    auto tokens = juce::StringArray::fromTokens(requestLine, " ", "");
-    if (tokens.size() < 2) {
-        SOCKET_CLOSE(sock);
-        return;
-    }
-
-    juce::String method = tokens[0].toUpperCase();
-    juce::String rawPath = tokens[1];
-    int qIdx = rawPath.indexOf("?");
-    juce::String path = (qIdx >= 0) ? rawPath.substring(0, qIdx) : rawPath;
 
     // Check for WebSocket Upgrade
-    if (requestText.containsIgnoreCase("Upgrade: websocket")) {
-        // Extract Sec-WebSocket-Key
-        juce::String secKey = "";
-        int keyPos = requestText.indexOfIgnoreCase("Sec-WebSocket-Key:");
-        if (keyPos >= 0) {
-            int valStart = keyPos + 18;
-            int valEnd = requestText.indexOf(valStart, "\r\n");
-            if (valEnd < 0) valEnd = requestText.indexOf(valStart, "\n");
-            if (valEnd > valStart) {
-                secKey = requestText.substring(valStart, valEnd).trim();
-            }
-        }
-
-        if (secKey.isNotEmpty() && handleWebSocketHandshake(socketHandle, secKey)) {
-            handleWebSocketSession(socketHandle);
+    const juce::String upgradeHdr = extractHeaderValue(headers, "Upgrade");
+    if (upgradeHdr.equalsIgnoreCase("websocket")) {
+        if (!isOriginAllowed(headers, true) || !isAuthorizedRequest(headers, query)) {
+            sendHttpResponse(socketHandle, 403, "text/plain", "403 Forbidden");
+            closeOwnedSocket();
             return;
         }
+
+        const juce::String secKey = extractHeaderValue(headers, "Sec-WebSocket-Key");
+        if (secKey.isNotEmpty() && handleWebSocketHandshake(socketHandle, secKey)) {
+            setSocketTimeoutsMs(sock, 2000, 5000);
+            {
+                std::lock_guard<std::mutex> lock(clientSocketsMutex);
+                activeHttpSockets.erase(socketHandle);
+                activeWsClients.insert(socketHandle);
+            }
+            handleWebSocketSession(socketHandle);
+        }
+        closeOwnedSocket();
+        return;
     }
 
     // Standard HTTP Request
-    int headerEnd = requestText.indexOf("\r\n\r\n");
-    juce::String body = "";
-    if (headerEnd >= 0) {
-        body = requestText.substring(headerEnd + 4);
-    }
-
-    handleHttpRequest(socketHandle, method, path, requestText, body);
-    SOCKET_CLOSE(sock);
+    handleHttpRequest(socketHandle, method, path, query, headers, body);
+    closeOwnedSocket();
 }
 
 namespace Sha1Detail {
@@ -326,42 +746,18 @@ bool WebServer::handleWebSocketHandshake(void* socketHandle, const juce::String&
     auto rawSha1 = Sha1Detail::compute(combined.toStdString());
     juce::String acceptKey = juce::Base64::toBase64(rawSha1.data(), rawSha1.size());
 
-    juce::String response = 
+    juce::String response =
         "HTTP/1.1 101 Switching Protocols\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Accept: " + acceptKey + "\r\n"
-        "Access-Control-Allow-Origin: *\r\n"
         "\r\n";
 
-    int sent = ::send(sock, response.toRawUTF8(), (int)response.getNumBytesAsUTF8(), 0);
-    return sent > 0;
-}
-
-namespace {
-    constexpr uint64_t kMaxWsPayloadBytes = 1024ULL * 1024ULL; // 1 MB hard cap per WebSocket frame
-
-    bool recvExact(SocketType sock, void* dst, size_t len) noexcept {
-        uint8_t* ptr = static_cast<uint8_t*>(dst);
-        size_t total = 0;
-        while (total < len) {
-            const int chunk = static_cast<int>(std::min<size_t>(len - total, 65536));
-            const int n = ::recv(sock, reinterpret_cast<char*>(ptr + total), chunk, 0);
-            if (n <= 0)
-                return false;
-            total += static_cast<size_t>(n);
-        }
-        return true;
-    }
+    return sendAll(sock, response.toRawUTF8(), (size_t)response.getNumBytesAsUTF8());
 }
 
 void WebServer::handleWebSocketSession(void* socketHandle) {
     SocketType sock = (SocketType)(uintptr_t)socketHandle;
-
-    {
-        std::lock_guard<std::mutex> lock(clientSocketsMutex);
-        activeWsClients.insert(socketHandle);
-    }
 
     try {
         // Send initial status packet upon connect
@@ -372,9 +768,9 @@ void WebServer::handleWebSocketSession(void* socketHandle) {
         broadcastWebSocket(initMsg);
 
         // Frame reader loop
-        while (serverRunning.load()) {
+        while (serverRunning.load(std::memory_order_acquire)) {
             uint8_t header[2];
-            if (!recvExact(sock, header, 2))
+            if (!recvExactWs(sock, header, 2, serverRunning, true))
                 break;
 
             uint8_t opcode = header[0] & 0x0F;
@@ -383,11 +779,11 @@ void WebServer::handleWebSocketSession(void* socketHandle) {
 
             if (payloadLen == 126) {
                 uint8_t ext[2];
-                if (!recvExact(sock, ext, 2)) break;
+                if (!recvExactWs(sock, ext, 2, serverRunning, false)) break;
                 payloadLen = ((uint64_t)ext[0] << 8) | ext[1];
             } else if (payloadLen == 127) {
                 uint8_t ext[8];
-                if (!recvExact(sock, ext, 8)) break;
+                if (!recvExactWs(sock, ext, 8, serverRunning, false)) break;
                 payloadLen = 0;
                 for (int i = 0; i < 8; ++i)
                     payloadLen = (payloadLen << 8) | ext[i];
@@ -400,12 +796,12 @@ void WebServer::handleWebSocketSession(void* socketHandle) {
 
             uint8_t maskKey[4] = { 0 };
             if (masked) {
-                if (!recvExact(sock, maskKey, 4)) break;
+                if (!recvExactWs(sock, maskKey, 4, serverRunning, false)) break;
             }
 
             std::vector<uint8_t> payload((size_t)payloadLen);
             if (payloadLen > 0) {
-                if (!recvExact(sock, payload.data(), (size_t)payloadLen))
+                if (!recvExactWs(sock, payload.data(), (size_t)payloadLen, serverRunning, false))
                     break;
             }
 
@@ -424,7 +820,8 @@ void WebServer::handleWebSocketSession(void* socketHandle) {
                 pongFrame[1] = static_cast<uint8_t>(pongLen);
                 if (pongLen > 0)
                     std::memcpy(pongFrame + 2, payload.data(), pongLen);
-                ::send(sock, reinterpret_cast<const char*>(pongFrame), static_cast<int>(2 + pongLen), 0);
+                if (!sendAll(sock, pongFrame, 2 + pongLen))
+                    break;
                 continue;
             } else if (opcode == 0x1) { // Text frame
                 juce::String textMsg = juce::String::fromUTF8((const char*)payload.data(), (int)payload.size());
@@ -432,14 +829,8 @@ void WebServer::handleWebSocketSession(void* socketHandle) {
             }
         }
     } catch (...) {
-        // Never allow an unhandled exception to std::terminate() a detached WS thread
+        // Never allow an unhandled exception to terminate a WS worker thread
     }
-
-    {
-        std::lock_guard<std::mutex> lock(clientSocketsMutex);
-        activeWsClients.erase(socketHandle);
-    }
-    SOCKET_CLOSE(sock);
 }
 
 void WebServer::broadcastWebSocket(const juce::String& jsonMessage) {
@@ -469,7 +860,7 @@ void WebServer::broadcastWebSocket(const juce::String& jsonMessage) {
 
     for (void* client : activeWsClients) {
         SocketType cs = (SocketType)(uintptr_t)client;
-        ::send(cs, (const char*)frame.data(), (int)frame.size(), 0);
+        sendAll(cs, frame.data(), frame.size());
     }
 }
 
@@ -478,10 +869,17 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
     if (!json.isObject()) return;
 
     juce::String type = json["type"].toString();
+    auto life = lifetime;
 
     if (type == "select_scene") {
-        int idx = json["index"];
-        juce::MessageManager::callAsync([this, idx]() {
+        int idx = 0;
+        if (!tryJsonInt(json["index"], idx, 0, 1024))
+            return;
+        juce::MessageManager::callAsync([this, life, idx]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            if (idx < 0 || idx >= engine.getNumScenes())
+                return;
             engine.saveCurrentStateToScene(engine.getCurrentSceneIndex());
             engine.loadScene(idx);
             notifySceneChanged(idx, engine.getSceneName(idx));
@@ -489,73 +887,56 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
                 mainComponent->updateStripCollapseStates();
         });
     } else if (type == "prev_setlist") {
-        juce::MessageManager::callAsync([this]() {
+        juce::MessageManager::callAsync([this, life]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
             auto& sm = Fanfare::SetlistManager::getInstance();
             if (sm.hasPrev() && mainComponent != nullptr) {
                 int prevIdx = sm.getActiveIndex() - 1;
-                auto file = sm.getSetups()[prevIdx];
-                mainComponent->loadRigFromFile(file, prevIdx);
+                auto setups = sm.getSetupsSnapshot();
+                if (prevIdx >= 0 && prevIdx < setups.size())
+                    mainComponent->loadRigFromFile(setups[prevIdx], prevIdx);
             }
         });
     } else if (type == "next_setlist") {
-        juce::MessageManager::callAsync([this]() {
+        juce::MessageManager::callAsync([this, life]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
             auto& sm = Fanfare::SetlistManager::getInstance();
             if (sm.hasNext() && mainComponent != nullptr) {
                 int nextIdx = sm.getActiveIndex() + 1;
-                auto file = sm.getSetups()[nextIdx];
-                mainComponent->loadRigFromFile(file, nextIdx);
+                auto setups = sm.getSetupsSnapshot();
+                if (nextIdx >= 0 && nextIdx < setups.size())
+                    mainComponent->loadRigFromFile(setups[nextIdx], nextIdx);
             }
         });
     } else if (type == "select_setlist") {
-        int targetIdx = json["index"];
-        juce::MessageManager::callAsync([this, targetIdx]() {
+        int targetIdx = 0;
+        if (!tryJsonInt(json["index"], targetIdx, 0, 10000))
+            return;
+        juce::MessageManager::callAsync([this, life, targetIdx]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
             auto& sm = Fanfare::SetlistManager::getInstance();
-            if (targetIdx >= 0 && targetIdx < sm.getSetups().size() && mainComponent != nullptr) {
-                auto file = sm.getSetups()[targetIdx];
-                mainComponent->loadRigFromFile(file, targetIdx);
-            }
+            auto setups = sm.getSetupsSnapshot();
+            if (targetIdx >= 0 && targetIdx < setups.size() && mainComponent != nullptr)
+                mainComponent->loadRigFromFile(setups[targetIdx], targetIdx);
         });
     } else if (type == "load_song") {
         juce::String pathOrName = json["path"].toString();
-        juce::MessageManager::callAsync([this, pathOrName]() {
-            if (mainComponent == nullptr) return;
-            auto songsDir = Fanfare::RigLibrary::getSongsDirectory();
-            juce::File f(pathOrName);
-            if (!f.existsAsFile()) {
-                f = songsDir.getChildFile(pathOrName);
-            }
-            if (!f.existsAsFile()) {
-                juce::Array<juce::File> found;
-                songsDir.findChildFiles(found, juce::File::findFiles, true, pathOrName + ".json");
-                if (!found.isEmpty()) f = found[0];
-            }
-            if (!f.existsAsFile()) {
-                juce::Array<juce::File> found;
-                songsDir.findChildFiles(found, juce::File::findFiles, true, pathOrName + ".orsong");
-                if (!found.isEmpty()) f = found[0];
-            }
-            if (f.existsAsFile()) {
+        juce::MessageManager::callAsync([this, life, pathOrName]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || mainComponent == nullptr)
+                return;
+            juce::File f = resolveAllowedSongFile(pathOrName);
+            if (f.existsAsFile())
                 mainComponent->loadRigFromFile(f);
-            }
         });
     } else if (type == "queue_song") {
         juce::String pathOrName = json["path"].toString();
-        juce::MessageManager::callAsync([this, pathOrName]() {
-            auto songsDir = Fanfare::RigLibrary::getSongsDirectory();
-            juce::File f(pathOrName);
-            if (!f.existsAsFile()) {
-                f = songsDir.getChildFile(pathOrName);
-            }
-            if (!f.existsAsFile()) {
-                juce::Array<juce::File> found;
-                songsDir.findChildFiles(found, juce::File::findFiles, true, pathOrName + ".json");
-                if (!found.isEmpty()) f = found[0];
-            }
-            if (!f.existsAsFile()) {
-                juce::Array<juce::File> found;
-                songsDir.findChildFiles(found, juce::File::findFiles, true, pathOrName + ".orsong");
-                if (!found.isEmpty()) f = found[0];
-            }
+        juce::MessageManager::callAsync([life, pathOrName]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            juce::File f = resolveAllowedSongFile(pathOrName);
             if (f.existsAsFile()) {
                 auto& sm = Fanfare::SetlistManager::getInstance();
                 sm.addSetup(f);
@@ -563,7 +944,15 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
         });
     } else if (type == "toggle_favorite") {
         juce::String pathOrName = json["path"].toString();
-        juce::MessageManager::callAsync([this, pathOrName]() {
+        juce::MessageManager::callAsync([life, pathOrName]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            const juce::File validatedSong = resolveAllowedSongFile(pathOrName);
+            if (!validatedSong.existsAsFile())
+                return;
+            const juce::String canonicalPath = validatedSong.getFullPathName();
+            const juce::String baseName = validatedSong.getFileNameWithoutExtension();
+
             auto appData = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory);
             for (const auto& appName : { "Fanfare", "OpenRig" }) {
                 auto favFile = appData.getChildFile(appName).getChildFile("library_favorites.txt");
@@ -571,53 +960,79 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
                 if (favFile.existsAsFile()) {
                     juce::StringArray lines;
                     favFile.readLines(lines);
-                    for (const auto& l : lines) if (l.trim().isNotEmpty()) favs.insert(l.trim());
+                    for (const auto& l : lines)
+                        if (l.trim().isNotEmpty())
+                            favs.insert(l.trim());
                 }
-                if (favs.count(pathOrName) > 0) favs.erase(pathOrName);
-                else favs.insert(pathOrName);
+                const bool wasFav = (favs.count(canonicalPath) > 0 || favs.count(baseName) > 0);
+                if (wasFav) {
+                    favs.erase(canonicalPath);
+                    favs.erase(baseName);
+                } else {
+                    favs.insert(canonicalPath);
+                }
 
                 juce::String outText;
-                for (const auto& favPath : favs) outText += favPath + "\n";
-                favFile.replaceWithText(outText);
+                for (const auto& favPath : favs)
+                    outText += favPath + "\n";
+                favFile.getParentDirectory().createDirectory();
+                juce::TemporaryFile tmp(favFile);
+                if (tmp.getFile().replaceWithText(outText))
+                    tmp.overwriteTargetFileWithTemporary();
             }
         });
     } else if (type == "panic") {
         engine.triggerPanic();
     } else if (type == "set_fader") {
         juce::String fader = json["fader"].toString();
-        float val = (float)json["value"];
+        float val = 0.0f;
+        if (!tryJsonFloat(json["value"], val, 0.0f, 1.0f))
+            return;
         if (fader == "masterFoh") engine.setFohMasterLevel(val);
         else if (fader == "masterIem") engine.setIemMasterLevel(val);
     } else if (type == "set_slot_fader") {
-        int slotIdx = json["slot"];
+        int slotIdx = 0;
+        float val = 0.0f;
+        if (!tryJsonInt(json["slot"], slotIdx, 0, engine.getNumSlots() - 1))
+            return;
+        if (!tryJsonFloat(json["value"], val, 0.0f, 1.0f))
+            return;
         juce::String ch = json["channel"].toString();
-        float val = juce::jlimit(0.0f, 1.0f, (float)json["value"]);
-        if (slotIdx >= 0 && slotIdx < engine.getNumSlots()) {
-            if (ch == "foh") engine.getSlot(slotIdx)->setFohLevel(val);
-            else if (ch == "iem") engine.getSlot(slotIdx)->setIemOffset(val * 2.0f);
+        if (auto* slot = engine.getSlot(slotIdx)) {
+            if (ch == "foh") slot->setFohLevel(val);
+            else if (ch == "iem") slot->setIemOffset(val * 2.0f);
         }
     } else if (type == "set_slot_mute") {
-        int slotIdx = json["slot"];
+        int slotIdx = 0;
+        if (!tryJsonInt(json["slot"], slotIdx, 0, engine.getNumSlots() - 1))
+            return;
         juce::String ch = json["channel"].toString();
-        bool enabled = json["enabled"];
-        if (slotIdx >= 0 && slotIdx < engine.getNumSlots()) {
-            if (ch == "foh") engine.getSlot(slotIdx)->setFohEnabled(enabled);
-            else if (ch == "iem") engine.getSlot(slotIdx)->setIemEnabled(enabled);
+        bool enabled = static_cast<bool>(json["enabled"]);
+        if (auto* slot = engine.getSlot(slotIdx)) {
+            if (ch == "foh") slot->setFohEnabled(enabled);
+            else if (ch == "iem") slot->setIemEnabled(enabled);
         }
     } else if (type == "set_notepad_tab") {
-        int idx = json["index"];
-        engine.setActiveNoteTabIndex(idx);
+        int idx = 0;
+        if (!tryJsonInt(json["index"], idx, 0, 15))
+            return;
+        const int maxTab = std::max(0, (int)engine.getNotes().size() - 1);
+        engine.setActiveNoteTabIndex(juce::jlimit(0, maxTab, idx));
         engine.broadcastNotesChanged();
     } else if (type == "set_notepad_font_size") {
-        float sz = (float)json["size"];
+        float sz = 20.0f;
+        if (!tryJsonFloat(json["size"], sz, 10.0f, 72.0f))
+            return;
         engine.setNoteFontSize(sz);
         engine.broadcastNotesChanged();
     } else if (type == "set_notepad_monospace") {
-        bool mono = json["isMonospace"];
+        bool mono = static_cast<bool>(json["isMonospace"]);
         engine.setNoteIsMonospace(mono);
         engine.broadcastNotesChanged();
     } else if (type == "update_notepad_content") {
-        int idx = json["index"];
+        int idx = 0;
+        if (!tryJsonInt(json["index"], idx, 0, 15))
+            return;
         juce::String content = json["content"].toString();
         auto notes = engine.getNotes();
         if (idx >= 0 && idx < (int)notes.size()) {
@@ -641,8 +1056,6 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
         root->setProperty("data", buildMixerJson());
         broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
     } else if (type == "ping") {
-        // Latency echo for the tablet HUD's WS pill: mirror the client's own
-        // timestamp straight back so it can compute round-trip time.
         juce::DynamicObject::Ptr root = new juce::DynamicObject();
         root->setProperty("type", "pong");
         root->setProperty("time", json["time"]);
@@ -710,13 +1123,31 @@ void WebServer::notifyMp3Changed() {
 }
 
 // REST API and Static Request Router
-bool WebServer::handleHttpRequest(void* socketHandle, const juce::String& method, const juce::String& path, const juce::String& headers, const juce::String& body) {
+bool WebServer::handleHttpRequest(void* socketHandle,
+                                  const juce::String& method,
+                                  const juce::String& path,
+                                  const juce::String& query,
+                                  const juce::String& headers,
+                                  const juce::String& body) {
     if (method == "OPTIONS") {
-        sendHttpResponse(socketHandle, 200, "text/plain", "");
+        if (!isOriginAllowed(headers, false)) {
+            sendHttpResponse(socketHandle, 403, "text/plain", "403 Forbidden");
+            return false;
+        }
+        sendHttpResponse(socketHandle, 204, "text/plain", "");
         return true;
     }
 
     if (path.startsWith("/api/")) {
+        if (!isOriginAllowed(headers, false)) {
+            sendHttpResponse(socketHandle, 403, "application/json", "{\"ok\":false,\"error\":\"Forbidden origin\"}");
+            return false;
+        }
+        if (!isAuthorizedRequest(headers, query)) {
+            sendHttpResponse(socketHandle, 401, "application/json", "{\"ok\":false,\"error\":\"Unauthorized\"}");
+            return false;
+        }
+
         if (method == "GET") {
             if (path == "/api/status") {
                 sendHttpResponse(socketHandle, 200, "application/json", juce::JSON::toString(buildStatusJson()));
@@ -737,22 +1168,47 @@ bool WebServer::handleHttpRequest(void* socketHandle, const juce::String& method
                 sendHttpResponse(socketHandle, 200, "application/json", juce::JSON::toString(buildMp3Json()));
                 return true;
             }
+            sendHttpResponse(socketHandle, 404, "application/json", "{\"ok\":false,\"error\":\"Not found\"}");
+            return false;
         } else if (method == "POST") {
             auto payload = juce::JSON::parse(body);
             juce::String res = handleApiPost(path, payload);
             sendHttpResponse(socketHandle, 200, "application/json", res);
             return true;
         }
+
+        sendHttpResponse(socketHandle, 405, "application/json", "{\"ok\":false,\"error\":\"Method not allowed\"}");
+        return false;
+    }
+
+    if (method != "GET" && method != "HEAD") {
+        sendHttpResponse(socketHandle, 405, "text/plain", "405 Method Not Allowed");
+        return false;
+    }
+
+    // Issue SameSite=Strict HttpOnly session cookie when the initial HUD URL includes ?token=<sessionToken>
+    juce::String extraHeader;
+    const juce::String qToken = extractQueryParam(query, "token");
+    if (qToken.isNotEmpty() && constantTimeEquals(qToken, sessionToken)) {
+        extraHeader = "Set-Cookie: fanfare_session=" + sessionToken + "; HttpOnly; SameSite=Strict; Path=/\r\n";
     }
 
     // Static File Serving
-    return serveStaticFile(socketHandle, path);
+    return serveStaticFile(socketHandle, path, extraHeader);
 }
 
 juce::String WebServer::handleApiPost(const juce::String& path, const juce::var& jsonPayload) {
+    auto life = lifetime;
+
     if (path == "/api/scenes/select") {
-        int idx = jsonPayload["index"];
-        juce::MessageManager::callAsync([this, idx]() {
+        int idx = 0;
+        if (!jsonPayload.isObject() || !tryJsonInt(jsonPayload["index"], idx, 0, 1024))
+            return "{\"ok\":false,\"error\":\"Invalid scene index\"}";
+        juce::MessageManager::callAsync([this, life, idx]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            if (idx < 0 || idx >= engine.getNumScenes())
+                return;
             engine.saveCurrentStateToScene(engine.getCurrentSceneIndex());
             engine.loadScene(idx);
             notifySceneChanged(idx, engine.getSceneName(idx));
@@ -764,8 +1220,8 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
         engine.triggerPanic();
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/play") {
-        juce::MessageManager::callAsync([this]() {
-            if (!serverRunning.load()) return;
+        juce::MessageManager::callAsync([this, life]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
             if (auto* mp3 = engine.getMp3Player()) {
                 mp3->play();
                 notifyMp3Changed();
@@ -773,8 +1229,8 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
         });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/pause") {
-        juce::MessageManager::callAsync([this]() {
-            if (!serverRunning.load()) return;
+        juce::MessageManager::callAsync([this, life]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
             if (auto* mp3 = engine.getMp3Player()) {
                 mp3->pause();
                 notifyMp3Changed();
@@ -782,8 +1238,8 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
         });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/next") {
-        juce::MessageManager::callAsync([this]() {
-            if (!serverRunning.load()) return;
+        juce::MessageManager::callAsync([this, life]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
             if (auto* mp3 = engine.getMp3Player()) {
                 mp3->nextTrack(true);
                 notifyMp3Changed();
@@ -791,8 +1247,8 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
         });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/prev") {
-        juce::MessageManager::callAsync([this]() {
-            if (!serverRunning.load()) return;
+        juce::MessageManager::callAsync([this, life]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
             if (auto* mp3 = engine.getMp3Player()) {
                 mp3->prevTrack();
                 notifyMp3Changed();
@@ -800,9 +1256,11 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
         });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/bank") {
-        int bankIdx = jsonPayload["index"];
-        juce::MessageManager::callAsync([this, bankIdx]() {
-            if (!serverRunning.load()) return;
+        int bankIdx = 0;
+        if (!jsonPayload.isObject() || !tryJsonInt(jsonPayload["index"], bankIdx, 0, 256))
+            return "{\"ok\":false,\"error\":\"Invalid bank index\"}";
+        juce::MessageManager::callAsync([this, life, bankIdx]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
             if (auto* mp3 = engine.getMp3Player()) {
                 mp3->loadBank(bankIdx, true);
                 notifyMp3Changed();
@@ -810,9 +1268,11 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
         });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/track") {
-        int trkIdx = jsonPayload["index"];
-        juce::MessageManager::callAsync([this, trkIdx]() {
-            if (!serverRunning.load()) return;
+        int trkIdx = 0;
+        if (!jsonPayload.isObject() || !tryJsonInt(jsonPayload["index"], trkIdx, 0, 100000))
+            return "{\"ok\":false,\"error\":\"Invalid track index\"}";
+        juce::MessageManager::callAsync([this, life, trkIdx]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
             if (auto* mp3 = engine.getMp3Player()) {
                 mp3->playTrack(trkIdx, true);
                 notifyMp3Changed();
@@ -820,26 +1280,32 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
         });
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/gain") {
-        float g = (float)jsonPayload["gain"];
+        float g = 1.0f;
+        if (!jsonPayload.isObject() || !tryJsonFloat(jsonPayload["gain"], g, 0.0f, 2.0f))
+            return "{\"ok\":false,\"error\":\"Invalid gain\"}";
         if (auto* mp3 = engine.getMp3Player()) {
             mp3->setGain(g);
             notifyMp3Changed();
         }
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/autodj") {
-        bool a = jsonPayload["enabled"];
+        if (!jsonPayload.isObject())
+            return "{\"ok\":false,\"error\":\"Invalid payload\"}";
+        bool a = static_cast<bool>(jsonPayload["enabled"]);
         if (auto* mp3 = engine.getMp3Player()) {
             mp3->setAutoDjEnabled(a);
             notifyMp3Changed();
         }
         return "{\"ok\":true}";
     } else if (path == "/api/mp3/download") {
+        if (!jsonPayload.isObject())
+            return "{\"ok\":false,\"error\":\"Invalid payload\"}";
         juce::String url = jsonPayload["url"].toString().trim();
         bool playNow = (bool)jsonPayload.getProperty("playNow", false);
         if (url.isNotEmpty()) {
             YoutubeDownloadManager::getInstance().queueDownload(url, playNow,
-                [this, playNow](bool success, const juce::File& file, const juce::String& /*title*/, const juce::String& /*err*/) {
-                    if (!serverRunning.load()) return;
+                [this, life, playNow](bool success, const juce::File& file, const juce::String& /*title*/, const juce::String& /*err*/) {
+                    if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
                     if (success && file.existsAsFile()) {
                         if (auto* mp3 = engine.getMp3Player()) {
                             mp3->addFile(file);
@@ -851,8 +1317,8 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
                         }
                     }
                 },
-                [this](const juce::String& status, float /*progress*/) {
-                    if (!serverRunning.load()) return;
+                [this, life](const juce::String& status, float /*progress*/) {
+                    if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
                     juce::DynamicObject::Ptr root = new juce::DynamicObject();
                     root->setProperty("type", "mp3_download_status");
                     root->setProperty("status", status);
@@ -869,18 +1335,21 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
 juce::var WebServer::buildStatusJson() {
     juce::DynamicObject::Ptr obj = new juce::DynamicObject();
     obj->setProperty("ok", true);
-    
+
     auto& sm = Fanfare::SetlistManager::getInstance();
     juce::String activeName = sm.getActiveFile().existsAsFile() ? sm.getActiveFile().getFileNameWithoutExtension() : "DEFAULT SONG";
     obj->setProperty("activePreset", activeName);
-    obj->setProperty("activeScene", engine.getCurrentSceneIndex());
-    obj->setProperty("numScenes", engine.getNumScenes());
-    
+
+    int activeSceneIdx = 0;
+    const auto sceneNames = engine.getSceneNamesSnapshot(activeSceneIdx);
+    obj->setProperty("activeScene", activeSceneIdx);
+    obj->setProperty("numScenes", (int)sceneNames.size());
+
     juce::Array<juce::var> sceneArr;
-    for (int i = 0; i < engine.getNumScenes(); ++i) {
+    for (size_t i = 0; i < sceneNames.size(); ++i) {
         juce::DynamicObject::Ptr scObj = new juce::DynamicObject();
-        scObj->setProperty("index", i);
-        scObj->setProperty("name", engine.getSceneName(i));
+        scObj->setProperty("index", (int)i);
+        scObj->setProperty("name", sceneNames[i]);
         sceneArr.add(juce::var(scObj.get()));
     }
     obj->setProperty("scenes", sceneArr);
@@ -953,13 +1422,8 @@ juce::var WebServer::buildScenesJson() {
 juce::var WebServer::buildSongsLibraryJson() {
     juce::Array<juce::var> songsArr;
     auto appData = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory);
-    
-    std::vector<juce::File> searchDirs;
-    searchDirs.push_back(Fanfare::RigLibrary::getSongsDirectory());
-    auto altDir = appData.getChildFile("OpenRig").getChildFile("songs");
-    if (altDir.isDirectory() && altDir != Fanfare::RigLibrary::getSongsDirectory()) {
-        searchDirs.push_back(altDir);
-    }
+
+    const std::vector<juce::File> searchDirs = getAllowedSongDirectories();
 
     // Read favorites from both Fanfare and OpenRig
     std::set<juce::String> favorites;
@@ -1159,26 +1623,58 @@ juce::var WebServer::buildMp3Json() {
     return juce::var(obj.get());
 }
 
-bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relativePath) {
-    juce::String cleanPath = relativePath.trim();
+bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relativePath, const juce::String& extraHeader) {
+    juce::String cleanPath = juce::URL::removeEscapeChars(relativePath.trim());
     if (cleanPath.containsChar('?')) cleanPath = cleanPath.upToFirstOccurrenceOf("?", false, false);
     if (cleanPath.containsChar('#')) cleanPath = cleanPath.upToFirstOccurrenceOf("#", false, false);
     if (cleanPath == "/" || cleanPath.isEmpty()) {
         cleanPath = "/index.html";
     }
 
-    // Prevent path traversal
-    if (cleanPath.contains("..")) {
+    // Strict traversal & absolute-path rejection (C1 + M6)
+    if (cleanPath.contains("..")
+        || cleanPath.containsChar(':')
+        || cleanPath.containsChar('\\')
+        || cleanPath.containsChar('\0')
+        || cleanPath.startsWith("//")
+        || !cleanPath.startsWithChar('/')) {
         sendHttpResponse(socketHandle, 404, "text/plain", "404 Not Found");
         return false;
     }
 
-    const juce::String relFile = cleanPath.startsWithChar('/') ? cleanPath.substring(1) : cleanPath;
-    auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+    const juce::String relFile = cleanPath.substring(1);
+    if (relFile.isEmpty()
+        || relFile.startsWithChar('/')
+        || relFile.startsWithChar('\\')
+        || juce::File::isAbsolutePath(relFile)
+        || !isAllowedStaticExtension(cleanPath)) {
+        sendHttpResponse(socketHandle, 404, "text/plain", "404 Not Found");
+        return false;
+    }
 
-    // 1. HUD Static Asset Directories FIRST (dev live-reload + packaged Web/static)
-    // Skip manual.html and assets-readonly/* here so the Offline Stage Manual always
-    // resolves from docsDirs alongside all manual stylesheets & screenshots!
+    auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+    auto cwdDir = juce::File::getCurrentWorkingDirectory();
+
+    auto tryServeFromDirs = [&](const juce::Array<juce::File>& dirs) -> bool {
+        for (const auto& dir : dirs) {
+            if (!dir.isDirectory())
+                continue;
+            juce::File targetFile = dir.getChildFile(relFile);
+            if (!targetFile.isSymbolicLink()
+                && targetFile.existsAsFile()
+                && targetFile.isAChildOf(dir)) {
+                juce::MemoryBlock block;
+                if (targetFile.loadFileAsData(block)) {
+                    sendHttpDataResponse(socketHandle, 200, getMimeType(cleanPath), block.getData(), block.getSize(), extraHeader);
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    // 1. HUD Static Asset Directories FIRST (packaged Web/static or relative workspace Source/Web/static)
+    // Skip manual.html and assets-readonly/* here so the Offline Stage Manual resolves from docsDirs!
     const bool isManualAsset = cleanPath.equalsIgnoreCase("/manual.html") ||
                                cleanPath.startsWithIgnoreCase("/assets-readonly/");
     if (!isManualAsset) {
@@ -1186,59 +1682,39 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
         hudStaticDirs.add(exeDir.getChildFile("Web/static"));
         hudStaticDirs.add(exeDir.getChildFile("static"));
         hudStaticDirs.add(exeDir.getChildFile("Source/Web/static"));
-        hudStaticDirs.add(exeDir.getParentDirectory().getChildFile("Web/static"));
-        hudStaticDirs.add(exeDir.getParentDirectory().getParentDirectory().getChildFile("Web/static"));
-        hudStaticDirs.add(exeDir.getParentDirectory().getParentDirectory().getParentDirectory().getParentDirectory().getChildFile("Source/Web/static"));
-        hudStaticDirs.add(juce::File::getCurrentWorkingDirectory().getChildFile("Source/Web/static"));
-        hudStaticDirs.add(juce::File("Z:/davecore/Source/Web/static"));
-        hudStaticDirs.add(juce::File("C:/davecore/Source/Web/static"));
+        hudStaticDirs.add(cwdDir.getChildFile("Source/Web/static"));
 
-        for (const auto& dir : hudStaticDirs) {
-            if (dir.isDirectory()) {
-                juce::File targetFile = dir.getChildFile(relFile);
-                if (targetFile.existsAsFile()) {
-                    juce::MemoryBlock block;
-                    if (targetFile.loadFileAsData(block)) {
-                        sendHttpDataResponse(socketHandle, 200, getMimeType(cleanPath), block.getData(), block.getSize());
-                        return true;
-                    }
-                }
-            }
-        }
+        if (tryServeFromDirs(hudStaticDirs))
+            return true;
     }
 
     // 2. Compiled-in HUD Production Fallback (never shadowed by docs/index.html!)
-    if (cleanPath == "/index.html" || cleanPath == "/") {
-        sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", EmbeddedWebAssets::INDEX_HTML_DATA, EmbeddedWebAssets::INDEX_HTML_DATA_LEN);
+    if (cleanPath == "/index.html") {
+        sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", EmbeddedWebAssets::INDEX_HTML_DATA, EmbeddedWebAssets::INDEX_HTML_DATA_LEN, extraHeader);
         return true;
     } else if (cleanPath == "/style.css") {
-        sendHttpDataResponse(socketHandle, 200, "text/css; charset=utf-8", EmbeddedWebAssets::STYLE_CSS_DATA, EmbeddedWebAssets::STYLE_CSS_DATA_LEN);
+        sendHttpDataResponse(socketHandle, 200, "text/css; charset=utf-8", EmbeddedWebAssets::STYLE_CSS_DATA, EmbeddedWebAssets::STYLE_CSS_DATA_LEN, extraHeader);
         return true;
     } else if (cleanPath == "/app.js") {
-        sendHttpDataResponse(socketHandle, 200, "application/javascript; charset=utf-8", EmbeddedWebAssets::APP_JS_DATA, EmbeddedWebAssets::APP_JS_DATA_LEN);
+        sendHttpDataResponse(socketHandle, 200, "application/javascript; charset=utf-8", EmbeddedWebAssets::APP_JS_DATA, EmbeddedWebAssets::APP_JS_DATA_LEN, extraHeader);
         return true;
     }
 
-    // 3. Offline Stage Manual & Supporting Assets (/manual.html, /assets-readonly/*, screenshots)
+    // 3. Offline Stage Manual & Supporting Assets (/manual.html, /assets-readonly/*, screenshots inside docs/)
     juce::Array<juce::File> docsDirs;
     docsDirs.add(exeDir.getChildFile("docs"));
-    docsDirs.add(exeDir);
-    docsDirs.add(exeDir.getParentDirectory().getParentDirectory().getParentDirectory().getParentDirectory().getChildFile("docs"));
-    docsDirs.add(juce::File::getCurrentWorkingDirectory().getChildFile("docs"));
-    docsDirs.add(juce::File("Z:/davecore/docs"));
-    docsDirs.add(juce::File("C:/davecore/docs"));
+    docsDirs.add(cwdDir.getChildFile("docs"));
 
-    for (const auto& dir : docsDirs) {
-        if (dir.isDirectory()) {
-            juce::File targetFile = dir.getChildFile(relFile);
-            if (targetFile.existsAsFile()) {
-                juce::MemoryBlock block;
-                if (targetFile.loadFileAsData(block)) {
-                    sendHttpDataResponse(socketHandle, 200, getMimeType(cleanPath), block.getData(), block.getSize());
-                    return true;
-                }
-            }
-        }
+    if (tryServeFromDirs(docsDirs))
+        return true;
+
+    // Also allow manual.html inside packaged Web/static if docs/ folder is absent
+    if (cleanPath.equalsIgnoreCase("/manual.html")) {
+        juce::Array<juce::File> fallbackManualDirs;
+        fallbackManualDirs.add(exeDir.getChildFile("Web/static"));
+        fallbackManualDirs.add(exeDir.getChildFile("static"));
+        if (tryServeFromDirs(fallbackManualDirs))
+            return true;
     }
 
     sendHttpResponse(socketHandle, 404, "text/plain", "404 Not Found");
@@ -1249,36 +1725,51 @@ juce::String WebServer::getMimeType(const juce::String& filePath) {
     if (filePath.endsWithIgnoreCase(".html")) return "text/html; charset=utf-8";
     if (filePath.endsWithIgnoreCase(".css")) return "text/css; charset=utf-8";
     if (filePath.endsWithIgnoreCase(".js")) return "application/javascript; charset=utf-8";
-    if (filePath.endsWithIgnoreCase(".json")) return "application/json; charset=utf-8";
     if (filePath.endsWithIgnoreCase(".png")) return "image/png";
     if (filePath.endsWithIgnoreCase(".svg")) return "image/svg+xml";
+    if (filePath.endsWithIgnoreCase(".ico")) return "image/x-icon";
     if (filePath.endsWithIgnoreCase(".woff2")) return "font/woff2";
     if (filePath.endsWithIgnoreCase(".woff")) return "font/woff";
     if (filePath.endsWithIgnoreCase(".ttf")) return "font/ttf";
     if (filePath.endsWithIgnoreCase(".jpg") || filePath.endsWithIgnoreCase(".jpeg")) return "image/jpeg";
-    return "text/plain";
+    return "application/octet-stream";
 }
 
-void WebServer::sendHttpResponse(void* socketHandle, int statusCode, const juce::String& contentType, const juce::String& body) {
-    sendHttpDataResponse(socketHandle, statusCode, contentType, body.toRawUTF8(), (size_t)body.getNumBytesAsUTF8());
+void WebServer::sendHttpResponse(void* socketHandle, int statusCode, const juce::String& contentType, const juce::String& body, const juce::String& extraHeader) {
+    sendHttpDataResponse(socketHandle, statusCode, contentType, body.toRawUTF8(), (size_t)body.getNumBytesAsUTF8(), extraHeader);
 }
 
-void WebServer::sendHttpDataResponse(void* socketHandle, int statusCode, const juce::String& contentType, const void* data, size_t dataSize) {
+void WebServer::sendHttpDataResponse(void* socketHandle, int statusCode, const juce::String& contentType, const void* data, size_t dataSize, const juce::String& extraHeader) {
     SocketType sock = (SocketType)(uintptr_t)socketHandle;
-    juce::String statusText = (statusCode == 200) ? "OK" : (statusCode == 404) ? "Not Found" : "Error";
+    const char* statusText = "Error";
+    switch (statusCode) {
+        case 200: statusText = "OK"; break;
+        case 204: statusText = "No Content"; break;
+        case 400: statusText = "Bad Request"; break;
+        case 401: statusText = "Unauthorized"; break;
+        case 403: statusText = "Forbidden"; break;
+        case 404: statusText = "Not Found"; break;
+        case 405: statusText = "Method Not Allowed"; break;
+        case 413: statusText = "Payload Too Large"; break;
+        case 431: statusText = "Request Header Fields Too Large"; break;
+        default: break;
+    }
 
     std::ostringstream ss;
-    ss << "HTTP/1.1 " << statusCode << " " << statusText.toStdString() << "\r\n";
+    ss << "HTTP/1.1 " << statusCode << " " << statusText << "\r\n";
     ss << "Content-Type: " << contentType.toStdString() << "\r\n";
     ss << "Content-Length: " << dataSize << "\r\n";
     ss << "Cache-Control: no-store, no-cache, must-revalidate\r\n";
-    ss << "Access-Control-Allow-Origin: *\r\n";
+    ss << "X-Content-Type-Options: nosniff\r\n";
+    if (extraHeader.isNotEmpty())
+        ss << extraHeader.toStdString();
     ss << "Connection: close\r\n\r\n";
 
     std::string headerStr = ss.str();
-    ::send(sock, headerStr.data(), (int)headerStr.size(), 0);
+    if (!sendAll(sock, headerStr.data(), headerStr.size()))
+        return;
     if (dataSize > 0 && data != nullptr) {
-        ::send(sock, (const char*)data, (int)dataSize, 0);
+        sendAll(sock, data, dataSize);
     }
 }
 

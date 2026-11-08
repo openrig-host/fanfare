@@ -13,7 +13,12 @@ namespace Fanfare {
 
 class QueueTilesPanel : public juce::Component {
 public:
-    QueueTilesPanel() = default;
+    QueueTilesPanel() {
+        tilesViewport.setViewedComponent(&tilesContainer, false);
+        tilesViewport.setScrollBarsShown(true, false);
+        tilesViewport.setScrollBarThickness(6);
+        addAndMakeVisible(tilesViewport);
+    }
 
     void setContent(juce::Array<QueueButtonComponent*> newTiles,
                     juce::Array<juce::Button*> newActions) {
@@ -21,7 +26,7 @@ public:
         actions = std::move(newActions);
         for (auto* tile : tiles) {
             tile->setRowStyle(true);
-            addAndMakeVisible(tile);
+            tilesContainer.addAndMakeVisible(tile);
         }
         for (auto* b : actions)
             addAndMakeVisible(b);
@@ -31,7 +36,9 @@ public:
     void paint(juce::Graphics& g) override {
         g.setColour(ThemeManager::get(Theme::Role::textDim));
         g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
-        g.drawText("Live queue", getLocalBounds().removeFromTop(24).withTrimmedRight(160),
+        const int rightTrim = actions.size() * 82 + 4;
+        g.drawText("Live queue",
+                   getLocalBounds().removeFromTop(24).withTrimmedRight(rightTrim),
                    juce::Justification::centredLeft, true);
     }
 
@@ -43,12 +50,23 @@ public:
             top.removeFromRight(4);
         }
         b.removeFromTop(4);
-        const int rowH = tiles.isEmpty() ? 0 : juce::jlimit(22, 30, b.getHeight() / tiles.size());
-        for (auto* tile : tiles)
-            tile->setBounds(b.removeFromTop(rowH));
+        tilesViewport.setBounds(b);
+        const int n = tiles.size();
+        const int rowH = (n == 0) ? 0 : juce::jlimit(22, 30, b.getHeight() / n);
+        const int totalH = n * rowH;
+        const bool needsScroll = totalH > b.getHeight();
+        const int contentW = juce::jmax(1, b.getWidth() - (needsScroll ? 8 : 0));
+        tilesContainer.setSize(contentW, totalH);
+        int y = 0;
+        for (auto* tile : tiles) {
+            tile->setBounds(0, y, contentW, rowH);
+            y += rowH;
+        }
     }
 
 private:
+    juce::Viewport tilesViewport;
+    juce::Component tilesContainer;
     juce::Array<QueueButtonComponent*> tiles;
     juce::Array<juce::Button*> actions;
 

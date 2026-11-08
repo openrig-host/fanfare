@@ -252,8 +252,37 @@ private:
             return;
         }
 
-        juce::String songName = nameEditor.getText().trim();
-        if (songName.isEmpty()) songName = "My Custom Song";
+        juce::String rawSongName = nameEditor.getText().trim();
+        if (rawSongName.isEmpty())
+            rawSongName = "My Custom Song";
+
+        if (rawSongName.containsAnyOf("/\\:*?\"<>|") || rawSongName.contains("..")) {
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::MessageBoxIconType::WarningIcon, "Invalid Song Name",
+                "Song name cannot contain path separators or reserved filename characters.");
+            return;
+        }
+
+        juce::String songName = juce::File::createLegalFileName(rawSongName).trimCharactersAtStart(". ").trimCharactersAtEnd(". ");
+        const juce::String upperStem = songName.upToFirstOccurrenceOf(".", false, false).toUpperCase();
+        static const char* const kReservedNames[] = {
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+        };
+        bool isReserved = songName.isEmpty();
+        for (const char* rn : kReservedNames) {
+            if (upperStem == rn) {
+                isReserved = true;
+                break;
+            }
+        }
+        if (isReserved) {
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::MessageBoxIconType::WarningIcon, "Invalid Song Name",
+                "Please enter a valid song name.");
+            return;
+        }
 
         auto* root = new juce::DynamicObject();
         juce::Array<juce::var> channelsArr;
@@ -344,17 +373,23 @@ private:
         root->setProperty("scenes", scenesArr);
         root->setProperty("currentSceneIndex", 0);
 
-        auto targetFile = Fanfare::RigLibrary::getSongsDirectory().getChildFile(songName + ".json");
-        SaveHistory::recordSave(targetFile);
-        targetFile.deleteFile();
-        targetFile.getParentDirectory().createDirectory();
+        const auto songsDir = Fanfare::RigLibrary::getSongsDirectory();
+        auto targetFile = songsDir.getChildFile(songName + ".json");
+        if (targetFile.getParentDirectory() != songsDir) {
+            delete root;
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::MessageBoxIconType::WarningIcon, "Invalid Song Name",
+                "Song file must be saved inside the Songs folder.");
+            return;
+        }
 
-        {
-            juce::FileOutputStream fos(targetFile);
-            if (fos.openedOk()) {
-                juce::JSON::writeToStream(fos, juce::var(root));
-                fos.flush();
-            }
+        const juce::var rootVar(root);
+        SaveHistory::recordSave(targetFile);
+        if (!Fanfare::RigSerializer::save(targetFile, juce::JSON::toString(rootVar))) {
+            juce::AlertWindow::showMessageBoxAsync(
+                juce::MessageBoxIconType::WarningIcon, "Build Song Failed",
+                "Could not save \"" + targetFile.getFileName() + "\" to disk. Check disk space and folder permissions.");
+            return;
         }
         SaveHistory::recordSave(targetFile);
 

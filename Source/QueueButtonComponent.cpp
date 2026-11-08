@@ -62,11 +62,14 @@ void QueueButtonComponent::mouseDown(const juce::MouseEvent& e) {
         if (assignedFile.existsAsFile()) {
             menu.addItem(2, "Clear Slot");
         }
-        menu.showMenuAsync(juce::PopupMenu::Options(), [this](int result) {
-            if (result == 1 && onAssignRequested) {
-                onAssignRequested(slotIndex);
-            } else if (result == 2 && onClearRequested) {
-                onClearRequested(slotIndex);
+        juce::Component::SafePointer<QueueButtonComponent> safeThis(this);
+        const int idx = slotIndex;
+        menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis, idx](int result) {
+            if (safeThis == nullptr) return;
+            if (result == 1 && safeThis->onAssignRequested) {
+                safeThis->onAssignRequested(idx);
+            } else if (result == 2 && safeThis->onClearRequested) {
+                safeThis->onClearRequested(idx);
             }
         });
         return;

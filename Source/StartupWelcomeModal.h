@@ -147,14 +147,22 @@ struct WelcomePrefs {
     static void setShowOnStartup(bool show) {
         auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
         juce::var v;
-        if (f.existsAsFile())
-            v = juce::JSON::parse(f.loadFileAsString());
+        if (f.existsAsFile()) {
+            const auto raw = f.loadFileAsString().trim();
+            if (raw.isNotEmpty()) {
+                v = juce::JSON::parse(raw);
+                if (!v.isObject())
+                    return; // Corrupt ui_settings.json — abort rather than wiping unrelated settings
+            }
+        }
         if (!v.isObject())
             v = juce::var(new juce::DynamicObject());
         if (auto* obj = v.getDynamicObject())
             obj->setProperty("showWelcomeOnStartup", show);
         f.getParentDirectory().createDirectory();
-        f.replaceWithText(juce::JSON::toString(v));
+        juce::TemporaryFile tmp(f);
+        if (tmp.getFile().replaceWithText(juce::JSON::toString(v)))
+            tmp.overwriteTargetFileWithTemporary();
     }
 };
 
@@ -197,26 +205,10 @@ public:
         scanPluginsBtn.setVisible(numPlugins <= 0);
         addChildComponent(scanPluginsBtn);
 
-        newSongBtn.onClick = [this] {
-            auto cb = actions.onNewSong;
-            dismiss();
-            if (cb) cb();
-        };
-        openSongBtn.onClick = [this] {
-            auto cb = actions.onOpenSong;
-            dismiss();
-            if (cb) cb();
-        };
-        buildSongBtn.onClick = [this] {
-            auto cb = actions.onBuildSong;
-            dismiss();
-            if (cb) cb();
-        };
-        scanPluginsBtn.onClick = [this] {
-            auto cb = actions.onScanPlugins;
-            dismiss();
-            if (cb) cb();
-        };
+        newSongBtn.onClick = [this] { dismiss(actions.onNewSong); };
+        openSongBtn.onClick = [this] { dismiss(actions.onOpenSong); };
+        buildSongBtn.onClick = [this] { dismiss(actions.onBuildSong); };
+        scanPluginsBtn.onClick = [this] { dismiss(actions.onScanPlugins); };
 
         // Recent songs ListBox
         recentList.setModel(this);
@@ -234,11 +226,7 @@ public:
         addAndMakeVisible(showOnStartupSwitch);
 
         docsLink.onClick = [] { openHelpManual("#main-mixer"); };
-        settingsLink.onClick = [this] {
-            auto cb = actions.onOpenSettings;
-            dismiss();
-            if (cb) cb();
-        };
+        settingsLink.onClick = [this] { dismiss(actions.onOpenSettings); };
         whatsNewLink.onClick = [this] {
             showingWhatsNew = !showingWhatsNew;
             whatsNewLink.setText(showingWhatsNew ? "Recent songs" : "What's New");
@@ -482,9 +470,18 @@ private:
         return {card.getX() + 24, top, card.getWidth() - 48, juce::jmax(80, bottom - top)};
     }
 
-    void dismiss() {
-        if (actions.onClose)
-            actions.onClose();
+    void dismiss(std::function<void()> afterClose = {}) {
+        if (isDismissing)
+            return;
+        isDismissing = true;
+        setEnabled(false);
+        auto closeCb = actions.onClose;
+        juce::MessageManager::callAsync([closeCb = std::move(closeCb), afterCb = std::move(afterClose)]() {
+            if (closeCb)
+                closeCb();
+            if (afterCb)
+                afterCb();
+        });
     }
 
     void paintWhatsNew(juce::Graphics& g, juce::Rectangle<int> area, const Theme& t) const {
@@ -588,8 +585,7 @@ private:
                     return;
                 if (r == 1) {
                     auto cb = safeThis->actions.onLoadRecentSong;
-                    safeThis->dismiss();
-                    if (cb) cb(file);
+                    safeThis->dismiss(cb ? [cb, file] { cb(file); } : std::function<void()>{});
                 } else if (r == 2) {
                     file.revealToUser();
                 } else if (r == 3) {
@@ -603,11 +599,9 @@ private:
             return;
         }
 
-        // Single click loads the song right away (fast workflow)
+        // Single click loads the song right away (fast workflow; deferred past modal teardown)
         auto cb = actions.onLoadRecentSong;
-        dismiss();
-        if (cb)
-            cb(file);
+        dismiss(cb ? [cb, file] { cb(file); } : std::function<void()>{});
     }
 
     void mouseMove(const juce::MouseEvent& e) override {
@@ -633,6 +627,7 @@ private:
     Actions actions;
     int numPlugins = 0;
     bool showingWhatsNew = false;
+    bool isDismissing = false;
     int hoveredRow = -1;
     std::vector<RecentSongs::Entry> recentEntries;
 

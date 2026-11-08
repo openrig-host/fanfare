@@ -59,22 +59,25 @@ public:
         if (f.existsAsFile()) {
             auto parsed = juce::JSON::parse(f);
             if (auto* obj = parsed.getDynamicObject()) {
-                // One-time introduction of the Studio look (Nov 2026): existing
-                // installs switch to Studio once; any later choice sticks.
-                if (!static_cast<bool>(obj->getProperty("studioIntroduced"))) {
-                    currentIndex = 0; // Studio
-                    saveToSettings();
-                    return;
-                }
-                juce::String rawId = obj->getProperty("themeId").toString();
-                juce::String normId = Theme::normalizeThemeId(rawId);
+                const bool studioIntroduced = static_cast<bool>(obj->getProperty("studioIntroduced"));
+                const juce::String rawId = obj->getProperty("themeId").toString().trim();
+                const juce::String normId = Theme::normalizeThemeId(rawId);
+
+                // Honour any valid saved themeId; only fall back to Studio (index 0)
+                // when no valid themeId is present. Persist normalized/migrated state once.
                 for (size_t i = 0; i < Theme::all().size(); ++i) {
                     if (Theme::all()[i].id == normId) {
                         currentIndex = (int)i;
-                        if (normId != rawId)
-                            saveToSettings(); // persist one-time migration
+                        if (!studioIntroduced || normId != rawId)
+                            saveToSettings();
                         return;
                     }
+                }
+
+                if (!studioIntroduced) {
+                    currentIndex = 0; // Studio
+                    saveToSettings();
+                    return;
                 }
             }
         }
@@ -87,12 +90,9 @@ public:
         juce::DynamicObject::Ptr obj = new juce::DynamicObject();
         obj->setProperty("themeId", getCurrentId());
         obj->setProperty("studioIntroduced", true);
-        juce::FileOutputStream fos(f);
-        if (fos.openedOk()) {
-            fos.setPosition(0);
-            fos.truncate();
-            juce::JSON::writeToStream(fos, juce::var(obj.get()));
-        }
+        juce::TemporaryFile tmp(f);
+        if (tmp.getFile().replaceWithText(juce::JSON::toString(juce::var(obj.get()))))
+            tmp.overwriteTargetFileWithTemporary();
     }
 
 private:

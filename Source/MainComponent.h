@@ -90,6 +90,7 @@ public:
   void showAboutDialog();
   void showQuickStartDialog(bool isFirstRunPrompt = false);
   void showWelcomeModal();
+  void onStartupSplashFinished();
   void resetToNewSong();
   void showConfigOverlay();
   void setActiveMidiNoteLearner(juce::Component* learner) {
@@ -241,9 +242,7 @@ private:
 
   // Collapsible library sidebar
   juce::TextButton toggleLibraryBtn{"<<"};
-  bool libraryVisible = true;
 
-  void loadSetupFromButton(int buttonIndex);
   void assignJsonToButton(int buttonIndex);
   void loadRigFile(int index);
   void loadSetFile(const juce::File &file);
@@ -402,6 +401,12 @@ private:
     if (msg.isSysEx())
       return;
 
+    // Feed detailed monitor panel before any early returns so learned/triggered
+    // events (and [CAPTURED] CC learn states) are always visible in the monitor.
+    if (midiMonitorPanel) {
+      midiMonitorPanel->addMidiMessage(msg);
+    }
+
     // Intercept for Library MIDI Trigger Learning
     if (libraryPanel != nullptr && libraryPanel->isLearning()) {
       if (msg.isProgramChange()) {
@@ -448,6 +453,18 @@ private:
         safeThis->refreshSceneButtons();
       });
       return;
+    }
+
+    // CC Learn takes precedence over live setup triggers so wiggling an already-bound
+    // controller knob while armed learns the CC instead of switching songs.
+    if (msg.isController()) {
+      int ccNum = msg.getControllerNumber();
+      int ccVal = msg.getControllerValue();
+      int channel = msg.getChannel();
+
+      if (Fanfare::MidiLearnBus::getInstance().handleMidiCC(ccNum, ccVal, channel)) {
+        return; // Intercepted by learn mode
+      }
     }
 
     // Direct MIDI Trigger matching for Setups
@@ -502,17 +519,6 @@ private:
       }
     }
 
-    // Debug: Log all MIDI including CC at device input level
-    if (msg.isController()) {
-      int ccNum = msg.getControllerNumber();
-      int ccVal = msg.getControllerValue();
-      int channel = msg.getChannel();
-
-      if (Fanfare::MidiLearnBus::getInstance().handleMidiCC(ccNum, ccVal, channel)) {
-        return; // Intercepted by learn mode
-      }
-    }
-
     if (msg.isNoteOn() && msg.getVelocity() > 0 && msg.getChannel() == 10) {
       int note = msg.getNoteNumber();
       if (note >= 36 && note < 36 + numSetupButtons) {
@@ -551,11 +557,6 @@ private:
           safeThis->hasMidiNoteLearner.store(false, std::memory_order_release);
         }
       });
-    }
-
-    // Feed detailed monitor panel (safely queued & rendered via 30ms timer)
-    if (midiMonitorPanel) {
-      midiMonitorPanel->addMidiMessage(msg);
     }
   }
 

@@ -35,6 +35,37 @@
   let pingIntervalId = null;
   const clientId = Math.random().toString(36).slice(2, 10);
 
+  let authToken = '';
+  (function initAuthToken() {
+    try {
+      const params = new URLSearchParams(window.location.search || '');
+      const urlToken = (params.get('token') || '').trim();
+      if (urlToken) {
+        authToken = urlToken;
+        try { sessionStorage.setItem('fanfareSessionToken', authToken); } catch (e) {}
+        params.delete('token');
+        const cleanQuery = params.toString();
+        const cleanUrl = window.location.pathname + (cleanQuery ? `?${cleanQuery}` : '') + (window.location.hash || '');
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState(null, '', cleanUrl);
+        }
+      } else {
+        try { authToken = sessionStorage.getItem('fanfareSessionToken') || ''; } catch (e) {}
+      }
+    } catch (e) {}
+  })();
+
+  function apiFetch(url, options) {
+    const opts = Object.assign({}, options || {});
+    const headers = Object.assign({}, opts.headers || {});
+    if (authToken) {
+      headers['X-Fanfare-Token'] = authToken;
+    }
+    opts.headers = headers;
+    opts.credentials = 'same-origin';
+    return fetch(url, opts);
+  }
+
   let currentStatus = {
     activePreset: "DEFAULT SONG",
     setlist: [],
@@ -141,7 +172,7 @@
   function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host || 'localhost:8080';
-    const wsUrl = `${protocol}//${host}/ws`;
+    const wsUrl = `${protocol}//${host}/ws` + (authToken ? `?token=${encodeURIComponent(authToken)}` : '');
 
     try {
       ws = new WebSocket(wsUrl);
@@ -1164,7 +1195,7 @@
         const sent = sendWsMessage({ type: 'panic' });
         if (!sent) {
           // Fallback to HTTP /api/panic if WS is mid-reconnect, and report honest status
-          fetch('/api/panic', { method: 'POST' }).then((res) => {
+          apiFetch('/api/panic', { method: 'POST' }).then((res) => {
             if (panicLabel) panicLabel.innerText = res.ok ? 'KILLED' : 'OFFLINE';
           }).catch(() => {
             if (panicLabel) panicLabel.innerText = 'OFFLINE';
@@ -1305,7 +1336,7 @@
       djYtStatusMsg.style.display = 'block';
       djYtStatusMsg.innerText = 'Sending download request (MP3 192k) to Fanfare...';
     }
-    fetch('/api/mp3/download', {
+    apiFetch('/api/mp3/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: url, playNow: playNow })
@@ -1325,7 +1356,7 @@
 
   async function fetchMp3Status() {
     try {
-      const res = await fetch('/api/mp3');
+      const res = await apiFetch('/api/mp3');
       if (res.ok) {
         const data = await res.json();
         updateMp3Player(data);
@@ -1345,7 +1376,7 @@
         btn.className = `btn-dj-bank ${b.index === data.activeBank ? 'active' : ''}`;
         btn.innerText = `${b.index + 1}: ${b.name}`;
         btn.onclick = () => {
-          fetch('/api/mp3/bank', {
+          apiFetch('/api/mp3/bank', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ index: b.index })
@@ -1386,19 +1417,19 @@
     if (djPlayPauseBtn) {
       djPlayPauseBtn.innerHTML = data.isPlaying ? '&#10074;&#10074; PAUSE' : '&#9658; PLAY';
       djPlayPauseBtn.onclick = () => {
-        fetch(data.isPlaying ? '/api/mp3/pause' : '/api/mp3/play', { method: 'POST' });
+        apiFetch(data.isPlaying ? '/api/mp3/pause' : '/api/mp3/play', { method: 'POST' });
       };
     }
 
     if (djPrevBtn) {
       djPrevBtn.onclick = () => {
-        fetch('/api/mp3/prev', { method: 'POST' });
+        apiFetch('/api/mp3/prev', { method: 'POST' });
       };
     }
 
     if (djNextBtn) {
       djNextBtn.onclick = () => {
-        fetch('/api/mp3/next', { method: 'POST' });
+        apiFetch('/api/mp3/next', { method: 'POST' });
       };
     }
 
@@ -1422,7 +1453,7 @@
           <span class="dj-track-duration">${durStr}</span>
         `;
         row.onclick = () => {
-          fetch('/api/mp3/track', {
+          apiFetch('/api/mp3/track', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ index: t.index })

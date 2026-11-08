@@ -13,77 +13,10 @@
 #include <objbase.h>
 #endif
 #include "Logger.h"
+#include "PluginBuildGate.h"
 #include "FanfareEngine.h"
 
 namespace Fanfare {
-
-// Per-path build gate: at most one build per normalized plugin path may be in
-// flight — INCLUDING an abandoned one still running on its detached thread.
-// Single-instance plugins (Kontakt, Zenology, Super 8) block or crash when a
-// second instance touches them while the first is mid-setStateInformation, so
-// a timed-out Kontakt load must fully finish (and destroy its instance)
-// before the next Kontakt build starts.
-inline std::mutex &buildGateMutex() { static std::mutex m; return m; }
-inline std::map<juce::String, int> &liveBuildsByPath() {
-  static std::map<juce::String, int> m;
-  return m;
-}
-inline std::condition_variable &buildGateCv() {
-  static std::condition_variable cv;
-  return cv;
-}
-
-// Waits for any in-flight build of `path` to finish (up to timeoutMs), then
-// registers this build as the live one for the path. Pair every call with
-// releasePathBuildGate on the worker thread that runs the build.
-inline void waitForPathBuildGate(const juce::String &path, int timeoutMs) {
-  if (path.isEmpty())
-    return;
-  std::unique_lock<std::mutex> lk(buildGateMutex());
-  buildGateCv().wait_for(lk, std::chrono::milliseconds(timeoutMs), [&] {
-    auto it = liveBuildsByPath().find(path);
-    return it == liveBuildsByPath().end() || it->second <= 0;
-  });
-  auto it = liveBuildsByPath().find(path);
-  int n = (it == liveBuildsByPath().end() ? 0 : it->second) + 1;
-  liveBuildsByPath()[path] = n;
-}
-
-inline void releasePathBuildGate(const juce::String &path) {
-  if (path.isEmpty())
-    return;
-  {
-    std::lock_guard<std::mutex> lk(buildGateMutex());
-    auto it = liveBuildsByPath().find(path);
-    if (it != liveBuildsByPath().end() && --it->second <= 0)
-      liveBuildsByPath().erase(it);
-  }
-  buildGateCv().notify_all();
-}
-
-// Paths that stalled past their timeout this session (a Kontakt multi whose
-// state restore never returns — typically missing samples raising an
-// un-clickable dialog inside the plugin). Later entries on the same path skip
-// immediately instead of burning another timeout each.
-inline std::set<juce::String> &poisonedBuildPaths() {
-  static std::set<juce::String> s;
-  return s;
-}
-inline bool isPathPoisoned(const juce::String &path) {
-  if (path.isEmpty())
-    return false;
-  std::lock_guard<std::mutex> lk(buildGateMutex());
-  return poisonedBuildPaths().count(path) > 0;
-}
-inline void poisonPath(const juce::String &path) {
-  if (path.isEmpty())
-    return;
-  {
-    std::lock_guard<std::mutex> lk(buildGateMutex());
-    poisonedBuildPaths().insert(path);
-  }
-  buildGateCv().notify_all();
-}
 
 // Shared, refcounted state for off-thread -> message-thread plugin builds, so
 // the async callback can NEVER dangle if the transitioner thread is torn down
@@ -373,6 +306,7 @@ private:
             r.ok = false;
             r.error = label + ": skipped (plugin stalled earlier this session)";
             r.failedEntries.push_back({key, pv});
+            engine.markStagedBuildFailed(key);
             return false;
         }
 
@@ -409,20 +343,30 @@ private:
         if (!requiresMessageThread) {
             // Serialize per path: wait out any earlier build of this same
             // plugin (possibly an abandoned one still restoring state).
-            Fanfare::waitForPathBuildGate(newPath, 120000);
+            if (!Fanfare::tryAcquirePathBuildGate(newPath, 120000, shouldAbort)) {
+                if (shouldAbort && shouldAbort())
+                    return false;
+                logToFile("WARNING: buildOne " + label + " skipped — previous build of " + newPath + " is still wedged.");
+                r.ok = false;
+                r.error = label + ": previous plugin build still wedged";
+                r.failedEntries.push_back({key, pv});
+                engine.markStagedBuildFailed(key);
+                return false;
+            }
             logToFile("TRACE: buildOne " + label + " building off-thread...");
             struct BuildThreadContext {
                 FanfareEngine* engine;
+                std::shared_ptr<std::atomic<bool>> engineAlive;
                 juce::var pluginVar;
                 std::unique_ptr<juce::AudioPluginInstance> inst;
                 juce::String err;
                 bool ok = false;
                 std::atomic<bool> done{false};
                 std::atomic<bool> abandoned{false};
-                std::atomic<bool> gateReleased{false};
             };
             auto bctx = std::make_shared<BuildThreadContext>();
             bctx->engine = &engine;
+            bctx->engineAlive = engine.getAliveToken();
             bctx->pluginVar = pv;
             juce::String gatePath = newPath;
 
@@ -433,52 +377,54 @@ private:
 #endif
                 std::unique_ptr<juce::AudioPluginInstance> tmpInst;
                 juce::String tmpErr;
-                bool tmpOk = bctx->engine->buildPluginFromVar(bctx->pluginVar, tmpInst, tmpErr) && (bool)tmpInst;
-                if (!bctx->abandoned.load()) {
+                bool tmpOk = false;
+                if (!bctx->abandoned.load(std::memory_order_acquire) &&
+                    (!bctx->engineAlive || bctx->engineAlive->load(std::memory_order_acquire))) {
+                    tmpOk = bctx->engine->buildPluginFromVar(bctx->pluginVar, tmpInst, tmpErr) && (bool)tmpInst;
+                }
+                if (!bctx->abandoned.load(std::memory_order_acquire) &&
+                    (!bctx->engineAlive || bctx->engineAlive->load(std::memory_order_acquire))) {
                     bctx->inst = std::move(tmpInst);
                     bctx->err = tmpErr;
                     bctx->ok = tmpOk;
                 } else {
-                    tmpInst = nullptr; // Instantly release instance and host resources if thread was abandoned
+                    tmpInst = nullptr; // Destroy instance on worker BEFORE releasing gate
                 }
 #ifdef _WIN32
                 ::CoUninitialize();
 #endif
-                if (!bctx->gateReleased.exchange(true))
-                    Fanfare::releasePathBuildGate(gatePath);
-                bctx->done.store(true);
+                // M13: ONLY the worker thread releases gatePath once it truly finishes.
+                Fanfare::releasePathBuildGate(gatePath);
+                bctx->done.store(true, std::memory_order_release);
             });
 
-            // Wait up to 60 seconds for the background VST build (cold-start builds legitimately take 10-30s). If it
-            // stalls (engines whose instantiation needs the host's message
-            // thread — UVI Sep 7, Replika XT Oct 7 — hang here forever),
-            // abandon the worker and fall through to the message-thread
-            // retry below, which is the proven cure. Without this the whole
-            // rig load blocks on one plugin until the 600s timeout.
             int waitCount = 0;
-            while (!bctx->done.load() && waitCount < 600 && !(shouldAbort && shouldAbort())) {
+            while (!bctx->done.load(std::memory_order_acquire) && waitCount < 600 &&
+                   !(shouldAbort && shouldAbort())) {
                 juce::Thread::sleep(100);
                 waitCount++;
             }
 
-            if (!bctx->done.load()) {
-                bctx->abandoned.store(true);
-                if (!bctx->gateReleased.exchange(true))
-                    Fanfare::releasePathBuildGate(gatePath);
-                t.detach(); // the stuck worker destroys its instance when/if it returns
+            if (!bctx->done.load(std::memory_order_acquire)) {
+                bctx->abandoned.store(true, std::memory_order_release);
+                t.detach(); // Gate remains held until detached worker actually exits!
                 if (shouldAbort && shouldAbort()) {
                     logToFile("TRACE: buildOne " + label + " aborted while building off-thread.");
                     return false;
                 }
-                logToFile("TRACE: buildOne " + label + " off-thread build stalled (60s) - abandoning worker, retrying on message thread...");
-                ok = false;
-                err = "off-thread build stalled (60s)";
-            } else {
-                t.join();
-                inst = std::move(bctx->inst);
-                err = bctx->err;
-                ok = bctx->ok;
+                Fanfare::poisonPath(gatePath);
+                engine.markStagedBuildFailed(key);
+                logToFile("WARNING: buildOne " + label + " off-thread build stalled (60s) — poisoning path and skipping concurrent retry while worker is still inside plugin.");
+                r.ok = false;
+                r.error = label + ": off-thread build stalled (60s)";
+                r.failedEntries.push_back({key, pv});
+                return false;
             }
+
+            t.join();
+            inst = std::move(bctx->inst);
+            err = bctx->err;
+            ok = bctx->ok;
 
             if (!ok) {
                 logToFile("TRACE: buildOne off-thread build failed for " + label + ". Error: " + err);
@@ -489,11 +435,21 @@ private:
             return false;
 
         if (!ok) {
+            if (!Fanfare::tryAcquirePathBuildGate(newPath, 120000, shouldAbort)) {
+                if (shouldAbort && shouldAbort())
+                    return false;
+                r.ok = false;
+                r.error = label + ": previous plugin build still wedged";
+                r.failedEntries.push_back({key, pv});
+                engine.markStagedBuildFailed(key);
+                return false;
+            }
             logToFile("TRACE: buildOne " + label + " building/retrying on message thread...");
             struct BuildContext {
                 FanfareEngine* engine;
                 std::shared_ptr<std::atomic<bool>> engineAlive;
                 juce::var pluginVar;
+                juce::String gatePath;
                 std::unique_ptr<juce::AudioPluginInstance> inst;
                 juce::String err;
                 bool ok = false;
@@ -504,6 +460,7 @@ private:
             ctx->engine = &engine;
             ctx->engineAlive = engine.getAliveToken();
             ctx->pluginVar = pv;
+            ctx->gatePath = newPath;
 
             juce::MessageManager::getInstance()->callAsync(
                 [ctx]() {
@@ -522,6 +479,7 @@ private:
                     } else {
                         tmpInst.reset();
                     }
+                    Fanfare::releasePathBuildGate(ctx->gatePath);
                     ctx->done.signal();
                 });
 
@@ -542,6 +500,7 @@ private:
                     return false;
                 }
                 Fanfare::poisonPath(newPath);
+                engine.markStagedBuildFailed(key);
                 logToFile("TRACE: buildOne timed out (60s) on message-thread build/retry: " + label);
                 r.ok = false;
                 r.error = label + ": build timed out (60s)";
@@ -550,6 +509,7 @@ private:
             }
 
             if (!ctx->ok) {
+                engine.markStagedBuildFailed(key);
                 logToFile("TRACE: buildOne message-thread build/retry failed for " + label + ": " + ctx->err);
                 r.ok = false;
                 r.error = label + ": " + ctx->err;
@@ -602,6 +562,7 @@ private:
             r.ok = false;
             r.error = label + ": skipped (plugin stalled earlier this session)";
             r.failedEntries.push_back({key, pv});
+            engine.markStagedBuildFailed(key);
             return false;
         }
 
@@ -629,20 +590,30 @@ private:
         bool ok = false;
 
         if (!requiresMessageThread) {
-            Fanfare::waitForPathBuildGate(newPath, 120000);
+            if (!Fanfare::tryAcquirePathBuildGate(newPath, 120000, shouldAbort)) {
+                if (shouldAbort && shouldAbort())
+                    return false;
+                logToFile("WARNING: buildMaster " + label + " skipped — previous build of " + newPath + " is still wedged.");
+                r.ok = false;
+                r.error = label + ": previous plugin build still wedged";
+                r.failedEntries.push_back({key, pv});
+                engine.markStagedBuildFailed(key);
+                return false;
+            }
             logToFile("TRACE: buildMaster " + label + " building off-thread...");
             struct BuildThreadContext {
                 FanfareEngine* engine;
+                std::shared_ptr<std::atomic<bool>> engineAlive;
                 juce::var pluginVar;
                 std::unique_ptr<juce::AudioPluginInstance> inst;
                 juce::String err;
                 bool ok = false;
                 std::atomic<bool> done{false};
                 std::atomic<bool> abandoned{false};
-                std::atomic<bool> gateReleased{false};
             };
             auto bctx = std::make_shared<BuildThreadContext>();
             bctx->engine = &engine;
+            bctx->engineAlive = engine.getAliveToken();
             bctx->pluginVar = pv;
             juce::String gatePath = newPath;
 
@@ -653,47 +624,54 @@ private:
 #endif
                 std::unique_ptr<juce::AudioPluginInstance> tmpInst;
                 juce::String tmpErr;
-                bool tmpOk = bctx->engine->buildPluginFromVar(bctx->pluginVar, tmpInst, tmpErr) && (bool)tmpInst;
-                if (!bctx->abandoned.load()) {
+                bool tmpOk = false;
+                if (!bctx->abandoned.load(std::memory_order_acquire) &&
+                    (!bctx->engineAlive || bctx->engineAlive->load(std::memory_order_acquire))) {
+                    tmpOk = bctx->engine->buildPluginFromVar(bctx->pluginVar, tmpInst, tmpErr) && (bool)tmpInst;
+                }
+                if (!bctx->abandoned.load(std::memory_order_acquire) &&
+                    (!bctx->engineAlive || bctx->engineAlive->load(std::memory_order_acquire))) {
                     bctx->inst = std::move(tmpInst);
                     bctx->err = tmpErr;
                     bctx->ok = tmpOk;
                 } else {
-                    tmpInst = nullptr; // Instantly release instance and host resources if thread was abandoned
+                    tmpInst = nullptr;
                 }
 #ifdef _WIN32
                 ::CoUninitialize();
 #endif
-                if (!bctx->gateReleased.exchange(true))
-                    Fanfare::releasePathBuildGate(gatePath);
-                bctx->done.store(true);
+                // M13: ONLY the worker thread releases gatePath once it truly finishes.
+                Fanfare::releasePathBuildGate(gatePath);
+                bctx->done.store(true, std::memory_order_release);
             });
 
-            // Wait up to 60 seconds (see buildOne: stall -> message-thread retry)
             int waitCount = 0;
-            while (!bctx->done.load() && waitCount < 600 && !(shouldAbort && shouldAbort())) {
+            while (!bctx->done.load(std::memory_order_acquire) && waitCount < 600 &&
+                   !(shouldAbort && shouldAbort())) {
                 juce::Thread::sleep(100);
                 waitCount++;
             }
 
-            if (!bctx->done.load()) {
-                bctx->abandoned.store(true);
-                if (!bctx->gateReleased.exchange(true))
-                    Fanfare::releasePathBuildGate(gatePath);
-                t.detach(); // Allow thread to remain stuck in background
+            if (!bctx->done.load(std::memory_order_acquire)) {
+                bctx->abandoned.store(true, std::memory_order_release);
+                t.detach(); // Gate remains held until detached worker actually exits!
                 if (shouldAbort && shouldAbort()) {
                     logToFile("TRACE: buildMaster " + label + " aborted while building off-thread.");
                     return false;
                 }
-                logToFile("TRACE: buildMaster " + label + " off-thread build stalled (60s) - abandoning worker, retrying on message thread...");
-                ok = false;
-                err = "off-thread build stalled (60s)";
-            } else {
-                t.join();
-                inst = std::move(bctx->inst);
-                err = bctx->err;
-                ok = bctx->ok;
+                Fanfare::poisonPath(gatePath);
+                engine.markStagedBuildFailed(key);
+                logToFile("WARNING: buildMaster " + label + " off-thread build stalled (60s) — poisoning path and skipping concurrent retry while worker is still inside plugin.");
+                r.ok = false;
+                r.error = label + ": off-thread build stalled (60s)";
+                r.failedEntries.push_back({key, pv});
+                return false;
             }
+
+            t.join();
+            inst = std::move(bctx->inst);
+            err = bctx->err;
+            ok = bctx->ok;
 
             if (!ok) {
                 logToFile("TRACE: buildMaster off-thread build failed for " + label + ". Error: " + err);
@@ -704,11 +682,21 @@ private:
             return false;
 
         if (!ok) {
+            if (!Fanfare::tryAcquirePathBuildGate(newPath, 120000, shouldAbort)) {
+                if (shouldAbort && shouldAbort())
+                    return false;
+                r.ok = false;
+                r.error = label + ": previous plugin build still wedged";
+                r.failedEntries.push_back({key, pv});
+                engine.markStagedBuildFailed(key);
+                return false;
+            }
             logToFile("TRACE: buildMaster " + label + " building/retrying on message thread...");
             struct BuildContext {
                 FanfareEngine* engine;
                 std::shared_ptr<std::atomic<bool>> engineAlive;
                 juce::var pluginVar;
+                juce::String gatePath;
                 std::unique_ptr<juce::AudioPluginInstance> inst;
                 juce::String err;
                 bool ok = false;
@@ -719,6 +707,7 @@ private:
             ctx->engine = &engine;
             ctx->engineAlive = engine.getAliveToken();
             ctx->pluginVar = pv;
+            ctx->gatePath = newPath;
 
             juce::MessageManager::getInstance()->callAsync(
                 [ctx]() {
@@ -737,6 +726,7 @@ private:
                     } else {
                         tmpInst.reset();
                     }
+                    Fanfare::releasePathBuildGate(ctx->gatePath);
                     ctx->done.signal();
                 });
 
@@ -757,6 +747,7 @@ private:
                     return false;
                 }
                 Fanfare::poisonPath(newPath);
+                engine.markStagedBuildFailed(key);
                 logToFile("TRACE: buildMaster timed out (60s) on message-thread build/retry: " + label);
                 r.ok = false;
                 r.error = label + ": build timed out (60s)";
@@ -765,6 +756,7 @@ private:
             }
 
             if (!ctx->ok) {
+                engine.markStagedBuildFailed(key);
                 logToFile("TRACE: buildMaster message-thread build/retry failed for " + label + ": " + ctx->err);
                 r.ok = false;
                 r.error = label + ": " + ctx->err;
