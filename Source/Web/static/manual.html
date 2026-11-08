@@ -6,16 +6,16 @@
 -->
 <html lang="en">
 	<head>
-		<title>Fanfare v1.51: Stage Survival Manual</title>
+		<title>Fanfare v1.52: Stage Survival Manual</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="description" content="Fanfare v1.51 User's Manual & Stage Survival Guide. Studio Workspace, Vertical Ribbon Sidebar, Global Controller Profiles, Version History, Strips, Songs, Scenes, Setlists, Curve-Link EQ, Built-In Synthesized IRs, Stereo/Ping-Pong/Tape Delay, Dual-Deck Break DJ with Broadcast Auto-Leveler, and bass-player-proof USB hotplugging." />
+		<meta name="description" content="Fanfare v1.52 User's Manual & Stage Survival Guide. Studio Workspace, Rig Doctor Setup Diagnostics & Surgical Repair, Vertical Ribbon Sidebar, Global Controller Profiles, Version History, Strips, Songs, Scenes, Setlists, Curve-Link EQ, Built-In Synthesized IRs, Stereo/Ping-Pong/Tape Delay, Dual-Deck Break DJ with Broadcast Auto-Leveler, and bass-player-proof USB hotplugging." />
 		<link rel="canonical" href="https://openrig-host.github.io/fanfare/manual.html" />
 		<link rel="icon" type="image/png" href="Fanfare_Icon.png" />
 		<meta property="og:site_name" content="Fanfare" />
 		<meta property="og:type" content="website" />
-		<meta property="og:title" content="Fanfare v1.51: Stage Survival Manual" />
-		<meta property="og:description" content="The Fanfare user's manual and stage survival guide: 23 chapters from Quick Start to engine tuning." />
+		<meta property="og:title" content="Fanfare v1.52: Stage Survival Manual" />
+		<meta property="og:description" content="The Fanfare user's manual and stage survival guide: 24 chapters from Quick Start to Rig Doctor & engine tuning." />
 		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
 		<meta name="twitter:card" content="summary_large_image" />
 		<link rel="stylesheet" href="assets-readonly/css/main.css" />
@@ -198,9 +198,9 @@
 			<section id="header">
 				<header>
 					<span class="image avatar"><img src="Fanfare_Icon.png" alt="Fanfare" /></span>
-					<h1 id="logo"><a href="#workflow">Fanfare v1.51</a></h1>
+					<h1 id="logo"><a href="#workflow">Fanfare v1.52</a></h1>
 					<p>The Stage Survival Manual</p>
-					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. EQ, IR, Leveler, Thermal, USB)..." />
+					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. Rig Doctor, EQ, IR, USB)..." />
 				</header>
 				<nav id="nav">
 					<ul>
@@ -226,7 +226,8 @@
 						<li><a href="#settings">20. Settings &amp; Routing</a></li>
 						<li><a href="#engine-tuning">21. Engine &amp; CPU Tuning</a></li>
 						<li><a href="#resource-inspector">22. Resource Inspector</a></li>
-						<li><a href="#community">23. Feedback &amp; Roll Your Own</a></li>
+						<li><a href="#rig-doctor">23. Rig Doctor (Setup Repair)</a></li>
+						<li><a href="#community">24. Feedback &amp; Roll Your Own</a></li>
 					</ul>
 				</nav>
 				<footer>
@@ -246,16 +247,16 @@
 						<!-- Hero + chapter cards (Nota-style landing) -->
 						<div class="manual-hero container">
 							<h1>Stage Survival Manual</h1>
-							<p>Everything Fanfare can do, and how to do it &mdash; from plugging in to the last encore. Twenty-three chapters, zero panic. If nothing is making noise right now, jump straight to the <a href="#no-sound">No-Sound Emergency Checklist</a>.</p>
+							<p>Everything Fanfare can do, and how to do it &mdash; from plugging in to the last encore. Twenty-four chapters, zero panic. If nothing is making noise right now, jump straight to the <a href="#no-sound">No-Sound Emergency Checklist</a>.</p>
 							<div class="manual-cards">
 								<a class="manual-card" href="#workflow"><h3>Start Here <span class="arrow">&rarr;</span></h3><p>Building blocks, first noise in ten minutes, and the emergency checklist.</p></a>
 								<a class="manual-card" href="#main-mixer"><h3>The Console <span class="arrow">&rarr;</span></h3><p>Main faders, FOH &amp; IEM buses, Panic, and USB hotplug survival.</p></a>
 								<a class="manual-card" href="#strips"><h3>Strips &amp; DSP <span class="arrow">&rarr;</span></h3><p>Strip chains, Curve-Link EQ, delay, IRs, musette and note splits.</p></a>
 								<a class="manual-card" href="#cc-assignments"><h3>MIDI &amp; CCs <span class="arrow">&rarr;</span></h3><p>CC assignments, B3 drawbars, transpose, arp and octaver.</p></a>
 								<a class="manual-card" href="#sampler"><h3>Sampler &amp; Breaks <span class="arrow">&rarr;</span></h3><p>The 8-pad sampler and the dual-deck break DJ with auto-leveler.</p></a>
-								<a class="manual-card" href="#song-builder"><h3>Build &amp; Perform <span class="arrow">&rarr;</span></h3><p>Song Builder, Scenes, Stage Queue, Setlists and the Gig Notepad.</p></a>
+								<a class="manual-card" href="#song-builder"><h3>Build &amp; Perform <span class="arrow">&rarr;</span></h3><p>Song Builder, Scenes (<code>1&ndash;9</code> hotkeys), Next-Up capsule, Setlists &amp; Notepad.</p></a>
 								<a class="manual-card" href="#web-remote"><h3>Remote &amp; Settings <span class="arrow">&rarr;</span></h3><p>Tablet Stage HUD, settings, routing and the Resource Inspector.</p></a>
-								<a class="manual-card" href="#engine-tuning"><h3>Under the Hood <span class="arrow">&rarr;</span></h3><p>Engine &amp; CPU tuning, USB quirks, community and roll-your-own.</p></a>
+								<a class="manual-card" href="#rig-doctor"><h3>Rig Doctor &amp; Engine <span class="arrow">&rarr;</span></h3><p>Diagnose &amp; repair sick setups, CPU core tuning, and roll-your-own.</p></a>
 							</div>
 						</div>
 
@@ -366,8 +367,8 @@
 												</tr>
 												<tr>
 													<td>6</td>
-													<td><strong>The plugin didn't load.</strong></td>
-													<td>Look at the strip's slots: an empty slot means the plugin failed or is missing. Run <code>SCAN FOR PLUGINS</code> and reload the strip.</td>
+													<td><strong>The plugin didn't load (or a Song stalled).</strong></td>
+													<td>Look at the strip's slots: an empty slot means the plugin failed or is missing. Run <code>SCAN FOR PLUGINS</code> and reload &mdash; or click <code>RIG DOCTOR...</code> on the warning banner (or <code>Tools &rarr; Rig doctor...</code>, <a href="#rig-doctor">Chapter 23</a>) to isolate and repair a broken patch or stalled plugin.</td>
 												</tr>
 												<tr>
 													<td>7</td>
@@ -401,11 +402,11 @@
 											<tbody>
 												<tr>
 													<td><strong>Top Menu Bar (<code>File</code> &middot; <code>View</code> &middot; <code>Rig</code> &middot; <code>Tools</code> &middot; <code>Help</code>)</strong></td>
-													<td>Gives instant access to Song &amp; Queue management (<code>File &rarr; Build song from strips...</code>), <strong><code>View &rarr; Theme</code></strong> (<code>Studio</code>, <code>Studio Scarlett</code>, <code>Studio Sapphire</code>, <code>Studio Jade</code>, <code>Studio Daylight</code>, <code>Front Panel Dark</code>, <code>Front Panel Bright</code>), Strip Width &amp; Stage Compact toggles, <strong><code>Rig &rarr; Audio &amp; MIDI settings...</code></strong> / <strong><code>Controller profile...</code></strong> / <strong><code>Engine &amp; CPU tuning...</code></strong>, <code>Tools</code> (Gig Notepad, Resource Inspector, Tablet Remote, MIDI Monitor, and <code>Settings...</code>), and <code>Help</code> (<code>F1</code> User Manual, Welcome Screen, Quick Start).</td>
+													<td>Gives instant access to Song &amp; Queue management (<code>File &rarr; Build song from strips...</code>, <code>Diagnose &amp; repair song (Rig Doctor)...</code>), <strong><code>View &rarr; Theme</code></strong> (<code>Studio</code>, <code>Studio Scarlett</code>, <code>Studio Sapphire</code>, <code>Studio Jade</code>, <code>Studio Daylight</code>, <code>Front Panel Dark</code>, <code>Front Panel Bright</code>), Strip Width &amp; Stage Compact toggles, <strong><code>Rig &rarr; Audio &amp; MIDI settings...</code></strong> / <strong><code>Controller profile...</code></strong> / <strong><code>Engine &amp; CPU tuning...</code></strong>, <code>Tools</code> (<strong><code>Rig doctor...</code></strong>, Gig Notepad, Resource Inspector, Tablet Remote, MIDI Monitor, and <code>Settings...</code>), and <code>Help</code> (<code>F1</code> User Manual, Welcome Screen, Quick Start).</td>
 												</tr>
 												<tr>
-													<td><strong>Centered <code>&lt; Song Name &gt;</code> Pill &amp; Live Stage Clock</strong></td>
-													<td>Displays the active Song front-and-center with previous/next setlist step arrows (<code>&lt;</code> / <code>&gt;</code>), alongside a live stage clock right beside <code>Panic</code> so you never blow past curfew. When <code>View &rarr; Clean slate for this song</code> is ticked, loading this Song unloads all prior plugins first instead of reusing matching plugin instances across songs.</td>
+													<td><strong>Centered <code>&lt; Song Name &gt;</code> Pill, <code>Next-Up</code> Capsule &amp; Stage Clock</strong></td>
+													<td>Displays the active Song front-and-center with previous/next setlist step arrows (<code>&lt;</code> / <code>&gt;</code>), paired with a clickable <strong><code>Next-Up</code></strong> preload capsule that mirrors background setlist build progress and fires the next song in one click, plus a live stage clock right beside <code>Panic</code> so you never blow past curfew. When <code>View &rarr; Clean slate for this song</code> is ticked, loading this Song unloads all prior plugins first instead of reusing matching plugin instances across songs.</td>
 												</tr>
 												<tr>
 													<td><strong><code>Stage Compact</code> &amp; <code>Strip Width</code> (<code>View</code> Menu)</strong></td>
@@ -421,8 +422,8 @@
 													<td>Advances to the next Song in your Setlist (ignored while you're typing in a text box).</td>
 												</tr>
 												<tr>
-													<td><strong>Bottom Telemetry Footer (<code>SONG</code> &middot; <code>CPU</code> &middot; <code>RAM</code> &middot; <code>LAT</code> &middot; <code>XRUNS</code>)</strong></td>
-													<td>Live monospace status bar along the bottom edge. <code>CPU</code> is the audio-callback budget: the one number that predicts dropouts. Hover <code>CPU</code> to see live and session-peak CPU package temperature (in &deg;C), or click <code>CPU</code> / <code>RAM</code> to open the Per-Strip Resource Inspector. <code>LAT</code> shows round-trip audio latency (or <code>RECONNECT...</code> if your USB cable was yanked). <code>XRUNS</code> reads <code>gap/stall</code>: click <code>XRUNS</code> anytime to reset the counter and open the timestamped glitch log.</td>
+													<td><strong>Bottom Telemetry Footer (<code>AUDIO</code> &middot; <code>SONG</code> &middot; <code>CPU</code> &middot; <code>RAM</code> &middot; <code>LAT</code> &middot; <code>XRUNS</code>)</strong></td>
+													<td>Live interactive monospace status bar along the bottom edge. Displays your active audio driver, sample rate, and buffer size (click to open Audio &amp; MIDI Settings). <code>CPU</code> is the real-time audio-callback budget (coloring amber above 70% and red above 90%): hover <code>CPU</code> for live and session-peak CPU package temperature (in &deg;C), or click <code>CPU</code> / <code>RAM</code> to open the Per-Strip Resource Inspector. <code>LAT</code> shows color-thresholded round-trip audio latency (or <code>RECONNECT...</code> if your USB cable was yanked). <code>XRUNS</code> reads <code>gap/stall</code>: click <code>XRUNS</code> anytime to reset the counter and open the timestamped glitch log.</td>
 												</tr>
 												<tr>
 													<td><strong>Thermal &amp; Throttle Guard Badge</strong></td>
@@ -752,7 +753,7 @@
 										<li>Strip DSP settings (EQ, Gate, Compressor, Stereo/Ping-Pong/Tape Delay, Reverb, Chorus, Musette)</li>
 										<li>Arpeggiator, Harmonizer, and Sampler states</li>
 									</ul>
-									<p>Whenever you click from Scene 1 to Scene 2, Fanfare automatically saves your current tweaks to Scene 1 before switching, or you can click <code>SAVE SCENE</code> at any time. Right-click any Scene button to <strong>Assign MIDI Trigger (Learn)...</strong> so a Program Change message from your keyboard footswitch or pad jumps straight to that Scene.</p>
+									<p>Whenever you click from Scene 1 to Scene 2, Fanfare automatically saves your current tweaks to Scene 1 before switching, or you can click <code>SAVE SCENE</code> at any time. On your laptop keyboard, tap number keys <strong><code>1</code>&ndash;<code>9</code></strong> (when not typing in a text field) to recall Scenes 1 through 9 directly; if a song has more scenes than fit across the bar, a compact <strong><code>+N</code></strong> overflow button at the right end opens a menu for the rest. Right-click any Scene button to <strong>Assign MIDI Trigger (Learn)...</strong> so a Program Change message from your keyboard footswitch or pad jumps straight to that Scene.</p>
 
 									<blockquote>
 										<span class="use-case-label">Real-World Stage Use Case</span><br />
@@ -770,7 +771,8 @@
 										<li><strong>Assigning Songs:</strong> Right-click any Queue tile and choose <code>Assign Song File...</code> (or manage tonight's full ordered show from the <code>Setlist</code> ribbon tab).</li>
 										<li><strong>Amber / Active Highlight:</strong> The Song currently live on stage.</li>
 										<li><strong>Pulsing Amber Dot:</strong> Fanfare's background thread is currently pre-building the VST plugins for this Song on your Efficiency CPU cores (true whenever <code>Auto: Fast Performance Cores Only</code> is selected in Chapter 21).</li>
-										<li><strong>Solid Green Ready Dot:</strong> The next Song's plugins are already built and warm in memory, ready for an instant swap when you click it or hit <code>Spacebar</code>.</li>
+										<li><strong>Solid Green Ready Dot &amp; Top-Bar <code>Next-Up</code> Capsule:</strong> The next Song's plugins are already built and warm in memory &mdash; mirrored by the clickable <strong><code>Next-Up</code></strong> capsule right beside the top Song pill &mdash; ready for an instant swap when you click it or hit <code>Spacebar</code>.</li>
+										<li><strong>Segmented <code>[X/N]</code> Progress Bar &amp; Cancelable Two-Phase Load:</strong> When switching cold into a multi-plugin Song, Fanfare runs a deadlock-free two-phase build (initializing UI/QML-bound STA instruments like Kontakt, Raum, Massive, Omnisphere, and EZkeys sequentially on the message thread first, then building standard VST3s in parallel on worker threads). The switching overlay divides its orange LED progress bar into <strong><code>N</code> discrete segments</strong> matching the exact plugin count (<code>[3/13]</code>) &mdash; solid orange for completed steps, pulsing for the plugin currently initializing, and dim for remaining steps &mdash; with a non-blocking <strong><code>Cancel</code></strong> button underneath if you pick the wrong song.</li>
 									</ul>
 
 									<blockquote>
@@ -894,10 +896,38 @@
 								</div>
 							</section>
 
-						<!-- 21. COMMUNITY & ROLL YOUR OWN -->
+						<!-- 23. RIG DOCTOR -->
+							<section id="rig-doctor">
+								<div class="container">
+									<h3>23. Rig Doctor: Diagnosing &amp; Rehabilitating Sick Setups</h3>
+									<p>Sooner or later on Windows, a third-party VST3 vendor ships an update that chokes on an older saved patch blob, a sample drive letter changes, or a newly added plugin hangs inside its COM/QML initializer &mdash; and a Song setup (<code>.json</code>) that worked last month suddenly refuses to load. Instead of losing 24 strips of faders, key splits, CC mappings, and scenes, open <strong>Rig Doctor</strong>:</p>
+									<ul>
+										<li><strong>How to Open Rig Doctor:</strong> Right-click any song in the left <strong><code>Songs</code></strong> sidebar and choose <strong><code>Diagnose &amp; repair (Rig Doctor)...</code></strong>, choose <strong><code>Tools &rarr; Rig doctor...</code></strong> (or <code>File &rarr; Diagnose &amp; repair song...</code>), or click <strong><code>RIG DOCTOR...</code></strong> directly on the Missing / Timed-Out Plugins toast or Song Load Failed dialog.</li>
+										<li><strong>Automatic Static Check, <code>.bak</code> Diff &amp; Log Forensics:</strong> The moment you open a setup, Rig Doctor validates its JSON schema, Base64 plugin state blobs, installed VST3 paths on disk, external WAV/IR/MP3 media files, and session-locked paths. If a sibling <code>&lt;song&gt;.json.bak</code> exists, Rig Doctor automatically diffs every slot against the backup (highlighting <code>+NEW vs .bak</code>, <code>REPLACED vs .bak</code>, or <code>PATCH EDITED vs .bak</code>) and scans <code>OpenRig_log.txt</code> for recent stalls or timeouts involving that song &mdash; usually naming the exact culprit before you even run a test.</li>
+										<li><strong>Isolated Dry-Run Plugin Tester (<code>TEST ALL PLUGINS</code> / <code>TEST SELECTED</code>):</strong> Instantiates each VST3 one by one using the exact same STA message-thread vs. MTA worker-thread path as the live song loader, applies its saved Base64 patch state, runs a silent <code>prepareToPlay</code> + <code>processBlock</code> check, and reports exact load time in milliseconds (<code>PASS (412 ms)</code>) or classifies the failure (<code>PATCH FAULT &rarr; Reset Patch</code> vs. <code>STALLED &rarr; Remove/Reset</code>). Tick <em>Unload active live rig before testing</em> first when probing RAM-heavy Kontakt or Omnisphere setups.</li>
+										<li><strong>Surgical Per-Slot Actions (Zero Collateral Damage):</strong> Every plugin row has four non-destructive action buttons:
+											<ul>
+												<li><strong><code>KEEP</code>:</strong> Leave the plugin and its saved patch untouched.</li>
+												<li><strong><code>OFF</code>:</strong> Keep the plugin and patch in the slot, but set <code>enabled = false</code> so you can re-enable it manually later.</li>
+												<li><strong><code>RESET</code>:</strong> Keep the plugin in the slot, but clear its corrupt Base64 patch blob so the VST3 boots cleanly to its factory init patch while preserving the slot's faders, splits, CCs, and scenes.</li>
+												<li><strong><code>REMOVE</code>:</strong> Remove only that plugin entry from the chain while keeping the strip, mixer routing, key range, CC bindings, and every Scene intact.</li>
+											</ul>
+										</li>
+										<li><strong>One-Click Recovery Tools:</strong> Toggle <strong><em>Force Clean Slate load (<code>freshBuild</code>)</em></strong> for heavy songs that prefer unloading old instances before building, tick <strong><em>Clear missing WAV/IR/MP3 paths</em></strong> to strip dead media references, click <strong><code>CLEAR SESSION LOCKS</code></strong> to retry a plugin that timed out earlier in the session, or use <strong><code>RESTORE .BAK</code></strong> / <strong><code>HISTORY...</code></strong> to roll back to a prior snapshot. When ready, choose <strong><code>SAVE COPY...</code></strong>, <strong><code>REPAIR &amp; SAVE</code></strong> (writes atomically after backing up <code>.bak</code> and recording a Version History snapshot), or <strong><code>REPAIR &amp; LOAD NOW</code></strong>.</li>
+										<li><strong>Command-Line Companion (<code>tools/rig_doctor.ps1</code>):</strong> Prefer inspecting a folder of songs from a terminal before opening Fanfare? Run <code>powershell -ExecutionPolicy Bypass -File tools\rig_doctor.ps1 "MySong.json"</code> to print a full plugin inventory, <code>.bak</code> diff, and log scan, or pass <code>-ResetStateSlots</code> / <code>-RemoveSlots</code> / <code>-DisableSlots</code> / <code>-ForceFreshBuild</code> to rehabilitate files offline.</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>Rehabilitating a 13-Plugin Band Setup in 45 Seconds:</strong> You click <em>Last Waltz</em> at rehearsal and the load stalls halfway through. Right-click the song in the sidebar &rarr; <code>Diagnose &amp; repair (Rig Doctor)...</code>. The forensic report immediately flags <code>+NEW vs .bak &rarr; Strip 16: Raum</code> (or <code>TEST ALL PLUGINS</code> flags <code>Strip 7: PATCH FAULT</code>). Click <code>RESET</code> (or <code>REMOVE</code>) on just that row, hit <strong><code>REPAIR &amp; LOAD NOW</code></strong>, and all 24 strips, splits, and scenes load straight onto the console without rebuilding a thing.
+									</blockquote>
+								</div>
+							</section>
+
+						<!-- 24. COMMUNITY & ROLL YOUR OWN -->
 							<section id="community">
 								<div class="container">
-									<h3>23. Comments, Feature Ideas &amp; Rolling Your Own</h3>
+									<h3>24. Comments, Feature Ideas &amp; Rolling Your Own</h3>
 									<p>Got a stage war story, a bug report, or an idea for a feature that would save your bacon on a Saturday night? Jump into the conversation on our <a href="https://github.com/openrig-host/fanfare/discussions" target="_blank" rel="noopener"><strong>GitHub Discussions</strong></a> page and let us know what you're playing and what you need.</p>
 									<blockquote>
 										<span class="use-case-label">The Roll-Your-Own Approach</span><br />
@@ -917,7 +947,7 @@
 					<section id="footer">
 						<div class="container">
 							<ul class="copyright">
-								<li>&copy; Fanfare v1.51</li><li><a href="index.html">Fanfare Home</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
+								<li>&copy; Fanfare v1.52</li><li><a href="index.html">Fanfare Home</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
 							</ul>
 						</div>
 					</section>

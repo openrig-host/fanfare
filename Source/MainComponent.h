@@ -9,6 +9,7 @@
 #include "SamplerComponent.h"
 #include "Mp3PlayerComponent.h"
 #include "ResourceInspectorModal.h"
+#include "RigDoctorModal.h"
 #include "GigNotepadWindow.h"
 #include "SetupMidiTriggers.h"
 #include "LoadingOverlay.h"
@@ -208,12 +209,14 @@ private:
   std::unique_ptr<LibraryPanel> libraryPanel;
   std::unique_ptr<SetupBuilderOverlay> setupBuilderOverlay;
   std::unique_ptr<ResourceInspectorModal> resourceInspectorOverlay;
+  std::unique_ptr<Fanfare::RigDoctorModal> rigDoctorOverlay;
   std::unique_ptr<GigNotepadWindow> gigNotepadWindow;
   std::unique_ptr<OpenRig::WebServer> webServer;
   std::unique_ptr<OpenRig::StageHotspotController> hotspotController;
   std::unique_ptr<OpenRig::StageRemoteModalOverlay> stageRemoteOverlay;
 
   void showResourceInspectorModal();
+  void showRigDoctorModal(const juce::File &file = {});
   void showGigNotepadWindow();
   void showWebRemoteDialog();
   

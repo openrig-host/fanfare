@@ -53,12 +53,15 @@ It's not a DAW. It's an instrument.
 3. **Load a song or fill a slot.** Pick a recent song on the Welcome screen, double-click a song in the left **Songs** sidebar, or click **`+`** on any channel strip slot to load a VST3.
 4. **Set key ranges and MIDI mappings.** Open the strip **`...`** menu for **Note range & transpose**, or click **`CC`** to open the CC Assignment Manager and apply your global **Controller Profile**.
 
-> The full walkthrough is in **[GETTING_STARTED.md](GETTING_STARTED.md)** and the 23-chapter **[Stage Survival Manual](https://openrig-host.github.io/fanfare/manual.html)**.
+> The full walkthrough is in **[GETTING_STARTED.md](GETTING_STARTED.md)** and the 24-chapter **[Stage Survival Manual](https://openrig-host.github.io/fanfare/manual.html)**.
 
 ---
 
-## What's New in v1.51: The Studio Workspace
+## What's New in v1.52: The Studio Workspace
 
+- **Rig Doctor: Setup Diagnostics & Surgical Repair (`v1.52`).** Open **`Tools → Rig doctor...`** (or right-click any song in the **Songs** sidebar → **`Diagnose & repair (Rig Doctor)...`**, or run **`tools/rig_doctor.ps1`** from PowerShell) to rehabilitate any setup `.json` that stops loading. Rig Doctor runs static schema/Base64/media validation, diffs every slot against its `.bak` backup to spotlight recent plugin or patch edits, scans `OpenRig_log.txt` for historical stalls, dry-runs every VST3 in isolation (`TEST ALL PLUGINS`) with millisecond timing and `PATCH FAULT` vs `STALLED` classification, and lets you surgically **`KEEP`**, **`OFF`** (disable), **`RESET`** (clear corrupt patch state), or **`REMOVE`** individual plugins while preserving 100% of your mixer faders, splits, CC maps, and scenes.
+- **Deadlock-Free Two-Phase VST3 Loader & Segmented `[X/N]` Progress (`v1.52`).** Song transitions now run a non-overlapping two-phase build — sequential STA message-thread initialization for QML/UI-bound instruments (Native Instruments Komplete/Kontakt/Raum/Massive family, Spectrasonics, Toontrack, HALion) followed by parallel MTA worker builds — eliminating Win32/COM loader lock contention on complex multi-synth songs, paired with a discrete **`N`-segment LED progress bar** (`[X/N]`) and non-blocking **`Cancel`**.
+- **Stage Ergonomics: Next-Up Capsule, `1–9` Scene Hotkeys & Live Status Bar (`v1.52`).** A clickable **`Next-Up`** preload capsule in the top bar mirrors background setlist readiness and fires the next song in one click; number keys **`1`–`9`** recall scenes directly (with a **`+N`** overflow menu on wide scene banks); and the bottom telemetry bar now displays your live audio device, sample rate, and buffer size alongside clickable, color-thresholded `CPU` (>70% amber / >90% red), `RAM`, `LAT`, and `XRUNS` segments.
 - **Embedded 100% Offline Help Manual & MP3 Strip Indicator (`v1.51`).** All `Help` buttons work standalone from any directory (even a single `Fanfare.exe` on your Desktop with zero internet or companion folders) via built-in embedded assets, channel strips with loaded MP3 playlists display a dedicated clickable **`MP3`** badge button (never disguised as empty), and the Web Remote API, lock-free MIDI learn routing, and scene serialization are hardened end-to-end.
 
 - **Studio Default Theme, Scarlett & 5 Studio Palettes (`View → Theme`).** Ultra-clean flat charcoal workspace with embedded **Source Sans 3** UI typography and crisp **JetBrains Mono** numeric readouts across five flat Studio themes — **`Studio`** (warm `#FFA02F` amber default), **`Studio Scarlett`** (synth-editor black + crimson red), **`Studio Sapphire`** (midnight slate + ice blue), **`Studio Jade`** (dark graphite + phosphor mint), and **`Studio Daylight`** (flat light paper) — plus classic **`Front Panel Dark`** and outdoor **`Front Panel Bright`**.
@@ -123,7 +126,7 @@ It's not a DAW. It's an instrument.
 - **Safe saves.** Files are written atomically and backed up automatically.
 - **Crash containment.** A misbehaving VST3 doesn't take down the show.
 - **Stage-proof USB hotplug & ASIO auto-recovery (New in v1.3).** When your bass player accidentally yanks your USB cable out of the computer, just put it back in, count to three, go back to playing, and smile at your bass player. Possibly the single most important update in Fanfare history!
-- **Per-plugin isolation.** One plugin failing doesn't stop the audio.
+- **Per-plugin isolation & Rig Doctor rehabilitation.** One plugin failing or timing out doesn't stop the audio — and if a third-party VST3 update or corrupt patch state ever makes a saved song stall, **Rig Doctor** (`Tools → Rig doctor...` or `tools/rig_doctor.ps1`) pinpoints the offending slot and rehabilitates the `.json` setup in place without losing your scenes or routing.
 - **Rig migration.** Older rig files upgrade automatically. Files from newer versions are refused instead of half-loaded.
 
 ### Engine, CPU & USB Hotplug Reliability (New in v1.2 & v1.3)

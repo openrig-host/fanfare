@@ -2314,77 +2314,89 @@ bool FanfareEngine::loadPluginFromVar(int slotIdx, int chainIdx, const juce::var
         return false;
       }
 
-      // 2. Fallback: cold path — build OFF-THREAD with a bounded wait (a
-      // message-thread build hangs for engines whose init needs a pumping
-      // thread: UVI Workstation, Sep 7; faults for HALion 7, Sep 6). On
-      // timeout: abandon, poison the path, leave the slot without this plugin.
-      struct OffThreadVarBuild {
-        FanfareEngine *engine;
-        std::shared_ptr<std::atomic<bool>> alive;
-        juce::var vt;
-        juce::String gatePath;
-        std::unique_ptr<juce::AudioPluginInstance> inst;
-        juce::String err;
-        bool ok = false;
-        std::atomic<bool> done{false};
-        std::atomic<bool> abandoned{false};
-      };
-      auto ctx = std::make_shared<OffThreadVarBuild>();
-      ctx->engine = this;
-      ctx->alive = engineAlive;
-      ctx->vt = vt;
-      ctx->gatePath = normPath;
-
-      std::thread t([ctx]() {
-#ifdef _WIN32
-        ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-#endif
-        std::unique_ptr<juce::AudioPluginInstance> tmp;
-        juce::String tmpErr;
-        bool tmpOk = false;
-        if (! ctx->abandoned.load(std::memory_order_acquire) &&
-            ctx->alive && ctx->alive->load(std::memory_order_acquire))
-          tmpOk = ctx->engine->buildPluginFromVar(ctx->vt, tmp, tmpErr) && (bool)tmp;
-        if (! ctx->abandoned.load(std::memory_order_acquire) &&
-            ctx->alive && ctx->alive->load(std::memory_order_acquire)) {
-          ctx->inst = std::move(tmp);
-          ctx->err = tmpErr;
-          ctx->ok = tmpOk;
-        } else {
-          tmp.reset();
+      // 2. Fallback: cold path — if the plugin requires STA message-thread
+      // instantiation (NI Kontakt/Raum/Replika, Spectrasonics, Toontrack, HALion)
+      // and we are on the message thread, build directly here; otherwise build
+      // off-thread with a pumping wait (required by UVI Workstation).
+      if (Fanfare::pluginRequiresMessageThread(normPath) &&
+          juce::MessageManager::getInstance()->isThisTheMessageThread()) {
+        juce::String buildErr;
+        const bool builtOk = buildPluginFromVar(vt, instance, buildErr) && (bool)instance;
+        Fanfare::releasePathBuildGate(normPath);
+        if (!builtOk) {
+          logToFile("WARNING: cold-path message-thread build failed for key " + key +
+                    ": " + buildErr);
+          return false;
         }
-#ifdef _WIN32
-        ::CoUninitialize();
-#endif
-        Fanfare::releasePathBuildGate(ctx->gatePath);
-        ctx->done.store(true, std::memory_order_release);
-      });
-
-      int waitedMs = 0;
-      while (! ctx->done.load(std::memory_order_acquire) && waitedMs < 60000) {
-#ifdef _WIN32
-        if (juce::MessageManager::getInstance()->isThisTheMessageThread()) {
-          MSG msg;
-          while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-          }
-        }
-#endif
-        juce::Thread::sleep(50);
-        waitedMs += 50;
-      }
-
-      if (ctx->done.load(std::memory_order_acquire)) {
-        t.join();
-        instance = std::move(ctx->inst);
       } else {
-        ctx->abandoned.store(true, std::memory_order_release);
-        Fanfare::poisonPath(normPath);
-        logToFile("WARNING: cold-path plugin build timed out (60s) for key " + key +
-                  " — abandoning; the rig continues without it.");
-        t.detach();
-        return false;
+        struct OffThreadVarBuild {
+          FanfareEngine *engine;
+          std::shared_ptr<std::atomic<bool>> alive;
+          juce::var vt;
+          juce::String gatePath;
+          std::unique_ptr<juce::AudioPluginInstance> inst;
+          juce::String err;
+          bool ok = false;
+          std::atomic<bool> done{false};
+          std::atomic<bool> abandoned{false};
+        };
+        auto ctx = std::make_shared<OffThreadVarBuild>();
+        ctx->engine = this;
+        ctx->alive = engineAlive;
+        ctx->vt = vt;
+        ctx->gatePath = normPath;
+
+        std::thread t([ctx]() {
+#ifdef _WIN32
+          ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+#endif
+          std::unique_ptr<juce::AudioPluginInstance> tmp;
+          juce::String tmpErr;
+          bool tmpOk = false;
+          if (! ctx->abandoned.load(std::memory_order_acquire) &&
+              ctx->alive && ctx->alive->load(std::memory_order_acquire))
+            tmpOk = ctx->engine->buildPluginFromVar(ctx->vt, tmp, tmpErr) && (bool)tmp;
+          if (! ctx->abandoned.load(std::memory_order_acquire) &&
+              ctx->alive && ctx->alive->load(std::memory_order_acquire)) {
+            ctx->inst = std::move(tmp);
+            ctx->err = tmpErr;
+            ctx->ok = tmpOk;
+          } else {
+            tmp.reset();
+          }
+#ifdef _WIN32
+          ::CoUninitialize();
+#endif
+          Fanfare::releasePathBuildGate(ctx->gatePath);
+          ctx->done.store(true, std::memory_order_release);
+        });
+
+        int waitedMs = 0;
+        while (! ctx->done.load(std::memory_order_acquire) && waitedMs < 60000) {
+#ifdef _WIN32
+          if (juce::MessageManager::getInstance()->isThisTheMessageThread()) {
+            MSG msg;
+            while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+              TranslateMessage(&msg);
+              DispatchMessage(&msg);
+            }
+          }
+#endif
+          juce::Thread::sleep(50);
+          waitedMs += 50;
+        }
+
+        if (ctx->done.load(std::memory_order_acquire)) {
+          t.join();
+          instance = std::move(ctx->inst);
+        } else {
+          ctx->abandoned.store(true, std::memory_order_release);
+          Fanfare::poisonPath(normPath);
+          logToFile("WARNING: cold-path plugin build timed out (60s) for key " + key +
+                    " — abandoning; the rig continues without it.");
+          t.detach();
+          return false;
+        }
       }
     }
 
@@ -2913,22 +2925,10 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
               juce::String(desc.numOutputChannels));
 
     // Engines that hang or AV when instantiated on a background MTA thread
-    // (see RigBuilder's requiresMessageThread) build synchronously right here
-    // on the message thread — the UI pauses for the build, which is what
-    // those engines need to come up reliably at all.
-    bool needsMessageThread =
-        pluginPath.containsIgnoreCase("Super 8") ||
-        pluginPath.containsIgnoreCase("Kontakt") ||
-        pluginPath.containsIgnoreCase("Replika") ||
-        pluginPath.containsIgnoreCase("HALion") ||
-        pluginPath.containsIgnoreCase("EZkeys") ||
-        pluginPath.containsIgnoreCase("EZdrummer") ||
-        pluginPath.containsIgnoreCase("EZbass") ||
-        pluginPath.containsIgnoreCase("Omnisphere") ||
-        pluginPath.containsIgnoreCase("Keyscape") ||
-        pluginPath.containsIgnoreCase("Trilian") ||
-        pluginPath.containsIgnoreCase("Stylus RMX") ||
-        pluginPath.containsIgnoreCase("Spectrasonics");
+    // (see PluginBuildGate's pluginRequiresMessageThread) build synchronously
+    // right here on the message thread — the UI pauses for the build, which is
+    // what those engines need to come up reliably at all.
+    bool needsMessageThread = Fanfare::pluginRequiresMessageThread(pluginPath);
     if (needsMessageThread) {
       logToFile("Building " + desc.name + " on the message thread (interactive)...");
       juce::String mtErr;

@@ -44,6 +44,7 @@ public:
   void moveItemToFolder(const juce::File &file, const juce::String &targetSubfolder);
 
   std::function<void(const juce::File &)> onDoubleClicked;
+  std::function<void(const juce::File &)> onDiagnoseRequested;
 
   Kind kind;
   juce::File learningFile;
@@ -100,6 +101,7 @@ public:
 
   std::function<void(const juce::File &)> onSetupDoubleClicked;
   std::function<void(const juce::File &)> onSetDoubleClicked;
+  std::function<void(const juce::File &)> onDiagnoseSetup;
 
   Fanfare::SetlistPanel* getSetlistPanel() { return setlistPanel.get(); }
 

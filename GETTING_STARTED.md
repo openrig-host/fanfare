@@ -68,9 +68,10 @@ Fanfare scans standard Windows VST3 directories (`C:\Program Files\Common Files\
 ## 6. Saving, Setlists, Version History & Stage Telemetry
 
 - **Save Song & Version History:** Press **`Ctrl+S`** (`File → Save song as...`) to save your Song, or click **`... → Save strip preset...`** to save a reusable `.orstrip` brick. Every save writes atomically and records a timestamped snapshot — right-click any Song, Set, or Strip in the left Library Sidebar and choose **`Version history...`** to restore any earlier version.
-- **Vertical Ribbon Sidebar & Preloading:** Use the left icon rail to switch between **Songs**, **Strips**, **Setlist**, **Queue** (10 instant stage tiles), and a live **MIDI Monitor**. While you play the active song, Fanfare automatically preloads the next song in the background on non-audio cores.
+- **Rig Doctor (Setup Diagnostics & Repair):** If a saved `.json` song ever fails to load or hangs after a third-party VST3 update, right-click the song in the **Songs** sidebar and choose **`Diagnose & repair (Rig Doctor)...`** (or open **`Tools → Rig doctor...`**). Click **`TEST ALL PLUGINS`** to dry-run every plugin in isolation, inspect `.bak` diffs and log clues, and set any broken plugin to **`RESET`** (clear corrupt patch state), **`OFF`**, or **`REMOVE`** without losing your faders, splits, or scenes.
+- **Vertical Ribbon Sidebar, Next-Up Capsule & `1–9` Scene Hotkeys:** Use the left icon rail to switch between **Songs**, **Strips**, **Setlist**, **Queue** (10 instant stage tiles), and a live **MIDI Monitor**. While you play the active song, Fanfare preloads the next song on non-audio cores and lights up the clickable **`Next-Up`** capsule in the top bar; press number keys **`1`–`9`** anytime to recall Scenes instantly.
 - **Panic Button:** Click the red **`Panic`** button at the top-right (or press `P`) to send All Notes Off and Sustain Off across every slot in the very next audio block.
-- **Telemetry Footer:** The bottom bar displays live Song status, `CPU`, `RAM`, round-trip `LAT`, and `XRUNS` in crisp monospace type. Click `XRUNS:` anytime to reset the counter to zero and open `audio_underrun_log.txt`.
+- **Telemetry Footer:** The bottom bar displays your live audio device (`SR / buffer`), Song status, color-thresholded `CPU` and `LAT`, `RAM`, and `XRUNS` in crisp monospace type. Click `CPU` / `RAM` to open the Resource Inspector, click the audio device readout to open Audio Settings, or click `XRUNS:` anytime to reset the counter to zero and open `audio_underrun_log.txt`.
 
 ---
 

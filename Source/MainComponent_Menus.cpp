@@ -248,6 +248,34 @@ void MainComponent::showResourceInspectorModal() {
   resourceInspectorOverlay->toFront(true);
 }
 
+void MainComponent::showRigDoctorModal(const juce::File &file) {
+  juce::File target = file.existsAsFile() ? file : currentRigFile;
+  if (!target.existsAsFile() && libraryPanel != nullptr) {
+    auto sel = libraryPanel->getSelectedPresetFile();
+    if (sel.existsAsFile() && sel.hasFileExtension(".json"))
+      target = sel;
+  }
+
+  Fanfare::RigDoctorModal::Actions a;
+  a.onClose = [this] {
+    rigDoctorOverlay.reset();
+    if (libraryPanel != nullptr)
+      libraryPanel->refreshAll();
+    resized();
+  };
+  a.onLoadSong = [this](const juce::File &repairedFile) {
+    if (libraryPanel != nullptr)
+      libraryPanel->refreshAll();
+    loadRigFromFile(repairedFile);
+  };
+
+  rigDoctorOverlay = std::make_unique<Fanfare::RigDoctorModal>(engine, target, std::move(a));
+  addAndMakeVisible(rigDoctorOverlay.get());
+  rigDoctorOverlay->centreWithSize(juce::jmin(getWidth() - 28, 920),
+                                   juce::jmin(getHeight() - 28, 620));
+  rigDoctorOverlay->toFront(true);
+}
+
 void MainComponent::showGigNotepadWindow() {
   if (gigNotepadWindow != nullptr) {
     gigNotepadWindow->toFront(true);
@@ -278,6 +306,7 @@ void MainComponent::showScanResultsDialog(const FanfareEngine::ScanResults &resu
 void MainComponent::showLoadingOverlay(const juce::String &title, const juce::String &message) {
   if (!loadingOverlay)
     loadingOverlay = std::make_unique<LoadingOverlay>();
+  loadingOverlay->resetProgress();
   loadingOverlay->setTitle(title);
   loadingOverlay->setMessage(message);
   loadingOverlay->setBounds(getLocalBounds());
@@ -296,6 +325,7 @@ void MainComponent::showMissingPluginsWarning(const std::vector<Fanfare::RigBuil
     MissingPluginInfo info;
     info.name = fe.pluginVar.getProperty("name", "").toString();
     info.path = fe.pluginVar.getProperty("path", "").toString();
+    info.reason = fe.reason;
     if (info.name.isEmpty() && info.path.isNotEmpty()) {
       info.name = juce::File(info.path).getFileNameWithoutExtension();
     }
@@ -331,17 +361,25 @@ void MainComponent::showMissingPluginsWarning(const std::vector<Fanfare::RigBuil
   }
 
   if (!missing.empty()) {
-    missingPluginsToast = std::make_unique<MissingPluginsToast>(missing, [this]() {
-      missingPluginsToast.reset();
-    });
+    juce::File diagFile = currentRigFile;
+    missingPluginsToast = std::make_unique<MissingPluginsToast>(
+        missing,
+        [this]() {
+          missingPluginsToast.reset();
+        },
+        [this, diagFile]() {
+          showRigDoctorModal(diagFile);
+        });
     addAndMakeVisible(missingPluginsToast.get());
     updateMissingPluginsToastBounds();
     missingPluginsToast->toFront(true);
 
-    juce::String logMsg = "Setup loaded with " + juce::String((int)missing.size()) + " uninstalled plugin(s): ";
+    juce::String logMsg = "Setup loaded with " + juce::String((int)missing.size()) + " plugin issue(s): ";
     for (size_t i = 0; i < missing.size(); ++i) {
       if (i > 0) logMsg += ", ";
       logMsg += missing[i].name + " [" + missing[i].location + "]";
+      if (missing[i].reason.isNotEmpty())
+        logMsg += " (" + missing[i].reason + ")";
     }
     LOG_WARN(logMsg);
   }
@@ -434,7 +472,7 @@ enum MenuIds {
   miWidthBase = 130,       // + preset index
   miThemeBase = 150,       // + theme index
   miAudio = 200, miBus, miEngine, miControllerProfile, miScan, miResetAudio, miSettings,
-  miNotepad = 300, miInspector, miRemote,
+  miNotepad = 300, miInspector, miRigDoctor, miRemote,
   miManual = 400, miWelcome, miQuickStart, miUpdate, miAbout
 };
 constexpr int kStripWidthPresets[] = {96, 124, 160, 220};
@@ -513,6 +551,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
       m.addItem(menuItem(miLoadSong, "Load song...", "Ctrl+O"));
       m.addItem(menuItem(miSaveSong, "Save song as...", "Ctrl+S"));
       m.addItem(menuItem(miBuildSong, "Build song from strips..."));
+      m.addItem(menuItem(miRigDoctor, "Diagnose & repair song (Rig Doctor)..."));
       m.addSeparator();
       m.addItem(menuItem(miLoadMap, "Load queue map..."));
       m.addItem(menuItem(miSaveMap, "Save queue map..."));
@@ -556,6 +595,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
     case 3: // Tools
       m.addItem(menuItem(miNotepad, "Gig notepad", "Ctrl+N"));
       m.addItem(menuItem(miInspector, "Resource inspector"));
+      m.addItem(menuItem(miRigDoctor, "Rig doctor (diagnose & repair)..."));
       m.addItem(menuItem(miRemote, "Tablet remote..."));
       m.addItem(menuItem(miViewContextBase + Fanfare::ToolRail::Midi,
                          "MIDI monitor", {},
@@ -621,6 +661,7 @@ void MainComponent::menuItemSelected(int id, int) {
     case miSettings:   showConfigOverlay(); break;
     case miNotepad:    showGigNotepadWindow(); break;
     case miInspector:  showResourceInspectorModal(); break;
+    case miRigDoctor:  showRigDoctorModal(); break;
     case miRemote:     showWebRemoteDialog(); break;
     case miManual:     Fanfare::openHelpManual("#main-mixer"); break;
     case miWelcome:    showWelcomeModal(); break;

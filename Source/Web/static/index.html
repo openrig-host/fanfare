@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -9,6 +10,7 @@
   <title>Fanfare Stage Companion</title>
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
   <!-- Offline / Connection Status Banner -->
   <div id="connectionBanner" class="connection-banner disconnected">
@@ -18,10 +20,10 @@
 
   <!-- Master Stage Frame: Main Area + Right Vertical Meter Sidebar -->
   <div class="stage-frame">
-    
+
     <!-- MAIN WORKSPACE AREA (1024x600 Optimized) -->
     <div class="stage-main-area">
-      
+
       <!-- Compact Stage Header (40px) -->
       <header class="stage-header">
         <div class="header-left">
@@ -32,16 +34,19 @@
           <div class="telemetry-pills">
             <div class="pill" id="cpuPill">CPU: <span id="cpuVal">0%</span></div>
             <div class="pill" id="xrunPill">XRUN: <span id="xrunVal">0</span></div>
-            <div class="pill thermal-pill hidden" id="thermalPill" title="CPU Thermal / Firmware Throttle Alert">THERMAL</div>
+            <div class="pill thermal-pill hidden" id="thermalPill" title="CPU Thermal / Firmware Throttle Alert">THERMAL
+            </div>
             <div class="pill wake-lock-pill" id="wakeLockPill">SCREEN AWAKE</div>
           </div>
         </div>
 
         <div class="header-right">
           <button id="themeToggleBtn" class="btn btn-theme" title="Toggle Dark / Bright front panel">BRIGHT</button>
-          <a href="/manual.html#web-remote" target="_blank" class="btn btn-haalp" title="Open the Fanfare User's Manual">HAAALP!</a>
+          <a href="/manual.html#web-remote" target="_blank" class="btn btn-haalp"
+            title="Open the Fanfare User's Manual">HAAALP!</a>
           <button id="fullscreenBtn" class="btn btn-fullscreen" title="Toggle Fullscreen">FULLSCREEN</button>
-          <button id="panicBtn" class="btn btn-panic" title="Hold ~1 second: All Notes Off / Silence Audio"><span class="panic-fill"></span><span class="panic-label">PANIC &middot; HOLD</span></button>
+          <button id="panicBtn" class="btn btn-panic" title="Hold ~1 second: All Notes Off / Silence Audio"><span
+              class="panic-fill"></span><span class="panic-label">PANIC &middot; HOLD</span></button>
         </div>
       </header>
 
@@ -56,10 +61,10 @@
 
       <!-- View Panes -->
       <main class="main-content">
-        
+
         <!-- VIEW 1: STAGE HUD (Main Live Performance Dashboard) -->
         <section id="hudView" class="view-pane active">
-          
+
           <!-- Song Navigation & Hero Bar (Compact) -->
           <div class="song-hero-bar">
             <button id="hudPrevBtn" class="btn btn-song-nav btn-prev" title="Previous Song in Setlist">
@@ -136,7 +141,8 @@
               <button id="jumpToNotepadBtn" class="btn-jump-tab">OPEN FULL NOTEPAD &rarr;</button>
             </div>
             <div class="quick-notes-container">
-              <pre class="quick-notes-content" id="quickNotesContent">No notes for this song. Tap 'OPEN FULL NOTEPAD' to add notes.</pre>
+              <pre class="quick-notes-content"
+                id="quickNotesContent">No notes for this song. Tap 'OPEN FULL NOTEPAD' to add notes.</pre>
             </div>
           </div>
 
@@ -190,7 +196,8 @@
           </div>
           <div class="notepad-body">
             <div id="notepadLiveViewer" class="notepad-live-viewer"></div>
-            <textarea id="notepadTextarea" class="notepad-editor" style="display: none;" spellcheck="false" placeholder="Type chords, lyrics, or notes. Use tags like [blue]Verse 1[/blue], [green]Chorus[/green], [yellow]Bridge[/yellow], **Bold**, or [C#m7] for chords."></textarea>
+            <textarea id="notepadTextarea" class="notepad-editor" style="display: none;" spellcheck="false"
+              placeholder="Type chords, lyrics, or notes. Use tags like [blue]Verse 1[/blue], [green]Chorus[/green], [yellow]Bridge[/yellow], **Bold**, or [C#m7] for chords."></textarea>
           </div>
         </section>
 
@@ -250,15 +257,18 @@
 
               <!-- Transport Buttons -->
               <div class="dj-transport-row">
-                <button class="btn btn-dj-transport" id="djPrevBtn" title="Previous Track (Crossfade)">&larr; PREV</button>
-                <button class="btn btn-dj-transport btn-dj-play" id="djPlayPauseBtn" title="Play / Pause">&#9658; PLAY</button>
+                <button class="btn btn-dj-transport" id="djPrevBtn" title="Previous Track (Crossfade)">&larr;
+                  PREV</button>
+                <button class="btn btn-dj-transport btn-dj-play" id="djPlayPauseBtn" title="Play / Pause">&#9658;
+                  PLAY</button>
                 <button class="btn btn-dj-transport" id="djNextBtn" title="Next Track (Crossfade)">NEXT &rarr;</button>
               </div>
             </div>
 
             <!-- YouTube / Web Link Grabber Bar -->
             <div class="dj-youtube-bar">
-              <input type="text" id="djYtUrlInput" class="input-yt-url" placeholder="Paste YouTube link here (auto-converts to MP3 192k)...">
+              <input type="text" id="djYtUrlInput" class="input-yt-url"
+                placeholder="Paste YouTube link here (auto-converts to MP3 192k)...">
               <button class="btn btn-yt-grab" id="djYtGrabBtn">GRAB MP3 (192k)</button>
               <button class="btn btn-yt-grab-play" id="djYtGrabPlayBtn">GRAB & PLAY</button>
             </div>
@@ -288,7 +298,7 @@
           <span id="clockDisplay">00:00:00</span>
         </div>
         <div class="footer-right">
-          <span class="host-pill">Fanfare v1.51</span>
+          <span class="host-pill">Fanfare v1.52</span>
         </div>
       </footer>
 
@@ -297,9 +307,9 @@
     <!-- FAR RIGHT COLUMN: FULL-HEIGHT VERTICAL MASTER VU METERS (84px width) -->
     <aside class="vertical-meters-sidebar" title="Master Audio Output Levels (Logarithmic dB Scale)">
       <div class="sidebar-title">VU METERS</div>
-      
+
       <div class="meters-pair-container">
-        
+
         <!-- FOH Vertical Meter Pair -->
         <div class="meter-column">
           <div class="meter-label">FOH</div>
@@ -347,4 +357,5 @@
 
   <script src="app.js"></script>
 </body>
+
 </html>

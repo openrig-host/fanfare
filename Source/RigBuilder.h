@@ -49,6 +49,7 @@ public:
     struct FailedEntry {
         juce::String key;
         juce::var pluginVar;
+        juce::String reason;
     };
 
     struct Result {
@@ -69,11 +70,6 @@ public:
 
         auto snap = engine.snapshotPluginPaths();
 
-        // --- Collect every plugin entry first (slot chains + master FX) so we
-        // can dispatch the builds in parallel, interleaved by plugin path:
-        // same-path plugins (a rack full of Kontakt multis!) serialize on the
-        // per-path build gate, while DIFFERENT plugins build concurrently
-        // alongside them instead of queueing behind each Kontakt.
         struct BuildEntry {
             juce::var pv;
             juce::String key;
@@ -102,6 +98,9 @@ public:
                         auto pv = chain->getReference(p);
                         if (!pv.isObject())
                             continue;
+                        const juce::String rawPath = pv.getProperty("path", "").toString();
+                        if (rawPath.isEmpty())
+                            continue;
                         BuildEntry e;
                         e.pv = pv;
                         e.key = FanfareEngine::stagingKeyFor(i, p, true);
@@ -110,8 +109,7 @@ public:
                         e.label = "Slot " + juce::String(i + 1) +
                                   " chain " + juce::String(p + 1);
                         e.name = entryName(pv);
-                        e.path = engine.normalizePath(
-                            pv.getProperty("path", "").toString());
+                        e.path = engine.normalizePath(rawPath);
                         entries.push_back(std::move(e));
                     }
                 }
@@ -127,6 +125,9 @@ public:
                         auto pv = chain->getReference(p);
                         if (!pv.isObject())
                             continue;
+                        const juce::String rawPath = pv.getProperty("path", "").toString();
+                        if (rawPath.isEmpty())
+                            continue;
                         BuildEntry e;
                         e.pv = pv;
                         e.key = FanfareEngine::stagingKeyFor(100 + a, p, true);
@@ -135,20 +136,21 @@ public:
                         e.label = "Aux " + juce::String(a + 1) +
                                   " chain " + juce::String(p + 1);
                         e.name = entryName(pv);
-                        e.path = engine.normalizePath(
-                            pv.getProperty("path", "").toString());
+                        e.path = engine.normalizePath(rawPath);
                         entries.push_back(std::move(e));
                     }
                 }
             }
         }
 
-        auto collectMasterFx = [&](const char *prop, bool isFoh,
-                                   const juce::StringArray &masterPaths) {
+        auto collectMasterFx = [&](const char *prop, bool isFoh) {
             if (auto *fx = rig.getProperty(prop, juce::var()).getArray()) {
                 for (int p = 0; p < (int)fx->size() && p < 3; ++p) {
                     auto pv = fx->getReference(p);
                     if (!pv.isObject())
+                        continue;
+                    const juce::String rawPath = pv.getProperty("path", "").toString();
+                    if (rawPath.isEmpty())
                         continue;
                     BuildEntry e;
                     e.pv = pv;
@@ -157,72 +159,185 @@ public:
                     e.label = juce::String(isFoh ? "FOH master " : "IEM master ") +
                               juce::String(p + 1);
                     e.name = entryName(pv);
-                    e.path = engine.normalizePath(
-                        pv.getProperty("path", "").toString());
+                    e.path = engine.normalizePath(rawPath);
                     entries.push_back(std::move(e));
                 }
             }
         };
-        collectMasterFx("fohFx", true, snap.fohChain);
-        collectMasterFx("iemFx", false, snap.iemChain);
+        collectMasterFx("fohFx", true);
+        collectMasterFx("iemFx", false);
 
-        // Round-robin the dispatch order by plugin path so consecutive builds
-        // are rarely the same plugin: Kontakt, Rhodes, Kontakt, B3, Kontakt...
+        // Partition into TWO non-overlapping phases to prevent cross-thread AB-BA
+        // deadlocks (Windows PE Loader Lock / vendor singleton mutex vs Win32 SendMessage):
+        //   Phase 1: STA Message-Thread plugins (NI Kontakt/Raum/Replika/Massive,
+        //            Spectrasonics, Toontrack, HALion) — built sequentially one at a
+        //            time with Win32 message-pump breathing room and ZERO concurrent
+        //            background LoadLibrary/SendMessage workers.
+        //   Phase 2: Off-thread plugins (UVI Workstation, Blue3, Hammond B-3X,
+        //            Jun-6 V, Roland XV-5080/ZENOLOGY, etc.) — built in parallel
+        //            (round-robin by path) while the message thread is 100% idle and
+        //            freely pumping messages (required by UVI Workstation).
+        std::vector<BuildEntry> msgThreadEntries;
+        std::vector<BuildEntry> offThreadEntries;
+        msgThreadEntries.reserve(entries.size());
+        offThreadEntries.reserve(entries.size());
+
+        for (auto &e : entries) {
+            if (Fanfare::pluginRequiresMessageThread(e.path))
+                msgThreadEntries.push_back(std::move(e));
+            else
+                offThreadEntries.push_back(std::move(e));
+        }
+
+        // Round-robin the off-thread dispatch order by plugin path
         {
             std::map<juce::String, std::deque<int>> byPath;
-            for (int idx = 0; idx < (int)entries.size(); ++idx) {
-                juce::String k = entries[idx].path.isEmpty()
+            for (int idx = 0; idx < (int)offThreadEntries.size(); ++idx) {
+                juce::String k = offThreadEntries[idx].path.isEmpty()
                                      ? "@none@" + juce::String(idx)
-                                     : entries[idx].path;
+                                     : offThreadEntries[idx].path;
                 byPath[k].push_back(idx);
             }
             std::vector<BuildEntry> ordered;
-            ordered.reserve(entries.size());
+            ordered.reserve(offThreadEntries.size());
             bool any = true;
             while (any) {
                 any = false;
                 for (auto &kv : byPath) {
                     if (!kv.second.empty()) {
-                        ordered.push_back(std::move(entries[kv.second.front()]));
+                        ordered.push_back(std::move(offThreadEntries[kv.second.front()]));
                         kv.second.pop_front();
                         any = true;
                     }
                 }
             }
-            entries.swap(ordered);
+            offThreadEntries.swap(ordered);
         }
 
-        logToFile("TRACE: RigBuilder dispatching " + juce::String((int)entries.size()) +
-                  " plugin build(s) in parallel (interleaved by path).");
+        const int totalEntries = (int)(msgThreadEntries.size() + offThreadEntries.size());
+        std::atomic<int> completedCount{0};
 
-        // --- Parallel dispatch: one worker per entry. Same-path entries line
-        // up on the per-path build gate inside buildOne/buildMaster; different
-        // paths run at the same time.
-        std::vector<std::thread> workers;
-        std::vector<std::unique_ptr<Result>> results(entries.size());
-        for (int idx = 0; idx < (int)entries.size(); ++idx) {
-            results[idx] = std::make_unique<Result>();
-            BuildEntry e = entries[idx]; // per-worker copy
-            Result *res = results[idx].get();
-            workers.emplace_back([&engine, &snap, e, res, isPreload,
-                                  onProgress, shouldAbort]() {
-                engine.applyBackgroundThreadTuning();
-                if (shouldAbort && shouldAbort())
-                    return;
-                if (onProgress)
-                    onProgress("Loading " + e.name + "...");
-                if (e.slotIdx >= 0)
-                    buildOne(engine, e.pv, e.key, snap.slotChains,
-                             snap.auxChains, e.slotIdx, e.chainIdx, e.label,
-                             *res, isPreload, shouldAbort);
-                else
-                    buildMaster(engine, e.pv, e.isFoh, e.masterIdx,
-                                e.isFoh ? snap.fohChain : snap.iemChain,
-                                e.label, *res, isPreload, shouldAbort);
-            });
+        logToFile("TRACE: RigBuilder two-phase dispatch: " +
+                  juce::String(totalEntries) + " plugin(s) total (" +
+                  juce::String((int)msgThreadEntries.size()) + " message-thread STA, " +
+                  juce::String((int)offThreadEntries.size()) + " off-thread worker).");
+
+        std::vector<std::unique_ptr<Result>> results;
+        results.reserve((size_t)totalEntries);
+
+        // --- PHASE 1: Sequential Message-Thread Builds ---
+        for (size_t i = 0; i < msgThreadEntries.size(); ++i) {
+            if (shouldAbort && shouldAbort())
+                break;
+            const auto &e = msgThreadEntries[i];
+            if (onProgress) {
+                onProgress("Loading [" + juce::String(completedCount.load() + 1) + "/" +
+                           juce::String(totalEntries) + "] " + e.name +
+                           " (" + e.label + ")...");
+            }
+            auto res = std::make_unique<Result>();
+            if (e.slotIdx >= 0)
+                buildOne(engine, e.pv, e.key, snap.slotChains, snap.auxChains,
+                         e.slotIdx, e.chainIdx, e.label, *res, isPreload, shouldAbort);
+            else
+                buildMaster(engine, e.pv, e.isFoh, e.masterIdx,
+                            e.isFoh ? snap.fohChain : snap.iemChain,
+                            e.label, *res, isPreload, shouldAbort);
+            results.push_back(std::move(res));
+            completedCount.fetch_add(1, std::memory_order_relaxed);
+            // Let the message loop paint LoadingOverlay & process pending Win32 messages
+            if (! (shouldAbort && shouldAbort()))
+                juce::Thread::sleep(20);
         }
-        for (auto &t : workers)
-            t.join();
+
+        // --- PHASE 2: Off-Thread Worker Builds (Message Thread Free & Pumping) ---
+        if (!offThreadEntries.empty() && !(shouldAbort && shouldAbort())) {
+            struct WorkerTrack {
+                juce::String name;
+                juce::String label;
+                std::atomic<bool> active{false};
+                std::atomic<bool> finished{false};
+                std::atomic<juce::int64> startMs{0};
+            };
+            std::vector<std::unique_ptr<WorkerTrack>> tracks(offThreadEntries.size());
+            std::vector<std::unique_ptr<Result>> offResults(offThreadEntries.size());
+            std::vector<std::thread> workers;
+            workers.reserve(offThreadEntries.size());
+
+            for (size_t idx = 0; idx < offThreadEntries.size(); ++idx) {
+                tracks[idx] = std::make_unique<WorkerTrack>();
+                tracks[idx]->name = offThreadEntries[idx].name;
+                tracks[idx]->label = offThreadEntries[idx].label;
+                offResults[idx] = std::make_unique<Result>();
+
+                BuildEntry e = offThreadEntries[idx];
+                Result *res = offResults[idx].get();
+                WorkerTrack *trk = tracks[idx].get();
+
+                workers.emplace_back([&engine, &snap, e, res, trk, &completedCount,
+                                      isPreload, shouldAbort]() {
+                    engine.applyBackgroundThreadTuning();
+                    if (shouldAbort && shouldAbort()) {
+                        trk->finished.store(true, std::memory_order_release);
+                        return;
+                    }
+                    trk->startMs.store(juce::Time::currentTimeMillis(), std::memory_order_relaxed);
+                    trk->active.store(true, std::memory_order_release);
+                    if (e.slotIdx >= 0)
+                        buildOne(engine, e.pv, e.key, snap.slotChains,
+                                 snap.auxChains, e.slotIdx, e.chainIdx, e.label,
+                                 *res, isPreload, shouldAbort);
+                    else
+                        buildMaster(engine, e.pv, e.isFoh, e.masterIdx,
+                                    e.isFoh ? snap.fohChain : snap.iemChain,
+                                    e.label, *res, isPreload, shouldAbort);
+                    trk->active.store(false, std::memory_order_release);
+                    completedCount.fetch_add(1, std::memory_order_relaxed);
+                    trk->finished.store(true, std::memory_order_release);
+                });
+            }
+
+            // Live progress & stall telemetry loop while off-thread workers run
+            for (;;) {
+                bool allDone = true;
+                juce::String activeDesc;
+                int activeCount = 0;
+                const juce::int64 nowMs = juce::Time::currentTimeMillis();
+                for (const auto &trk : tracks) {
+                    if (!trk->finished.load(std::memory_order_acquire)) {
+                        allDone = false;
+                        if (trk->active.load(std::memory_order_acquire)) {
+                            ++activeCount;
+                            if (activeCount <= 2) {
+                                if (activeDesc.isNotEmpty())
+                                    activeDesc += ", ";
+                                activeDesc += trk->name + " (" + trk->label + ")";
+                                const juce::int64 elapsedSec =
+                                    (nowMs - trk->startMs.load(std::memory_order_relaxed)) / 1000;
+                                if (elapsedSec >= 3)
+                                    activeDesc += " [" + juce::String(elapsedSec) + "s]";
+                            }
+                        }
+                    }
+                }
+                if (allDone)
+                    break;
+                if (onProgress && activeDesc.isNotEmpty()) {
+                    juce::String tail = (activeCount > 2)
+                        ? (" +" + juce::String(activeCount - 2) + " more")
+                        : juce::String();
+                    const int currentStep = juce::jmin(totalEntries, completedCount.load() + 1);
+                    onProgress("Loading [" + juce::String(currentStep) + "/" +
+                               juce::String(totalEntries) + "] " + activeDesc + tail);
+                }
+                juce::Thread::sleep(250);
+            }
+
+            for (auto &t : workers)
+                t.join();
+            for (auto &res : offResults)
+                results.push_back(std::move(res));
+        }
 
         // --- Merge the per-entry results
         for (auto &res : results) {
@@ -305,36 +420,12 @@ private:
             logToFile("WARNING: buildOne " + label + " skipped — this plugin path already stalled past its timeout this session (" + newPath + "). Fix the offending multi (e.g. missing samples in Kontakt) or restart to retry.");
             r.ok = false;
             r.error = label + ": skipped (plugin stalled earlier this session)";
-            r.failedEntries.push_back({key, pv});
+            r.failedEntries.push_back({key, pv, "stalled earlier this session"});
             engine.markStagedBuildFailed(key);
             return false;
         }
 
-        // Super 8 (NI) needs message-thread instantiation. Kontakt (NI) needs
-        // it for state restore: bulk background-thread setStateInformation on
-        // the 2nd+ instance in a process deadlocks reliably (Last Waltz rig,
-        // Oct 2026), while interactive message-thread loads of the same
-        // instances work. Restores are sub-second when they work.
-        // Replika XT (Arturia): instantiation hangs off-thread in bulk loads
-        // (Oct 7 — stalled the whole rig build on its first aux-return save).
-        // HALion 7 (Steinberg): off-thread instantiation is racy — hung once,
-        // built once (Oct 8) — and its worker AV'd when abandoned.
-        // Toontrack (EZkeys 2, Oct 10): instantiates off-thread but its
-        // engine reports "cannot initiate audio engine" — engine init needs
-        // the message thread (COM audio-endpoint probing).
-        bool requiresMessageThread =
-            newPath.containsIgnoreCase("Super 8") ||
-            newPath.containsIgnoreCase("Kontakt") ||
-            newPath.containsIgnoreCase("Replika") ||
-            newPath.containsIgnoreCase("HALion") ||
-            newPath.containsIgnoreCase("EZkeys") ||
-            newPath.containsIgnoreCase("EZdrummer") ||
-            newPath.containsIgnoreCase("EZbass") ||
-            newPath.containsIgnoreCase("Omnisphere") ||
-            newPath.containsIgnoreCase("Keyscape") ||
-            newPath.containsIgnoreCase("Trilian") ||
-            newPath.containsIgnoreCase("Stylus RMX") ||
-            newPath.containsIgnoreCase("Spectrasonics");
+        const bool requiresMessageThread = Fanfare::pluginRequiresMessageThread(newPath);
 
         std::unique_ptr<juce::AudioPluginInstance> inst;
         juce::String err;
@@ -349,7 +440,7 @@ private:
                 logToFile("WARNING: buildOne " + label + " skipped — previous build of " + newPath + " is still wedged.");
                 r.ok = false;
                 r.error = label + ": previous plugin build still wedged";
-                r.failedEntries.push_back({key, pv});
+                r.failedEntries.push_back({key, pv, "previous build still wedged"});
                 engine.markStagedBuildFailed(key);
                 return false;
             }
@@ -417,7 +508,7 @@ private:
                 logToFile("WARNING: buildOne " + label + " off-thread build stalled (60s) — poisoning path and skipping concurrent retry while worker is still inside plugin.");
                 r.ok = false;
                 r.error = label + ": off-thread build stalled (60s)";
-                r.failedEntries.push_back({key, pv});
+                r.failedEntries.push_back({key, pv, "off-thread build stalled (60s)"});
                 return false;
             }
 
@@ -440,7 +531,7 @@ private:
                     return false;
                 r.ok = false;
                 r.error = label + ": previous plugin build still wedged";
-                r.failedEntries.push_back({key, pv});
+                r.failedEntries.push_back({key, pv, "previous build still wedged"});
                 engine.markStagedBuildFailed(key);
                 return false;
             }
@@ -504,7 +595,7 @@ private:
                 logToFile("TRACE: buildOne timed out (60s) on message-thread build/retry: " + label);
                 r.ok = false;
                 r.error = label + ": build timed out (60s)";
-                r.failedEntries.push_back({key, pv});
+                r.failedEntries.push_back({key, pv, "build timed out (60s)"});
                 return false;
             }
 
@@ -513,7 +604,8 @@ private:
                 logToFile("TRACE: buildOne message-thread build/retry failed for " + label + ": " + ctx->err);
                 r.ok = false;
                 r.error = label + ": " + ctx->err;
-                r.failedEntries.push_back({key, pv});
+                const bool missingFile = !juce::File(pv.getProperty("path", "").toString()).exists();
+                r.failedEntries.push_back({key, pv, missingFile ? juce::String("not installed") : ctx->err});
                 return false;
             }
             inst = std::move(ctx->inst);
@@ -561,29 +653,12 @@ private:
             logToFile("WARNING: buildMaster " + label + " skipped — this plugin path already stalled past its timeout this session (" + newPath + ").");
             r.ok = false;
             r.error = label + ": skipped (plugin stalled earlier this session)";
-            r.failedEntries.push_back({key, pv});
+            r.failedEntries.push_back({key, pv, "stalled earlier this session"});
             engine.markStagedBuildFailed(key);
             return false;
         }
 
-        // Same rule as buildOne: Super 8 needs a message-thread build, and
-        // Kontakt state restores deadlock off-thread on the 2nd+ instance.
-        // Replika XT instantiation hangs off-thread in bulk loads (Oct 7).
-        // HALion 7 off-thread instantiation is racy (Oct 8).
-        // Toontrack (EZkeys 2, Oct 10): engine needs a message-thread build.
-        bool requiresMessageThread =
-            newPath.containsIgnoreCase("Super 8") ||
-            newPath.containsIgnoreCase("Kontakt") ||
-            newPath.containsIgnoreCase("Replika") ||
-            newPath.containsIgnoreCase("HALion") ||
-            newPath.containsIgnoreCase("EZkeys") ||
-            newPath.containsIgnoreCase("EZdrummer") ||
-            newPath.containsIgnoreCase("EZbass") ||
-            newPath.containsIgnoreCase("Omnisphere") ||
-            newPath.containsIgnoreCase("Keyscape") ||
-            newPath.containsIgnoreCase("Trilian") ||
-            newPath.containsIgnoreCase("Stylus RMX") ||
-            newPath.containsIgnoreCase("Spectrasonics");
+        const bool requiresMessageThread = Fanfare::pluginRequiresMessageThread(newPath);
 
         std::unique_ptr<juce::AudioPluginInstance> inst;
         juce::String err;
@@ -596,7 +671,7 @@ private:
                 logToFile("WARNING: buildMaster " + label + " skipped — previous build of " + newPath + " is still wedged.");
                 r.ok = false;
                 r.error = label + ": previous plugin build still wedged";
-                r.failedEntries.push_back({key, pv});
+                r.failedEntries.push_back({key, pv, "previous build still wedged"});
                 engine.markStagedBuildFailed(key);
                 return false;
             }
@@ -664,7 +739,7 @@ private:
                 logToFile("WARNING: buildMaster " + label + " off-thread build stalled (60s) — poisoning path and skipping concurrent retry while worker is still inside plugin.");
                 r.ok = false;
                 r.error = label + ": off-thread build stalled (60s)";
-                r.failedEntries.push_back({key, pv});
+                r.failedEntries.push_back({key, pv, "off-thread build stalled (60s)"});
                 return false;
             }
 
@@ -687,7 +762,7 @@ private:
                     return false;
                 r.ok = false;
                 r.error = label + ": previous plugin build still wedged";
-                r.failedEntries.push_back({key, pv});
+                r.failedEntries.push_back({key, pv, "previous build still wedged"});
                 engine.markStagedBuildFailed(key);
                 return false;
             }
@@ -751,7 +826,7 @@ private:
                 logToFile("TRACE: buildMaster timed out (60s) on message-thread build/retry: " + label);
                 r.ok = false;
                 r.error = label + ": build timed out (60s)";
-                r.failedEntries.push_back({key, pv});
+                r.failedEntries.push_back({key, pv, "build timed out (60s)"});
                 return false;
             }
 
@@ -760,7 +835,7 @@ private:
                 logToFile("TRACE: buildMaster message-thread build/retry failed for " + label + ": " + ctx->err);
                 r.ok = false;
                 r.error = label + ": " + ctx->err;
-                r.failedEntries.push_back({key, pv});
+                r.failedEntries.push_back({key, pv, ctx->err.isEmpty() ? "load failed" : ctx->err});
                 return false;
             }
             inst = std::move(ctx->inst);

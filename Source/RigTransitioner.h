@@ -47,6 +47,11 @@ public:
 
     bool isBusy() const { return isThreadRunning(); }
 
+    /** Non-blocking cancel request safe to call from the message thread UI. */
+    void requestCancel() {
+        signalThreadShouldExit();
+    }
+
     /** Begin an async transition to a rig file. Call from the message thread. */
     void transitionToFile(const juce::File &file, Callbacks cbs) {
         jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
@@ -184,6 +189,7 @@ public:
 
         if (threadShouldExit() || !st->alive->load(std::memory_order_acquire)) {
             logToFile("TRACE: RigTransitioner exit requested before apply.");
+            eng.clearStagingCache();
             postComplete(st, false, "Cancelled", 0, {});
             return;
         }

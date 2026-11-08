@@ -383,6 +383,8 @@ void LibraryList::listBoxItemClicked(int row, const juce::MouseEvent &e) {
     menu.addSeparator();
 
     if (kind == Kind::Setups) {
+      menu.addItem(8, "Diagnose & repair (Rig Doctor)...");
+      menu.addSeparator();
       bool isCurrentlyLearning = (learningFile == item.file);
       if (isCurrentlyLearning) {
         menu.addItem(3, "Cancel Learn");
@@ -448,6 +450,9 @@ void LibraryList::listBoxItemClicked(int row, const juce::MouseEvent &e) {
           if (safeThis->kind != Kind::Strips && safeThis->onDoubleClicked)
             safeThis->onDoubleClicked(restored);
         });
+      } else if (result == 8) {
+        if (safeThis->onDiagnoseRequested)
+          safeThis->onDiagnoseRequested(file);
       }
     });
   }
@@ -515,6 +520,10 @@ LibraryPanel::LibraryPanel() {
   setupsList->onDoubleClicked = [this](const juce::File &f) {
     if (onSetupDoubleClicked)
       onSetupDoubleClicked(f);
+  };
+  setupsList->onDiagnoseRequested = [this](const juce::File &f) {
+    if (onDiagnoseSetup)
+      onDiagnoseSetup(f);
   };
   addChildComponent(setupsList.get());
 

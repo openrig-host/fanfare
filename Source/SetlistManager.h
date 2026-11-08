@@ -182,6 +182,24 @@ public:
         return preloaderThread ? preloaderThread->getSetupFile().getFileNameWithoutExtension() : "";
     }
 
+    // Ensure background preloading never races an active rig load, and discard
+    // any cached preload if the user is loading a different file than what was
+    // preloaded.
+    void prepareForRigLoad(const juce::File& targetFile) {
+        if (!preloaderThread)
+            return;
+        const bool exactMatchReady =
+            !preloaderThread->isPreloading() &&
+            preloaderThread->getIsPreloaded() &&
+            targetFile != juce::File{} &&
+            preloaderThread->getSetupFile() == targetFile;
+        if (!exactMatchReady) {
+            preloaderThread->stopPreloading();
+            if (engine != nullptr)
+                engine->clearPreloadedCache();
+        }
+    }
+
     const juce::Array<juce::File>& getSetups() const { return setups; }
     juce::Array<juce::File> getSetupsSnapshot() const {
         const juce::ScopedLock sl(setupsLock);

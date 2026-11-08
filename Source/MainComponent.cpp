@@ -200,6 +200,9 @@ MainComponent::MainComponent() {
   libraryPanel->onSetupDoubleClicked = [this](const juce::File &file) {
     loadRigFromFile(file);
   };
+  libraryPanel->onDiagnoseSetup = [this](const juce::File &file) {
+    showRigDoctorModal(file);
+  };
   libraryPanel->onSetDoubleClicked = [this](const juce::File &file) {
     loadSetFile(file);
   };
@@ -1859,6 +1862,9 @@ void MainComponent::resized() {
     setupBuilderOverlay->centreWithSize(400, 480);
   if (resourceInspectorOverlay)
     resourceInspectorOverlay->centreWithSize(740, 520);
+  if (rigDoctorOverlay)
+    rigDoctorOverlay->centreWithSize(juce::jmin(getWidth() - 28, 920),
+                                     juce::jmin(getHeight() - 28, 620));
   if (engineTuningModal)
     engineTuningModal->centreWithSize(juce::jmin(getWidth() - 32, 640), juce::jmin(getHeight() - 32, 560));
   if (configOverlay)

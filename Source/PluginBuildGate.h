@@ -92,5 +92,50 @@ inline void poisonPath(const juce::String &path) {
     buildGateCv().notify_all();
 }
 
+inline std::set<juce::String> getPoisonedPaths() {
+    std::lock_guard<std::mutex> lk(buildGateMutex());
+    return poisonedBuildPaths();
+}
+
+inline void clearPoisonedPaths() {
+    {
+        std::lock_guard<std::mutex> lk(buildGateMutex());
+        poisonedBuildPaths().clear();
+    }
+    buildGateCv().notify_all();
+}
+
+// Centralized thread-affinity classification for VST3 instantiation + state restore.
+// Plugins using Native Instruments' Qt/QML/HostIntegration runtime (Kontakt, Super 8,
+// Replika XT, Raum, Massive, Solid series, etc.), Spectrasonics, Toontrack, and
+// Steinberg HALion require STA message-thread instantiation/restore and deadlock if
+// invoked on a COINIT_MULTITHREADED background worker.
+// Conversely, UVI Workstation requires an unblocked pumping message thread, so it
+// must run on a background worker while the message thread is idle.
+inline bool pluginRequiresMessageThread(const juce::String &path) {
+    if (path.isEmpty())
+        return false;
+    static const char *const kMessageThreadTokens[] = {
+        // Native Instruments instruments & QML/Qt FX shell
+        "Kontakt", "Super 8", "Replika", "Raum", "Massive", "Komplete",
+        "Guitar Rig", "FM8", "Absynth", "Reaktor", "Battery",
+        "Solid Bus", "Solid Dynamics", "Solid EQ", "Supercharger",
+        "Phasis", "Flair", "Choral", "Bite", "Dirt", "Freak",
+        "Driver", "Transient Master", "VC 2A", "VC 76", "VC 160",
+        "RC 24", "RC 48", "Enhanced EQ", "Passive EQ", "Vari Comp",
+        // Spectrasonics
+        "Omnisphere", "Keyscape", "Trilian", "Stylus RMX", "Spectrasonics",
+        // Toontrack
+        "EZkeys", "EZdrummer", "EZbass", "Superior Drummer",
+        // Steinberg
+        "HALion"
+    };
+    for (const char *token : kMessageThreadTokens) {
+        if (path.containsIgnoreCase(token))
+            return true;
+    }
+    return false;
+}
+
 } // namespace Fanfare
 

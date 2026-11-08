@@ -231,9 +231,17 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
   }
 
   closeAllPluginWindows();
+  Fanfare::SetlistManager::getInstance().prepareForRigLoad(file);
   SaveHistory::snapshotBeforeLoadAsync(file);
   showLoadingOverlay("SWITCHING SONG",
                      "Loading " + file.getFileNameWithoutExtension() + "...");
+  if (loadingOverlay) {
+    juce::Component::SafePointer<MainComponent> cancelSafeThis(this);
+    loadingOverlay->setOnCancel([cancelSafeThis]() {
+      if (cancelSafeThis != nullptr && cancelSafeThis->transitioner)
+        cancelSafeThis->transitioner->requestCancel();
+    });
+  }
 
   int highlight = buttonIndexForHighlight;
 
@@ -302,11 +310,26 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
                     sm.triggerPreloadOfNext();
                 } else {
                     // Rollback-by-construction: current rig is untouched.
-                    juce::AlertWindow::showMessageBoxAsync(
-                        juce::MessageBoxIconType::WarningIcon, "Song Load Failed",
-                        message + "\n\nThe current song is unchanged.");
-                    LOG_ERROR("Failed to load rig: " + message + " file: " +
-                              fileName);
+                    if (message == "Cancelled") {
+                        safeThis->midiMonitorLabel.setText(
+                            "SONG: Switch cancelled (current song unchanged)",
+                            juce::dontSendNotification);
+                        LOG_INFO("Rig transition cancelled by user for: " + fileName);
+                    } else {
+                        juce::AlertWindow::showAsync(
+                            juce::MessageBoxOptions()
+                                .withIconType(juce::MessageBoxIconType::WarningIcon)
+                                .withTitle("Song Load Failed")
+                                .withMessage(message + "\n\nThe current song is unchanged. Open Rig Doctor to diagnose and repair this setup?")
+                                .withButton("Open Rig Doctor")
+                                .withButton("Close"),
+                            [safeThis, file](int result) {
+                                if (result == 1 && safeThis != nullptr)
+                                    safeThis->showRigDoctorModal(file);
+                            });
+                        LOG_ERROR("Failed to load rig: " + message + " file: " +
+                                  fileName);
+                    }
                 }
             }
         });
