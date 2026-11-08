@@ -332,3 +332,35 @@ Batch 1 of the section 2 order (items 1-3) is implemented and Release-build veri
 - **Build result**: `MSBuild build/Fanfare.vcxproj -p:Configuration=Release` links clean; `build/Fanfare_artefacts/Release/Fanfare.exe` produced (deployed to workspace root by the post-build step). No errors, no new warnings in the touched TUs.
 
 Not done yet (next batches): items 4-5 (per-strip widths, empty-slot collapse), 6 (sidebar), 7 (F11 stage mode + full key map), 8 (master column), 9 (inspector), 10 (tablet), 11 (sweeps), 12 (cloud mirror).
+
+---
+
+## 7. Mechanical file split (8 Nov 2026, Mistral - executing the Argon plan)
+
+The two monoliths were split mechanically: same classes, same members, same
+lifetimes - only method *definitions* moved between translation units.
+
+- `MainComponent.cpp` 4,783 -> 2,171 lines, plus four new TUs:
+  `MainComponent_Setup.cpp` (1,195: the setup* constructors-called methods),
+  `MainComponent_Menus.cpp` (665: menu bar, keyPressed, dialogs, overlays),
+  `MainComponent_Windows.cpp` (254: plugin window lifecycle, master plugin menu),
+  `MainComponent_RigOps.cpp` (552: song/scene/set/queue load-save-recall).
+  `PluginWindow` and the `createGearImage` helper moved to a new
+  `MainComponentInternal.h` shared by all five TUs (anon-namespace copies per TU).
+- `FanfareEngine.h` 4,190 -> 1,292 lines; 62 cold method bodies (scene
+  management, rig import/export, plugin build/load, DSP worker lifecycle,
+  MIDI-out) moved to a new `FanfareEngine.cpp` (3,266 lines). The audio hot
+  path `processAudio` and all small inline getters/templates stayed in the
+  header, so audio-thread inlining is unchanged. Out-of-line definitions got
+  `FanfareEngine::` qualifiers, `static` stripped, default arguments stripped
+  (they stay on the header declarations), and nested-type return types
+  qualified (`FanfareEngine::PluginPathSnapshot`).
+- Build system: the five new TUs added to `CMakeLists.txt` `target_sources` and
+  to `Fanfare.jucer` (Projucer stays in sync).
+- Also removed the `POST_BUILD` "Checking for Google Drive deployment folder"
+  probe (`E:\My Drive\...`); the post-build step now only copies `Fanfare.exe`
+  to the workspace root.
+- **Verified**: full Release MSBuild links clean
+  (`build/Fanfare_artefacts/Release/Fanfare.exe`), 0 errors; incremental
+  rebuild after touching only `FanfareEngine.cpp` relinks with no errors.
+  Editing `FanfareEngine.cpp` now recompiles 1 TU instead of ~12.

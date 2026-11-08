@@ -25,6 +25,10 @@ juce_add_gui_app(Fanfare
 target_sources(Fanfare PRIVATE
     Source/Main.cpp
     Source/MainComponent.cpp
+    Source/MainComponent_Setup.cpp
+    Source/MainComponent_Menus.cpp
+    Source/MainComponent_Windows.cpp
+    Source/MainComponent_RigOps.cpp
     Source/RackSlotComponent.cpp
     Source/BoutiqueLookAndFeel.cpp
     Source/ConfigModalOverlay.cpp
@@ -35,6 +39,7 @@ target_sources(Fanfare PRIVATE
     Source/RigBuilder.cpp
     Source/RigTransitioner.cpp
     Source/AssetLoader.cpp
+    Source/FanfareEngine.cpp
     Source/Web/OpenRigWebServer.cpp
     Source/Web/StageHotspotController.cpp
     Source/Web/StageRemoteModalOverlay.cpp
@@ -84,12 +89,8 @@ if(WIN32)
         target_link_options(Fanfare PRIVATE $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF>)
     endif()
 
-    # Deploy latest binary to workspace root and Google Drive shared folder if present
     add_custom_command(TARGET Fanfare POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Fanfare>" "${CMAKE_CURRENT_SOURCE_DIR}/Fanfare.exe"
-        COMMAND ${CMAKE_COMMAND} -E echo "Checking for Google Drive deployment folder..."
-        COMMAND cmd /c "if exist \"E:\\My Drive\\Fanfare - Latest versions\" (copy /Y \"$<TARGET_FILE:Fanfare>\" \"E:\\My Drive\\Fanfare - Latest versions\\Fanfare.exe\")"
-        COMMENT "Deploying latest Fanfare.exe to workspace root and E:/My Drive/Fanfare - Latest versions"
     )
 endif()
 

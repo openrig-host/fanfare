@@ -8,6 +8,8 @@
     <GROUP id="{7F03F339-D8EE-9CEA-49B0-ACBF8ABA11C0}" name="Source">
       <FILE id="engineH" name="FanfareEngine.h" compile="0" resource="0"
             file="Source/FanfareEngine.h"/>
+      <FILE id="engineCpp" name="FanfareEngine.cpp" compile="1" resource="0"
+            file="Source/FanfareEngine.cpp"/>
       <FILE id="rackSlotH" name="RackSlot.h" compile="0" resource="0" file="Source/RackSlot.h"/>
       <FILE id="sceneH" name="Scene.h" compile="0" resource="0" file="Source/Scene.h"/>
       <FILE id="rackSlotCompH" name="RackSlotComponent.h" compile="0" resource="0"
@@ -16,6 +18,16 @@
       <FILE id="y5Bcq1" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
       <FILE id="Rl5RHc" name="MainComponent.cpp" compile="1" resource="0"
             file="Source/MainComponent.cpp"/>
+      <FILE id="mcSetup1" name="MainComponent_Setup.cpp" compile="1" resource="0"
+            file="Source/MainComponent_Setup.cpp"/>
+      <FILE id="mcMenus1" name="MainComponent_Menus.cpp" compile="1" resource="0"
+            file="Source/MainComponent_Menus.cpp"/>
+      <FILE id="mcWindow" name="MainComponent_Windows.cpp" compile="1" resource="0"
+            file="Source/MainComponent_Windows.cpp"/>
+      <FILE id="mcRigOps" name="MainComponent_RigOps.cpp" compile="1" resource="0"
+            file="Source/MainComponent_RigOps.cpp"/>
+      <FILE id="mcIntern" name="MainComponentInternal.h" compile="0" resource="0"
+            file="Source/MainComponentInternal.h"/>
       <FILE id="assetLoaderH" name="AssetLoader.h" compile="0" resource="0" file="Source/AssetLoader.h"/>
       <FILE id="assetLoaderCpp" name="AssetLoader.cpp" compile="1" resource="0" file="Source/AssetLoader.cpp"/>
       <FILE id="boutiqueLafH" name="BoutiqueLookAndFeel.h" compile="0" resource="0" file="Source/BoutiqueLookAndFeel.h"/>
