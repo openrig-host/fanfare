@@ -44,6 +44,18 @@ inline void drawBrandBadge(juce::Graphics& g, juce::Rectangle<float> box) {
     }
 }
 
+inline const juce::Image& getAppIconImage() {
+    static const juce::Image icon = []() {
+        constexpr int kSize = 256;
+        juce::Image img(juce::Image::ARGB, kSize, kSize, true);
+        juce::Graphics g(img);
+        g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+        drawBrandBadge(g, juce::Rectangle<float>(4.0f, 4.0f, kSize - 8.0f, kSize - 8.0f));
+        return img;
+    }();
+    return icon;
+}
+
 //==============================================================================
 // Borderless Studio splash screen with synchronous pre-loop painting, sleek
 // #FFA02F progress bar, Fanfare f-clef emblem badge, and bespoke stage-keyboard
@@ -68,6 +80,8 @@ public:
 
         addToDesktop(juce::ComponentPeer::windowIsTemporary |
                      juce::ComponentPeer::windowHasDropShadow);
+        if (auto* peer = getPeer())
+            peer->setIcon(getAppIconImage());
         setAlwaysOnTop(true);
         setVisible(true);
         toFront(false);

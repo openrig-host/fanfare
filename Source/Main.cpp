@@ -103,6 +103,7 @@ public:
                   juce::ResizableWindow::backgroundColourId),
               DocumentWindow::allButtons) {
       setUsingNativeTitleBar(true);
+      setIcon(Fanfare::getAppIconImage());
       setContentOwned(new MainComponent(), true);
 
 #if JUCE_IOS || JUCE_ANDROID
@@ -153,6 +154,8 @@ public:
 #endif
 
       setVisible(true);
+      if (auto *peer = getPeer())
+        peer->setIcon(Fanfare::getAppIconImage());
 
 #if !(JUCE_IOS || JUCE_ANDROID)
       if (wantMaximised) {

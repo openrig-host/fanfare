@@ -18,6 +18,7 @@ juce_add_gui_app(Fanfare
     COMPANY_NAME    "Fanfare"
     BUNDLE_ID       "com.fanfare.app"
     ICON_BIG        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Resources/Fanfare_Icon.png"
+    ICON_SMALL      "${CMAKE_CURRENT_SOURCE_DIR}/Source/Resources/Fanfare_Icon.png"
 )
 
 # All compilation units (must match the Projucer source list).
