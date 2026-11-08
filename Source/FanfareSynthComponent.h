@@ -292,7 +292,8 @@ private:
 // played without a MIDI controller. Mouse click/drag works too. Notes go to
 // the processor via injectNote(); pressed keys are highlighted.
 // ==============================================================================
-class OnscreenKeyboard : public juce::Component {
+class OnscreenKeyboard : public juce::Component,
+                       private juce::Timer {
 public:
   explicit OnscreenKeyboard(FanfareSynthProcessor &p) : proc(p) {
     setWantsKeyboardFocus(true);
@@ -327,6 +328,10 @@ public:
       proc.allNotesOff();
     };
     addAndMakeVisible(panicBtn);
+
+    // Poll held keys independently of keyboard focus: key-ups must never be
+    // missed just because the user clicked a knob (which moves focus)
+    startTimerHz(15);
   }
 
   void shiftOctave(int semis) {
@@ -398,7 +403,10 @@ public:
     octDownBtn.setBounds(b.removeFromRight(44).removeFromTop(18).reduced(1));
   }
 
-  bool keyPressed(const juce::KeyPress &key) override {
+  // Called from the panel's bubbling key handlers AND our own overrides
+  // (whichever component holds keyboard focus) — the keyHeldByCode guard
+  // makes double delivery harmless.
+  bool handleKeyPressed(const juce::KeyPress &key) {
     if (key.isKeyCode(juce::KeyPress::leftKey)) {
       shiftOctave(-12);
       return true;
@@ -422,7 +430,7 @@ public:
     return false;
   }
 
-  bool keyStateChanged(bool /*isKeyDown*/) override {
+  bool handleKeyStateChange() {
     // Poll every mapped key: self-heals missed key-ups after focus switches
     for (auto &km : keyMap) {
       const bool down = juce::KeyPress::isKeyCurrentlyDown(km.first);
@@ -442,6 +450,14 @@ public:
   }
 
   void focusLost(juce::Component::FocusChangeType) override { releaseAll(); }
+
+  bool keyPressed(const juce::KeyPress &key) override {
+    return handleKeyPressed(key);
+  }
+  bool keyStateChanged(bool /*isKeyDown*/) override {
+    return handleKeyStateChange();
+  }
+  void timerCallback() override { handleKeyStateChange(); }
 
   // Public escape hatch for the owner's destructor (releaseAll is private)
   void releaseAllNotes() { releaseAll(); }
@@ -664,6 +680,15 @@ public:
   void visibilityChanged() override {
     if (isVisible())
       keyboard.grabKeyboardFocus();
+  }
+
+  // Keys bubble up from whichever child holds focus, so QWERTY playing keeps
+  // working after the user has clicked knobs, sliders or the preset box
+  bool keyPressed(const juce::KeyPress &key) override {
+    return keyboard.handleKeyPressed(key);
+  }
+  bool keyStateChanged(bool /*isKeyDown*/) override {
+    return keyboard.handleKeyStateChange();
   }
 
   // ===== Layout ===============================================================
