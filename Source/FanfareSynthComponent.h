@@ -651,6 +651,8 @@ public:
                         ThemeManager::get(Theme::Role::textFaint));
     hintLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(hintLabel);
+
+    addAndMakeVisible(keyboard);
   }
 
   ~FanfareSynthComponent() override {
