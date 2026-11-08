@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <JUCERPROJECT id="y15uHa" name="Fanfare" projectType="guiapp" useAppConfig="1"
-              version="1.50"
+              version="1.51"
               addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" bundleIdentifier="com.fanfare.app"
               iconBig="Source/Resources/Fanfare_Icon.png" iconSmall="Source/Resources/Fanfare_Icon.png">
   <MAINGROUP id="kDqy99" name="Fanfare">

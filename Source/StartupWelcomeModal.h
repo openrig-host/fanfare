@@ -493,7 +493,7 @@ private:
              "Name your keyboard's physical knobs, drawbars, and pedals once - Fanfare labels those CCs everywhere and applies them in one click."},
             {"Automatic Save Version History",
              "Every saved song, strip, and queue map retains timestamped snapshots you can inspect or restore from right-click -> Version history."},
-            {"Stage-hardened v1.41 audio engine",
+            {"Stage-hardened v1.51 audio engine",
              "Parallel VST3 rig loading, hybrid P-core DSP isolation, automatic USB audio/MIDI hotplug recovery, and live thermal monitoring."},
         };
 

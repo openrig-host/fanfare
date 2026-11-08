@@ -57,7 +57,9 @@ It's not a DAW. It's an instrument.
 
 ---
 
-## What's New in v1.50: The Studio Workspace
+## What's New in v1.51: The Studio Workspace
+
+- **Embedded 100% Offline Help Manual & MP3 Strip Indicator (`v1.51`).** All `Help` buttons work standalone from any directory (even a single `Fanfare.exe` on your Desktop with zero internet or companion folders) via built-in embedded assets, channel strips with loaded MP3 playlists display a dedicated clickable **`MP3`** badge button (never disguised as empty), and the Web Remote API, lock-free MIDI learn routing, and scene serialization are hardened end-to-end.
 
 - **Studio Default Theme, Scarlett & 5 Studio Palettes (`View → Theme`).** Ultra-clean flat charcoal workspace with embedded **Source Sans 3** UI typography and crisp **JetBrains Mono** numeric readouts across five flat Studio themes — **`Studio`** (warm `#FFA02F` amber default), **`Studio Scarlett`** (synth-editor black + crimson red), **`Studio Sapphire`** (midnight slate + ice blue), **`Studio Jade`** (dark graphite + phosphor mint), and **`Studio Daylight`** (flat light paper) — plus classic **`Front Panel Dark`** and outdoor **`Front Panel Bright`**.
 - **Vertical Ribbon Sidebar & Top Menu Bar.** A 40px icon rail switches the left drawer cleanly between **Songs**, **Strips**, **Setlist**, **Queue** (10 instant stage tiles), and a live **MIDI Monitor**, paired with a slim `File · View · Rig · Tools · Help` menu bar, centered `< Song Name >` switcher pill, live stage clock, and bottom monospace telemetry footer.
