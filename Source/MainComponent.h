@@ -238,6 +238,7 @@ private:
   juce::OwnedArray<Fanfare::SceneButtonComponent> sceneButtons;
   juce::StringArray sceneSetupFilePaths;
   void refreshSceneButtons();
+  void recallScene(int sceneIdx);
   void showSetupBuilderOverlay();
 
   // Collapsible library sidebar
@@ -343,6 +344,10 @@ private:
   juce::String auxLogoUserPath; // empty = embedded Last Waltz art
   juce::Label clockLabel{"clockLabel", ""};
   juce::Label preloadStatusLabel{"preloadStatusLabel", ""};
+  // Next-up capsule (top bar center) mirrors preloadStatusLabel; click = load next song
+  juce::Label nextUpLabel{"nextUpLabel", ""};
+  // Audio device / sample rate / buffer readout in the status bar
+  juce::Label audioDeviceLabel{"audioDeviceLabel", ""};
   juce::Rectangle<int> headerBounds;
   juce::Rectangle<int> stageHeaderBounds;
   juce::Rectangle<int> controlBarBounds;
@@ -358,6 +363,8 @@ private:
   Fanfare::ToolRail toolRail;
   Fanfare::QueueTilesPanel queueTilesPanel;
   juce::TextButton sceneMenuBtn{"..."};
+  juce::TextButton sceneOverflowBtn{">>"}; // lists scenes hidden by a narrow scene row
+  juce::Array<int> hiddenSceneIndices;     // filled by resized()
   int sidebarContext = 0; // ToolRail context index, -1 = sidebar closed
   void setupStudioShell();
   void setSidebarContext(int ctx);

@@ -85,31 +85,42 @@ void SceneButtonComponent::paintButton(juce::Graphics& g,
     const float radius = 3.0f;
     const bool hasSetupFile = assignedFile.existsAsFile();
 
-    juce::Colour topCol = isActive ? t.raised.interpolatedWith(t.accent, 0.14f) : t.faceTop;
-    juce::Colour botCol = isActive ? t.panelAlt.interpolatedWith(t.accent, 0.08f) : t.faceBot;
     juce::Colour borderCol = isActive ? t.accent : t.borderStrong;
-
-    if (shouldDrawButtonAsDown) {
-        topCol = t.pressTop;
-        botCol = t.pressBot;
-        bounds = bounds.translated(0.0f, 1.0f);
-    } else if (shouldDrawButtonAsHighlighted || isDragHover) {
-        topCol = topCol.interpolatedWith(t.text, 0.06f);
-        botCol = botCol.interpolatedWith(t.text, 0.04f);
-    }
-
-    if (isDragHover) {
+    if (isDragHover)
         borderCol = t.accent;
-    }
 
-    juce::ColourGradient grad(topCol, bounds.getX(), bounds.getY(),
-                              botCol, bounds.getX(), bounds.getBottom(), false);
-    g.setGradientFill(grad);
-    g.fillRoundedRectangle(bounds, radius);
+    if (ThemeManager::isStudio()) {
+        // Flat Studio path (nov8mistral.md 1.2): solid fill, 1 px border,
+        // no gradient face or bevel highlight.
+        juce::Colour face = isActive ? t.raised
+                          : (shouldDrawButtonAsHighlighted || isDragHover) ? t.panelAlt
+                          : t.panel;
+        if (shouldDrawButtonAsDown)
+            face = t.sunken;
+        g.setColour(face);
+        g.fillRoundedRectangle(bounds, radius);
+    } else {
+        juce::Colour topCol = isActive ? t.raised.interpolatedWith(t.accent, 0.14f) : t.faceTop;
+        juce::Colour botCol = isActive ? t.panelAlt.interpolatedWith(t.accent, 0.08f) : t.faceBot;
 
-    if (!shouldDrawButtonAsDown) {
-        g.setColour(t.bevelHi);
-        g.drawHorizontalLine((int)bounds.getY() + 1, bounds.getX() + 2.0f, bounds.getRight() - 2.0f);
+        if (shouldDrawButtonAsDown) {
+            topCol = t.pressTop;
+            botCol = t.pressBot;
+            bounds = bounds.translated(0.0f, 1.0f);
+        } else if (shouldDrawButtonAsHighlighted || isDragHover) {
+            topCol = topCol.interpolatedWith(t.text, 0.06f);
+            botCol = botCol.interpolatedWith(t.text, 0.04f);
+        }
+
+        juce::ColourGradient grad(topCol, bounds.getX(), bounds.getY(),
+                                  botCol, bounds.getX(), bounds.getBottom(), false);
+        g.setGradientFill(grad);
+        g.fillRoundedRectangle(bounds, radius);
+
+        if (!shouldDrawButtonAsDown) {
+            g.setColour(t.bevelHi);
+            g.drawHorizontalLine((int)bounds.getY() + 1, bounds.getX() + 2.0f, bounds.getRight() - 2.0f);
+        }
     }
 
     // Active scene gets a crisp 2px bottom accent bar (rather than a neon flood)

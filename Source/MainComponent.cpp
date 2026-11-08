@@ -1422,6 +1422,30 @@ void MainComponent::setupHeaderButtons() {
   addAndMakeVisible(preloadStatusLabel);
   preloadStatusLabel.setFont(BoutiqueLookAndFeel::condensedFont(12.5f, 0.04f));
   preloadStatusLabel.setJustificationType(juce::Justification::centredRight);
+  preloadStatusLabel.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+  preloadStatusLabel.setTooltip("Next song in setlist/queue - click to load it now");
+  preloadStatusLabel.addMouseListener(this, false);
+
+  // Next-up capsule for the empty center of the top bar (nov8mistral.md 1.1)
+  addAndMakeVisible(nextUpLabel);
+  nextUpLabel.setFont(BoutiqueLookAndFeel::condensedFont(13.0f, 0.04f));
+  nextUpLabel.setJustificationType(juce::Justification::centred);
+  nextUpLabel.setTooltip("Next song in setlist/queue - click to load it now");
+  nextUpLabel.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+  nextUpLabel.addMouseListener(this, false);
+
+  // Audio device / sample rate / buffer readout in the status bar (nov8mistral.md 1.6)
+  addAndMakeVisible(audioDeviceLabel);
+  audioDeviceLabel.setFont(BoutiqueLookAndFeel::monoFont(11.0f, true));
+  audioDeviceLabel.setJustificationType(juce::Justification::centredLeft);
+  audioDeviceLabel.setTooltip("Audio device, sample rate and buffer size - click for Audio & MIDI settings");
+  audioDeviceLabel.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+  audioDeviceLabel.addMouseListener(this, false);
+
+  midiMonitorLabel.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+  midiMonitorLabel.setTooltip("Click to open the MIDI monitor in the sidebar");
+  midiMonitorLabel.addMouseListener(this, false);
+
   updatePreloadStatus();
 }
 
@@ -1556,22 +1580,7 @@ void MainComponent::refreshSceneButtons() {
       refreshSceneButtons();
     };
 
-    btn->onClicked = [this, sceneIdx](int) {
-      if (sceneIdx >= 0 && sceneIdx < sceneSetupFilePaths.size()) {
-        juce::File f(sceneSetupFilePaths[sceneIdx]);
-        if (f.existsAsFile()) {
-          loadRigAsync(f);
-          return;
-        }
-      }
-      engine.saveCurrentStateToScene(engine.getCurrentSceneIndex());
-      engine.loadScene(sceneIdx);
-      for (int j = 0; j < sceneButtons.size(); ++j)
-        sceneButtons[j]->setActive(j == sceneIdx);
-      if (webServer)
-        webServer->notifySceneChanged(sceneIdx, engine.getSceneName(sceneIdx));
-      updateStripCollapseStates();
-    };
+    btn->onClicked = [this, sceneIdx](int) { recallScene(sceneIdx); };
 
     btn->onRightClicked = [this, sceneIdx](int, const juce::MouseEvent&) {
       juce::PopupMenu menu;
@@ -1655,6 +1664,26 @@ void MainComponent::refreshSceneButtons() {
   }
   updateStripCollapseStates();
   resized();
+}
+
+// Shared scene recall path: assigned song file loads asynchronously, otherwise
+// the engine scene snapshot is restored. Used by scene buttons, the overflow
+// menu and the 1-9 hotkeys (nov8mistral.md 1.2).
+void MainComponent::recallScene(int sceneIdx) {
+  if (sceneIdx >= 0 && sceneIdx < sceneSetupFilePaths.size()) {
+    juce::File f(sceneSetupFilePaths[sceneIdx]);
+    if (f.existsAsFile()) {
+      loadRigAsync(f);
+      return;
+    }
+  }
+  engine.saveCurrentStateToScene(engine.getCurrentSceneIndex());
+  engine.loadScene(sceneIdx);
+  for (int j = 0; j < sceneButtons.size(); ++j)
+    sceneButtons[j]->setActive(j == sceneIdx);
+  if (webServer)
+    webServer->notifySceneChanged(sceneIdx, engine.getSceneName(sceneIdx));
+  updateStripCollapseStates();
 }
 
 void MainComponent::setupMasterSection() {
@@ -2953,23 +2982,35 @@ void MainComponent::updatePreloadStatus() {
 
   if (preloadTarget.existsAsFile()) {
     preloadStatusLabel.setVisible(true);
+    nextUpLabel.setVisible(true);
     juce::String nextName = preloadTarget.getFileNameWithoutExtension();
+    juce::String capsuleText;
+    juce::Colour stateCol;
     if (sm.isPreloading()) {
       preloadStatusLabel.setText("Preloading next: " + nextName + "...", juce::dontSendNotification);
-      preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
+      capsuleText = "Next: " + nextName + " (loading...)";
+      stateCol = ThemeManager::get(Theme::Role::warn);
     } else if (sm.isPreloaded()) {
       preloadStatusLabel.setText("Next Ready: " + nextName, juce::dontSendNotification);
-      preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::ok));
+      capsuleText = "Next ready: " + nextName;
+      stateCol = ThemeManager::get(Theme::Role::ok);
     } else if (sm.isPreloadFailed()) {
       preloadStatusLabel.setText("Preload Failed: " + nextName, juce::dontSendNotification);
-      preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::danger));
+      capsuleText = "Next failed: " + nextName;
+      stateCol = ThemeManager::get(Theme::Role::danger);
     } else {
       preloadStatusLabel.setText("Next: " + nextName + " (Not Preloaded)", juce::dontSendNotification);
-      preloadStatusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
+      capsuleText = "Next: " + nextName;
+      stateCol = ThemeManager::get(Theme::Role::textDim);
     }
+    preloadStatusLabel.setColour(juce::Label::textColourId, stateCol);
+    nextUpLabel.setText(capsuleText, juce::dontSendNotification);
+    nextUpLabel.setColour(juce::Label::textColourId, stateCol);
   } else {
     preloadStatusLabel.setText("", juce::dontSendNotification);
     preloadStatusLabel.setVisible(false);
+    nextUpLabel.setText("", juce::dontSendNotification);
+    nextUpLabel.setVisible(false);
   }
 }
 
@@ -3019,6 +3060,9 @@ void MainComponent::refreshThemeDependentStyles() {
                        (audioUnderrunCount.load() + engineStallCount.load() > 0) ? t.warn : t.ok);
   thermalLabel.setColour(juce::Label::textColourId, juce::Colours::white);
   clockLabel.setColour(juce::Label::textColourId, t.isStudio() ? t.textDim : t.accent);
+  nextUpLabel.setColour(juce::Label::textColourId, t.textDim);
+  audioDeviceLabel.setColour(juce::Label::textColourId, t.textDim);
+  preloadStatusLabel.setColour(juce::Label::textColourId, t.textDim);
   if (t.isStudio()) {
     cpuLabel.setColour(juce::Label::textColourId, t.textDim);
     midiMonitorLabel.setColour(juce::Label::textColourId, t.textDim);
@@ -3170,6 +3214,14 @@ void MainComponent::resized() {
   sh.removeFromLeft(4);
   nextSetlistBtn.setBounds(sh.removeFromLeft(30).reduced(0, 7));
 
+  // Next-up capsule occupies the remaining center of the top bar
+  if (nextUpLabel.isVisible()) {
+    const int capW = juce::jmin(320, sh.getWidth());
+    nextUpLabel.setBounds(sh.withSizeKeepingCentre(capW, 24).reduced(10, 0));
+  } else {
+    nextUpLabel.setBounds({});
+  }
+
   // Row 2: scene bar
   auto sceneRow = r.removeFromTop(32);
   sceneRowBounds = sceneRow;
@@ -3184,6 +3236,7 @@ void MainComponent::resized() {
     sr.removeFromRight(4);
     addSceneBtn.setBounds(sr.removeFromRight(74));
     sr.removeFromRight(8);
+    hiddenSceneIndices.clear();
     if (!sceneButtons.isEmpty()) {
       const int n = sceneButtons.size();
       const int minW = 56;
@@ -3192,6 +3245,7 @@ void MainComponent::resized() {
         if (sr.getWidth() < minW) {
           sceneButtons[i]->setVisible(false);
           sceneButtons[i]->setBounds({});
+          hiddenSceneIndices.add(i);
           continue;
         }
         sceneButtons[i]->setVisible(true);
@@ -3200,13 +3254,23 @@ void MainComponent::resized() {
         sceneButtons[i]->setBounds(sr.removeFromLeft(w).reduced(2, 0));
       }
     }
+    // Scenes that did not fit go into the overflow button instead of vanishing
+    if (hiddenSceneIndices.size() > 0) {
+      sceneOverflowBtn.setVisible(true);
+      sceneOverflowBtn.setBounds(sr.removeFromLeft(30).reduced(2, 0));
+    } else {
+      sceneOverflowBtn.setVisible(false);
+      sceneOverflowBtn.setBounds({});
+    }
   }
 
   // Bottom status bar
   statusBarBounds = r.removeFromBottom(22);
   {
     auto sb = statusBarBounds.reduced(8, 0);
-    midiMonitorLabel.setBounds(sb.removeFromLeft(juce::jmin(200, sb.getWidth() / 5)));
+    midiMonitorLabel.setBounds(sb.removeFromLeft(juce::jmin(150, sb.getWidth() / 6)));
+    sb.removeFromLeft(6);
+    audioDeviceLabel.setBounds(sb.removeFromLeft(juce::jmin(210, sb.getWidth() / 5)));
     const bool showThermal = thermalLabel.isVisible();
     if (showThermal)
       thermalLabel.setBounds(sb.removeFromRight(110).reduced(0, 2));
@@ -3655,6 +3719,11 @@ void MainComponent::timerCallback() {
   thermalMonitor.setAudioCpuLoadPercent(cpu);
   cpuLabel.setText("CPU: " + juce::String(cpu, 1) + "%",
                    juce::dontSendNotification);
+  // Threshold colours (nov8mistral.md 1.6): amber > 70%, red > 90%
+  cpuLabel.setColour(juce::Label::textColourId,
+                     cpu > 90.0 ? ThemeManager::get(Theme::Role::danger)
+                                : cpu > 70.0 ? ThemeManager::get(Theme::Role::warn)
+                                             : ThemeManager::get(Theme::Role::textDim));
 
   static int memUpdateTicks = 19;
   if (++memUpdateTicks >= 20) {
@@ -3697,18 +3766,31 @@ void MainComponent::timerCallback() {
     double sr = dev->getCurrentSampleRate();
     int inL = dev->getInputLatencyInSamples();
     int outL = dev->getOutputLatencyInSamples();
+    const int buf = dev->getCurrentBufferSizeSamples();
     double ms = 0.0;
     if (sr > 0.0) {
       if (inL + outL > 0)
         ms = (inL + outL) / sr * 1000.0;
       else
-        ms = dev->getCurrentBufferSizeSamples() * 2.0 / sr * 1000.0;
+        ms = buf * 2.0 / sr * 1000.0;
     }
     latencyLabel.setText(inAudioRecoveryMode ? "LAT: RECONNECT..." : ("LAT: " + juce::String(ms, 1) + "ms"),
                          juce::dontSendNotification);
+    // LAT beyond one buffer period deserves a glance (nov8mistral.md 1.6)
+    const double bufferMs = (sr > 0.0) ? buf / sr * 1000.0 : 0.0;
+    latencyLabel.setColour(juce::Label::textColourId,
+                           (!inAudioRecoveryMode && bufferMs > 0.0 && ms > bufferMs)
+                               ? ThemeManager::get(Theme::Role::warn)
+                               : ThemeManager::get(Theme::Role::textDim));
+    audioDeviceLabel.setText(dev->getName() + " | " + juce::String(sr / 1000.0, 1) +
+                                 " kHz | " + juce::String(buf) + " smp",
+                             juce::dontSendNotification);
+    audioDeviceLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
   } else {
     latencyLabel.setText(inAudioRecoveryMode ? "LAT: RECONNECT..." : "LAT: --",
                          juce::dontSendNotification);
+    audioDeviceLabel.setText("audio: no device", juce::dontSendNotification);
+    audioDeviceLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::danger));
   }
 
   // Surface any audio underruns: callback-gap count + engine-side stalls,
@@ -4101,6 +4183,20 @@ void MainComponent::mouseDown(const juce::MouseEvent &e) {
     logFile.startAsProcess();
     return;
   }
+  if (e.originalComponent == &nextUpLabel || e.originalComponent == &preloadStatusLabel) {
+    if (nextSetlistBtn.onClick)
+      nextSetlistBtn.onClick();
+    return;
+  }
+  if (e.originalComponent == &midiMonitorLabel) {
+    setSidebarContext(sidebarContext == Fanfare::ToolRail::Midi ? -1 : Fanfare::ToolRail::Midi);
+    return;
+  }
+  if (e.originalComponent == &audioDeviceLabel) {
+    if (audioSettingsBtn.onClick)
+      audioSettingsBtn.onClick();
+    return;
+  }
   if (e.originalComponent == &thermalLabel) {
     const auto snap = thermalMonitor.getSnapshot();
     thermalMonitor.acknowledgeLatch();
@@ -4174,6 +4270,15 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
   else if (!key.getModifiers().isCommandDown() && !key.getModifiers().isAltDown() && (key.isKeyCode ('P') || key.isKeyCode ('p'))) {
     engine.triggerPanic();
     return true;
+  }
+  else if (!key.getModifiers().isCommandDown() && !key.getModifiers().isAltDown()) {
+    // Keys 1-9 recall scenes (nov8mistral.md 1.2). The TextEditor guard at the
+    // top of this handler keeps digits typed into search/rename fields safe.
+    const int digit = key.getKeyCode() - '0';
+    if (digit >= 1 && digit <= 9 && digit <= engine.getNumScenes()) {
+      recallScene(digit - 1);
+      return true;
+    }
   }
   return false;
 }
@@ -4336,6 +4441,28 @@ void MainComponent::setupStudioShell() {
   Fanfare::setButtonRole(sceneMenuBtn, Fanfare::ButtonRole::Subtle);
   sceneMenuBtn.setTooltip("Scene actions: save, rename, delete (right-click a scene for more)");
   sceneMenuBtn.onClick = [this] { showSceneMenu(); };
+
+  // Overflow button: lists scenes that no longer fit in the scene row
+  addAndMakeVisible(sceneOverflowBtn);
+  Fanfare::setButtonRole(sceneOverflowBtn, Fanfare::ButtonRole::Subtle);
+  sceneOverflowBtn.setTooltip("Scenes hidden by a narrow window - click to recall one");
+  sceneOverflowBtn.onClick = [this] {
+    juce::PopupMenu m;
+    m.addSectionHeader("More scenes");
+    for (int idx : hiddenSceneIndices) {
+      juce::String name = (idx >= 0 && idx < engine.getNumScenes()) ? engine.getSceneName(idx) : juce::String();
+      juce::File f(idx < sceneSetupFilePaths.size() ? sceneSetupFilePaths[idx] : juce::String());
+      if (f.existsAsFile())
+        name = f.getFileNameWithoutExtension();
+      m.addItem(idx + 1, juce::String(idx + 1) + "  " + name);
+    }
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&sceneOverflowBtn),
+                    [safeThis](int result) {
+      if (safeThis != nullptr && result > 0)
+        safeThis->recallScene(result - 1);
+    });
+  };
 
   panicBtn.setButtonText("Panic");
   panicBtn.setTooltip("Panic (P): silences all stuck notes and flushes audio buffers.");
