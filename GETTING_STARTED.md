@@ -15,7 +15,7 @@ Welcome to **Fanfare**! This guide walks you through your first 5 minutes with F
 
 ## 2. Initial Setup (Audio & MIDI)
 
-When Fanfare launches for the first time, click the **Settings** gear icon in the top header bar:
+When Fanfare launches, the **Welcome Screen** gives you quick actions for creating or opening songs and scanning VST3s (reopen it anytime via **`Help → Welcome screen...`**). To configure your hardware, open **`Rig → Audio & MIDI settings...`** from the top menu bar (or click the **Settings** gear icon at the bottom of the left rail):
 
 1. **Audio Settings (ASIO Recommended)**:
    - Select **ASIO** as your audio device type.
@@ -44,34 +44,33 @@ Click the **Settings** gear icon and open **ENGINE & CPU TUNING** to inspect or 
 
 Fanfare scans standard Windows VST3 directories (`C:\Program Files\Common Files\VST3`) to locate your installed instruments and effects:
 
-1. Click the **Settings** gear icon.
-2. Click **SCAN PLUGINS** to populate your local plugin registry.
+1. Open **`Rig → Scan for plugins`** from the menu bar (or click **Scan VST3 plug-ins...** on the Startup Welcome screen).
 
 ---
 
 ## 5. Build Your First Rig
 
 ### Step A: Load a VST3 Instrument into a Slot
-1. Click **[EMPTY]** on any channel strip slot.
-2. Pick a VST3 instrument from your list (for example, *Hammond B-3X*, *Kontakt 8*, *ZENOLOGY*, *DX7 V*, *Jun-6 V*).
-3. Click **E** next to the slot to open the plugin's floating editor window.
+1. Click **`+`** on any empty channel strip slot.
+2. Pick a VST3 instrument from your list (for example, *Hammond B-3X*, *Kontakt 8*, *ZENOLOGY*, *EZkeys 2*, *Jun-6 V*).
+3. Click **`E`** next to the slot to open the plugin's floating editor window.
 
-### Step B: Set Key Split / Note Range (**NR**)
-1. Click **NR** on the channel strip.
-2. Click **Learn Range**, then strike the lowest key and highest key on your controller to define the split zone.
+### Step B: Set Key Split / Note Range
+1. Click **`...`** at the bottom of the channel strip (or click the note range readout under the strip name) and choose **`Note range & transpose...`**.
+2. Strike the lowest key and highest key on your controller to define the split zone, then click **Done**.
 
-### Step C: Map Hardware Knobs & Buttons (**CC**)
-1. Click **CC** on the channel strip (or long-press **MUTE**, **FOH**, or **IEM** directly on the mixer).
-2. Click **Learn** on any parameter, toggle, or A/B instrument swap, then move a physical knob, fader, or button on your keyboard.
+### Step C: Map Hardware Knobs & Controller Profile (**`CC`**)
+1. Click **`CC`** at the bottom of the channel strip (or long-press **Mute**, **FOH**, or **IEM** directly on the mixer).
+2. Click **`Edit...`** (or **`Rig → Controller profile...`**) once to define your keyboard's physical CCs, then click **`Profile`** on any strip to apply your standard controller passthroughs in one click — or click **`Quick`** / **`Learn`** and move any VST control + hardware knob to bind them directly.
 
 ---
 
-## 6. Saving, Setlists & Stage Telemetry
+## 6. Saving, Setlists, Version History & Stage Telemetry
 
-- **Save Rig:** Click **SAVE** in the top bar. Fanfare writes files atomically with rotating `.bak` backups in `%APPDATA%\Fanfare\`.
-- **Stage Queue & Preloading:** Assign songs to the numbered setlist buttons. While you play the active song, Fanfare automatically preloads the next song in the background on non-audio cores.
-- **Panic Button:** Click the red **PANIC** button (or press `P`) to send All Notes Off and Sustain Off across every slot in the very next audio block.
-- **XRUNS Monitor:** The top telemetry bar displays live CPU, RAM, round-trip latency, and `XRUNS`. Click `XRUNS:` anytime to reset the counter to zero and open `audio_underrun_log.txt`.
+- **Save Song & Version History:** Press **`Ctrl+S`** (`File → Save song as...`) to save your Song, or click **`... → Save strip preset...`** to save a reusable `.orstrip` brick. Every save writes atomically and records a timestamped snapshot — right-click any Song, Set, or Strip in the left Library Sidebar and choose **`Version history...`** to restore any earlier version.
+- **Vertical Ribbon Sidebar & Preloading:** Use the left icon rail to switch between **Songs**, **Strips**, **Setlist**, **Queue** (10 instant stage tiles), and a live **MIDI Monitor**. While you play the active song, Fanfare automatically preloads the next song in the background on non-audio cores.
+- **Panic Button:** Click the red **`Panic`** button at the top-right (or press `P`) to send All Notes Off and Sustain Off across every slot in the very next audio block.
+- **Telemetry Footer:** The bottom bar displays live Song status, `CPU`, `RAM`, round-trip `LAT`, and `XRUNS` in crisp monospace type. Click `XRUNS:` anytime to reset the counter to zero and open `audio_underrun_log.txt`.
 
 ---
 

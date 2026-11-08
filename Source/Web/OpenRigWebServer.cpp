@@ -1177,25 +1177,31 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
     auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
 
     // 1. HUD Static Asset Directories FIRST (dev live-reload + packaged Web/static)
-    juce::Array<juce::File> hudStaticDirs;
-    hudStaticDirs.add(exeDir.getChildFile("Web/static"));
-    hudStaticDirs.add(exeDir.getChildFile("static"));
-    hudStaticDirs.add(exeDir.getChildFile("Source/Web/static"));
-    hudStaticDirs.add(exeDir.getParentDirectory().getChildFile("Web/static"));
-    hudStaticDirs.add(exeDir.getParentDirectory().getParentDirectory().getChildFile("Web/static"));
-    hudStaticDirs.add(exeDir.getParentDirectory().getParentDirectory().getParentDirectory().getParentDirectory().getChildFile("Source/Web/static"));
-    hudStaticDirs.add(juce::File::getCurrentWorkingDirectory().getChildFile("Source/Web/static"));
-    hudStaticDirs.add(juce::File("C:/davecore/Source/Web/static"));
-    hudStaticDirs.add(juce::File("Z:/davecore/Source/Web/static"));
+    // Skip manual.html and assets-readonly/* here so the Offline Stage Manual always
+    // resolves from docsDirs alongside all manual stylesheets & screenshots!
+    const bool isManualAsset = cleanPath.equalsIgnoreCase("/manual.html") ||
+                               cleanPath.startsWithIgnoreCase("/assets-readonly/");
+    if (!isManualAsset) {
+        juce::Array<juce::File> hudStaticDirs;
+        hudStaticDirs.add(exeDir.getChildFile("Web/static"));
+        hudStaticDirs.add(exeDir.getChildFile("static"));
+        hudStaticDirs.add(exeDir.getChildFile("Source/Web/static"));
+        hudStaticDirs.add(exeDir.getParentDirectory().getChildFile("Web/static"));
+        hudStaticDirs.add(exeDir.getParentDirectory().getParentDirectory().getChildFile("Web/static"));
+        hudStaticDirs.add(exeDir.getParentDirectory().getParentDirectory().getParentDirectory().getParentDirectory().getChildFile("Source/Web/static"));
+        hudStaticDirs.add(juce::File::getCurrentWorkingDirectory().getChildFile("Source/Web/static"));
+        hudStaticDirs.add(juce::File("Z:/davecore/Source/Web/static"));
+        hudStaticDirs.add(juce::File("C:/davecore/Source/Web/static"));
 
-    for (const auto& dir : hudStaticDirs) {
-        if (dir.isDirectory()) {
-            juce::File targetFile = dir.getChildFile(relFile);
-            if (targetFile.existsAsFile()) {
-                juce::MemoryBlock block;
-                if (targetFile.loadFileAsData(block)) {
-                    sendHttpDataResponse(socketHandle, 200, getMimeType(cleanPath), block.getData(), block.getSize());
-                    return true;
+        for (const auto& dir : hudStaticDirs) {
+            if (dir.isDirectory()) {
+                juce::File targetFile = dir.getChildFile(relFile);
+                if (targetFile.existsAsFile()) {
+                    juce::MemoryBlock block;
+                    if (targetFile.loadFileAsData(block)) {
+                        sendHttpDataResponse(socketHandle, 200, getMimeType(cleanPath), block.getData(), block.getSize());
+                        return true;
+                    }
                 }
             }
         }
@@ -1219,8 +1225,8 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
     docsDirs.add(exeDir);
     docsDirs.add(exeDir.getParentDirectory().getParentDirectory().getParentDirectory().getParentDirectory().getChildFile("docs"));
     docsDirs.add(juce::File::getCurrentWorkingDirectory().getChildFile("docs"));
-    docsDirs.add(juce::File("C:/davecore/docs"));
     docsDirs.add(juce::File("Z:/davecore/docs"));
+    docsDirs.add(juce::File("C:/davecore/docs"));
 
     for (const auto& dir : docsDirs) {
         if (dir.isDirectory()) {

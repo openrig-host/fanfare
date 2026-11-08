@@ -4476,6 +4476,8 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
       m.addItem(menuItem(miInspector, "Resource inspector"));
       m.addItem(menuItem(miRemote, "Tablet remote..."));
       m.addItem(menuItem(miViewContextBase + Fanfare::ToolRail::Midi, "MIDI monitor"));
+      m.addSeparator();
+      m.addItem(menuItem(miSettings, "Settings..."));
       break;
     case 4: // Help
       m.addItem(menuItem(miManual, "User manual", "F1"));

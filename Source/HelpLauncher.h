@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "ButtonRoles.h"
 #include "ThemeManager.h"
+#include "Version.h"
 
 namespace Fanfare {
 
@@ -17,10 +18,11 @@ inline void openHelpManual(const juce::String& anchor = {}) {
         exeDir.getChildFile("docs/manual.html").existsAsFile() ||
         exeDir.getChildFile("Web/static/manual.html").existsAsFile() ||
         exeDir.getChildFile("Source/Web/static/manual.html").existsAsFile() ||
+        juce::File("Z:/davecore/docs/manual.html").existsAsFile() ||
         juce::File("C:/davecore/docs/manual.html").existsAsFile();
 
     juce::String urlStr = hasLocalManual
-        ? "http://127.0.0.1:8080/manual.html"
+        ? ("http://127.0.0.1:8080/manual.html?v=" OPENRIG_VERSION_STRING)
         : "https://openrig-host.github.io/fanfare/manual.html";
 
     if (frag.isNotEmpty())

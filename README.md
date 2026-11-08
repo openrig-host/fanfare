@@ -49,11 +49,22 @@ It's not a DAW. It's an instrument.
 ## Quick Start
 
 1. **Download the latest release.** Grab `Fanfare.exe` from [GitHub Releases](https://github.com/openrig-host/fanfare/releases/latest). No installer.
-2. **Set up audio and MIDI.** Open `Settings`, pick your **ASIO** driver (or WASAPI), and enable your MIDI controller.
-3. **Load a rig or fill a slot.** Click **LOAD RIG** to open a setlist or song, or click **[EMPTY]** on any slot to load a VST3.
-4. **Set key ranges and MIDI mappings.** Click **NR** on a strip to set a split by playing the notes, or **CC** to open the CC Assignment Manager.
+2. **Set up audio and MIDI.** From the Startup Welcome screen or **`Rig → Audio & MIDI settings...`**, pick your **ASIO** driver (or WASAPI) and enable your MIDI controller.
+3. **Load a song or fill a slot.** Pick a recent song on the Welcome screen, double-click a song in the left **Songs** sidebar, or click **`+`** on any channel strip slot to load a VST3.
+4. **Set key ranges and MIDI mappings.** Open the strip **`...`** menu for **Note range & transpose**, or click **`CC`** to open the CC Assignment Manager and apply your global **Controller Profile**.
 
-> The full walkthrough is in **[GETTING_STARTED.md](GETTING_STARTED.md)**.
+> The full walkthrough is in **[GETTING_STARTED.md](GETTING_STARTED.md)** and the 23-chapter **[Stage Survival Manual](https://openrig-host.github.io/fanfare/manual.html)**.
+
+---
+
+## What's New in v1.50: The Studio Workspace
+
+- **Studio Default Theme, Scarlett & 5 Studio Palettes (`View → Theme`).** Ultra-clean flat charcoal workspace with embedded **Source Sans 3** UI typography and crisp **JetBrains Mono** numeric readouts across five flat Studio themes — **`Studio`** (warm `#FFA02F` amber default), **`Studio Scarlett`** (synth-editor black + crimson red), **`Studio Sapphire`** (midnight slate + ice blue), **`Studio Jade`** (dark graphite + phosphor mint), and **`Studio Daylight`** (flat light paper) — plus classic **`Front Panel Dark`** and outdoor **`Front Panel Bright`**.
+- **Vertical Ribbon Sidebar & Top Menu Bar.** A 40px icon rail switches the left drawer cleanly between **Songs**, **Strips**, **Setlist**, **Queue** (10 instant stage tiles), and a live **MIDI Monitor**, paired with a slim `File · View · Rig · Tools · Help` menu bar, centered `< Song Name >` switcher pill, live stage clock, and bottom monospace telemetry footer.
+- **Startup Splash & Welcome Screen.** Bespoke stage-spotlight splash screen with live startup progress bar, followed by a toggleable **Welcome Screen** (`Show on startup`) featuring Recent Songs, `New song`, `Open song...`, `Build from strips...`, and one-click `Scan VST3 plug-ins...`.
+- **Decluttered Stage Strips (`CC · DYN · ...`).** Preset saving/loading, note-range splits, MIDI FX, 8-pad sampler, MP3 deck, strip rename, and strip colors live cleanly inside the **`...`** menu (or right-click) so stray stage clicks never pop file dialogs beside live faders.
+- **Global Controller Profiles (`Rig → Controller profile...`).** Define your physical keyboard's CCs *once* (saved in `%APPDATA%/Fanfare/controller_profile.json`, pre-seeded with Yamaha CK88 defaults) and apply them inside any strip's CC Manager with one click on **`Profile`**.
+- **Timestamped Save Version History.** Every Song, Setlist, and Strip save records rotating snapshots in `%APPDATA%/Fanfare/history/`; right-click any item in the Library Sidebar and choose **`Version history...`** to inspect and restore prior versions in one click.
 
 ---
 
@@ -129,8 +140,9 @@ Everything is under `%APPDATA%/Fanfare/`:
 |---|---|
 | `songs/` | Rig files (`.json`) |
 | `sets/` | Setlists |
-| `backups/` | Rotating `.bak` copies of rigs |
-| `settings/` | Preferences and MIDI maps |
+| `strips/` | Reusable channel strip bricks (`.orstrip`) |
+| `history/` & `backups/` | Timestamped version history snapshots & rotating `.bak` copies |
+| `settings/` | Preferences, audio setup, and global `controller_profile.json` |
 
 The `.exe` is self-contained. Icons are built in, so there are no extra files to keep track of.
 

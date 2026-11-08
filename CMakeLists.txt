@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(Fanfare VERSION 1.4.1 LANGUAGES C CXX)
+project(Fanfare VERSION 1.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -78,6 +78,11 @@ target_link_libraries(Fanfare PRIVATE
 
 if(WIN32)
     set_property(TARGET Fanfare PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+    if(MSVC)
+        target_compile_options(Fanfare PRIVATE $<$<CONFIG:Release>:/Zi>)
+        target_link_options(Fanfare PRIVATE $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF>)
+    endif()
 
     # Deploy latest binary to workspace root and Google Drive shared folder if present
     add_custom_command(TARGET Fanfare POST_BUILD
