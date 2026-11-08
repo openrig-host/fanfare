@@ -77,6 +77,7 @@
 				background: rgba(255, 255, 255, 0.12);
 			}
 			.showcase-img { width: 100%; height: auto; display: none; cursor: zoom-in; }
+			.showcase-img.portrait { width: auto; max-width: 360px; max-height: 74vh; margin: 0 auto; border-radius: 6px; border: solid 1px rgba(255, 255, 255, 0.15); }
 			.showcase-img.active { display: block; }
 			.showcase-caption { font-size: 0.8em; color: rgba(255,255,255,0.5); margin-top: 0.8em; }
 			.pills { list-style: none; padding: 0; margin: 1.5em 0; display: flex; flex-wrap: wrap; gap: 0.5em; justify-content: center; }
@@ -252,16 +253,18 @@
 								<div class="showcase-tabs">
 									<button type="button" class="tab-btn active" onclick="switchTab(0)">Full Live Rig</button>
 									<button type="button" class="tab-btn" onclick="switchTab(1)">Tablet Stage HUD</button>
-									<button type="button" class="tab-btn" onclick="switchTab(2)">Channel Strip DSP</button>
-									<button type="button" class="tab-btn" onclick="switchTab(3)">MIDI FX</button>
-									<button type="button" class="tab-btn" onclick="switchTab(4)">Sampler</button>
-									<button type="button" class="tab-btn" onclick="switchTab(5)">VST Editors</button>
-									<button type="button" class="tab-btn" onclick="switchTab(6)">CC Manager</button>
-									<button type="button" class="tab-btn" onclick="switchTab(7)">Break-Music Player</button>
+									<button type="button" class="tab-btn" onclick="switchTab(2)">HUD Touch Mixer</button>
+									<button type="button" class="tab-btn" onclick="switchTab(3)">Channel Strip DSP</button>
+									<button type="button" class="tab-btn" onclick="switchTab(4)">MIDI FX</button>
+									<button type="button" class="tab-btn" onclick="switchTab(5)">Sampler</button>
+									<button type="button" class="tab-btn" onclick="switchTab(6)">VST Editors</button>
+									<button type="button" class="tab-btn" onclick="switchTab(7)">CC Manager</button>
+									<button type="button" class="tab-btn" onclick="switchTab(8)">Break-Music Player</button>
 								</div>
 								<div>
 									<img src="fanfare_v1_4_console.jpg" width="1024" height="581" decoding="async" class="showcase-img active" alt="Fanfare v1.50 Studio live mixer interface" />
-									<img src="tablet_stage_hud.png" width="1280" height="800" loading="lazy" decoding="async" class="showcase-img" alt="Fanfare Tablet Stage HUD over Wi-Fi SoftAP" />
+									<img src="tablet_stage_hud.png" width="966" height="471" loading="lazy" decoding="async" class="showcase-img" alt="Fanfare Tablet Stage HUD Songs view over Wi-Fi SoftAP" />
+									<img src="tablet_touch_mixer.png" width="471" height="966" loading="lazy" decoding="async" class="showcase-img portrait" alt="Fanfare mobile Touch Mixer with dual FOH and IEM faders" />
 									<img src="channel_strip_dsp.png" width="1024" height="524" loading="lazy" decoding="async" class="showcase-img" alt="Channel strip processing and convolution panel" />
 									<img src="midi_effects_panel.png" width="924" height="612" loading="lazy" decoding="async" class="showcase-img" alt="Arpeggiator transpose and octaver MIDI FX" />
 									<img src="sampler_splice_editor.png" width="1024" height="850" loading="lazy" decoding="async" class="showcase-img" alt="8-pad sampler and waveform splice handle editor" />
@@ -364,7 +367,8 @@
 			<script>
 				const captions = [
 					"Full Studio live mixer interface with Vertical Ribbon sidebar, Scene snapshots, dual FOH/IEM mixes, scrollable 24-strip rack, and peak VU metering.",
-					"Touchscreen Tablet Stage HUD running over the built-in Wi-Fi SoftAP hotspot with color-coded song tags, Bright/Dark toggle, guarded Panic, and 3ms WebSocket sync.",
+					"Touchscreen Tablet Stage HUD running over Wi-Fi / SoftAP with color-coded song tags, favorites, Bright/Dark toggle, guarded Panic, and 3ms WebSocket sync.",
+					"Portrait mobile Touch Mixer in the Stage HUD: independent multi-touch gold FOH and cyan IEM faders per strip, Master faders, and live stereo VU meters.",
 					"Channel strip DSP: noise gate, 10-band Curve-Link EQ, compressor, stereo/ping-pong/tape delay with tap tempo, musette detuner, IR loader, and per-strip IEM trim.",
 					"MIDI FX module with per-strip transposer, tempo-locked arpeggiator patterns, octaver, and Africa harmonizer.",
 					"8 one-shot pad sampler with drag-and-drop WAV support, MIDI key learn, and sample-accurate waveform splice handles.",
