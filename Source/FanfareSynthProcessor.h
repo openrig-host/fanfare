@@ -172,8 +172,11 @@ public:
     spec.numChannels = 2;
     reverb.prepare(spec);
 
-    for (auto &u : units)
+    for (auto &u : units) {
+      u.ampEnv.sr = currentSampleRate;
+      u.filtEnv.sr = currentSampleRate;
       u.reset();
+    }
     allNotesOff();
   }
 
@@ -642,6 +645,7 @@ private:
       u->lp2.reset();
       u->startedTick = globalTick;
       u->rng.setSeed((juce::int64)(note * 7919 + (int)monoUnits.size() * 131 + 7));
+      u->lfoSh = u->rng.nextFloat() * 2.0f - 1.0f;
       monoUnits.push_back((int)(u - units.data()));
     }
 
@@ -672,13 +676,15 @@ private:
         u.lfoPhase = lfoGlobalPhase;
       }
 
-      // Unison spread: detune + equal-power stereo pan across the stack
+      // Unison spread: detune + equal-power stereo pan across the stack,
+      // normalized by 1/sqrt(N) so 4- or 6-voice unison doesn't clip the bus
+      const float uniNorm = 1.0f / std::sqrt((float)juce::jmax(1, count));
       float t = (count > 1) ? (float)idx / (float)(count - 1) : 0.5f;
       u.detuneCents = s.v[uniDetune] * (2.0f * t - 1.0f);
       float ang = juce::MathConstants<float>::halfPi *
                   (0.5f + s.v[uniWidth] * (t - 0.5f));
-      u.panL = std::cos(ang);
-      u.panR = std::sin(ang);
+      u.panL = std::cos(ang) * uniNorm;
+      u.panR = std::sin(ang) * uniNorm;
       ++idx;
     }
   }
@@ -804,10 +810,12 @@ private:
   void renderUnit(Unit &u, Snap &s, float *outL, float *outR, int numSamples,
                   double sr) {
     // Envelope coefficient refresh (CCs can change times mid-note)
+    u.ampEnv.sr = sr;
     u.ampEnv.aTime = s.v[atk];
     u.ampEnv.dTime = s.v[dec];
     u.ampEnv.sLevel = s.v[sus];
     u.ampEnv.rTime = s.v[rel];
+    u.filtEnv.sr = sr;
     u.filtEnv.aTime = s.v[fatk];
     u.filtEnv.dTime = s.v[fdec];
     u.filtEnv.sLevel = s.v[fsus];
@@ -828,7 +836,11 @@ private:
     const double uniMul = std::pow(2.0, u.detuneCents / 1200.0);
 
     const double baseCutoff = s.v[cutoff];
-    const double kDamp = 1.0 / (0.5 + s.v[reso] * 7.5); // Q 0.5..8
+    // In 24 dB mode two identical 2-pole SVFs are cascaded (gains multiply),
+    // so each stage takes sqrt(Q) to keep passband flat (sqrt(0.5)=0.707) and
+    // prevent Q^2 (+36 dB) resonant blowup.
+    const double qTarget = 0.5 + s.v[reso] * 7.5; // Q 0.5..8
+    const double kDamp = 1.0 / (slope24 ? std::sqrt(qTarget) : qTarget);
 
     const double lfoInc = s.v[lfoRate] / sr;
     const double pwmInc = s.v[pwmRate] / sr;
@@ -845,24 +857,26 @@ private:
     const double lfoPitchCents = s.v[lfoToPitch];
     const double vibCents = mod * 50.0; // mod wheel adds gentle vibrato
     const double lfoPwm = s.v[lfoToPwm] * 0.45;
-    const double pwmDepth = s.v[pwmDepth] * 0.45;
-    const double lfoDelay = s.v[lfoDelay];
+    const double pwmDepthAmt = s.v[ParamId::pwmDepth] * 0.45;
+    const double lfoDelaySec = s.v[ParamId::lfoDelay];
     const double tremDepth = s.v[lfoToAmp];
 
-    const int lfoWave = (int)s.v[lfoWave];
+    const int lfoWaveShape = (int)s.v[ParamId::lfoWave];
     const double glideCoef =
         std::exp(-1.0 / juce::jmax(1.0, s.v[glideTime] * 0.25 * sr));
 
     const double o1Gain = s.v[o1Level];
     const double o2Gain = s.v[o2Level];
     const double subGain = s.v[subLevel];
-    const float gl = u.panL;
-    const float gr = u.panR;
-    const bool gliding = u.gliding;
+    // Per-voice polyphonic headroom (~-13 dB) so 4-6 note chords sit around
+    // -8..-6 dBFS instead of slamming the FX bus and soft clipper.
+    static constexpr float kVoiceHeadroom = 0.22f;
+    const float gl = u.panL * kVoiceHeadroom;
+    const float gr = u.panR * kVoiceHeadroom;
 
     for (int i = 0; i < numSamples; ++i) {
       // --- Glide (mono family) ---
-      if (gliding) {
+      if (u.gliding) {
         u.glideFreq = u.glideTarget + (u.glideFreq - u.glideTarget) * glideCoef;
         if (std::abs(u.glideFreq - u.glideTarget) < u.glideTarget * 0.0006)
           u.gliding = false;
@@ -871,10 +885,10 @@ private:
 
       // --- LFO (bipolar -1..1, delayed fade-in) ---
       double lfoVal;
-      if (lfoWave == 0) // Tri
+      if (lfoWaveShape == 0) // Tri
         lfoVal = u.lfoPhase < 0.5 ? (4.0 * u.lfoPhase - 1.0)
                                   : (3.0 - 4.0 * u.lfoPhase);
-      else if (lfoWave == 1) // Square
+      else if (lfoWaveShape == 1) // Square
         lfoVal = u.lfoPhase < 0.5 ? 1.0 : -1.0;
       else // S&H
         lfoVal = u.lfoSh;
@@ -882,17 +896,17 @@ private:
       u.lfoPhase += lfoInc;
       if (u.lfoPhase >= 1.0) {
         u.lfoPhase -= 1.0;
-        if (lfoWave == 2)
+        if (lfoWaveShape == 2)
           u.lfoSh = (float)(u.rng.nextDouble() * 2.0 - 1.0);
       }
 
       u.age += 1.0 / sr;
       double lfoFade = 1.0;
-      if (lfoDelay > 0.001) {
-        if (u.age < lfoDelay)
+      if (lfoDelaySec > 0.001) {
+        if (u.age < lfoDelaySec)
           lfoFade = 0.0;
         else
-          lfoFade = juce::jlimit(0.0, 1.0, (u.age - lfoDelay) / 1.0);
+          lfoFade = juce::jlimit(0.0, 1.0, (u.age - lfoDelaySec) / 1.0);
       }
       const double lfoMod = lfoVal * lfoFade;
 
@@ -901,7 +915,7 @@ private:
       if (u.pwmPhase >= 1.0)
         u.pwmPhase -= 1.0;
       const double pwmVal = std::sin(u.pwmPhase * 6.283185307179586);
-      double width = 0.5 + pwmDepth * pwmVal + lfoPwm * lfoMod;
+      double width = 0.5 + pwmDepthAmt * pwmVal + lfoPwm * lfoMod;
       width = juce::jlimit(0.05, 0.95, width);
 
       // --- Oscillator frequencies ---
@@ -971,8 +985,8 @@ private:
       }
 
       // --- Envelopes ---
-      const double ampEnv = u.ampEnv.next();
-      const double fEnvVal = envSrcIsAmp ? ampEnv : u.filtEnv.next();
+      const double ampEnvVal = u.ampEnv.next();
+      const double fEnvVal = envSrcIsAmp ? ampEnvVal : u.filtEnv.next();
 
       // --- Filter (per-sample modulated) ---
       const double cutHz =
@@ -989,7 +1003,7 @@ private:
 
       // --- Amp ---
       const double trem = 1.0 - tremDepth * 0.5 * (1.0 - lfoMod);
-      const double amp = ampEnv * ampVelGain * trem;
+      const double amp = ampEnvVal * ampVelGain * trem;
 
       outL[i] += (float)(filtered * amp * gl);
       outR[i] += (float)(filtered * amp * gr);
@@ -1033,18 +1047,19 @@ private:
       rp.dryLevel = 1.0f - s.v[revMix];
       rp.freezeMode = 0.0f;
       reverb.setParameters(rp);
-      juce::dsp::AudioBlock<float> block(synthBuffer);
+      auto block = juce::dsp::AudioBlock<float>(synthBuffer)
+                       .getSubBlock(0, (size_t)numSamples);
       juce::dsp::ProcessContextReplacing<float> ctx(block);
       reverb.process(ctx);
     }
 
-    // --- Master soft clip + level ---
+    // --- Master soft clip (bus safety ceiling) + post-clip output level ---
     const float vol = s.v[volume];
     float *mL = synthBuffer.getWritePointer(0);
     float *mR = synthBuffer.getWritePointer(1);
     for (int i = 0; i < numSamples; ++i) {
-      mL[i] = std::tanh(mL[i] * vol * 1.15f);
-      mR[i] = std::tanh(mR[i] * vol * 1.15f);
+      mL[i] = std::tanh(mL[i]) * vol;
+      mR[i] = std::tanh(mR[i]) * vol;
     }
   }
 
