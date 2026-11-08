@@ -304,21 +304,16 @@ public:
 
   // ===== Audio =================================================================
 
+  // Safe from any thread: just requests the panic, the audio thread performs
+  // the actual kill at the top of its next block (mutating voice/stack state
+  // from the message thread while the audio thread renders would be a race).
   void allNotesOff() {
+    panicPending.store(true);
     {
       juce::SpinLock::ScopedTryLockType sl(uiMidiLock);
       if (sl.isLocked())
         uiMidiQueue.clear();
     }
-    for (auto &u : units) {
-      u.active = false;
-      u.reservedMono = false;
-      u.midiNote = -1;
-    }
-    monoStack.clear();
-    monoUnits.clear();
-    sustainedNotes.clear();
-    sustainOn = false;
   }
 
   void processBlock(juce::AudioBuffer<float> &buffer,
@@ -343,6 +338,10 @@ public:
         u.active = false;
         u.reservedMono = false;
       }
+
+    // Deferred panic (from the UI thread / CC120/123)
+    if (panicPending.exchange(false))
+      panicNow();
 
     { // Merge UI-injected notes (onscreen keyboard); skip this block if the
       // UI thread holds the lock — the queue just rides to the next block
@@ -391,6 +390,18 @@ public:
   }
 
 private:
+  void panicNow() {
+    for (auto &u : units) {
+      u.active = false;
+      u.reservedMono = false;
+      u.midiNote = -1;
+    }
+    monoStack.clear();
+    monoUnits.clear();
+    sustainedNotes.clear();
+    sustainOn = false;
+  }
+
   // ===== Parameter snapshot (audio-thread local) ==============================
   struct Snap {
     std::array<float, kNumParams> v;
@@ -1121,6 +1132,7 @@ private:
   std::atomic<float> pitchBend{0.0f};
   std::atomic<float> modWheel{0.0f};
 
+  std::atomic<bool> panicPending{false};
   juce::SpinLock uiMidiLock;      // guards uiMidiQueue (UI thread <-> audio)
   juce::MidiBuffer uiMidiQueue;   // notes injected from the message thread
 
