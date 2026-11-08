@@ -1486,6 +1486,34 @@ public:
     bool isPlaying() const { return playing.load(); }
 
     bool hasLoadedTrack() const { return isDeckLoaded(0) || isDeckLoaded(1); }
+
+    int getPlaylistCount() const {
+        juce::ScopedLock sl(playlistLock);
+        return (int)playlist.size();
+    }
+
+    bool hasAnyTracks() const {
+        if (isDeckLoaded(0) || isDeckLoaded(1))
+            return true;
+        juce::ScopedLock sl(playlistLock);
+        return !playlist.empty();
+    }
+
+    juce::String getCurrentOrFirstTrackTitle() const {
+        const int activeIdx = activeDeckIndex.load();
+        const Deck& activeDeck = (activeIdx == 0) ? deckA : deckB;
+        if (activeDeck.isLoaded.load() && activeDeck.trackInfo.title.isNotEmpty())
+            return activeDeck.trackInfo.title;
+        const Deck& otherDeck = (activeIdx == 0) ? deckB : deckA;
+        if (otherDeck.isLoaded.load() && otherDeck.trackInfo.title.isNotEmpty())
+            return otherDeck.trackInfo.title;
+        juce::ScopedLock sl(playlistLock);
+        if (!playlist.empty()) {
+            const int idx = juce::jlimit(0, (int)playlist.size() - 1, currentTrackIndex);
+            return playlist[(size_t)idx].title;
+        }
+        return {};
+    }
     
     double getPosition() const {
         return getDeckPosition(activeDeckIndex.load());

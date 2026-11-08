@@ -540,8 +540,12 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   stripMenuBtn.onClick = [this] { showStripActionsMenu(); };
 
   addAndMakeVisible(midiLed);
-  addAndMakeVisible(mp3Led);
-  mp3Led.setTooltip("MP3 loaded on this strip (blinking = playing)");
+  addChildComponent(mp3BadgeBtn);
+  mp3BadgeBtn.setTooltip("Open MP3 Playlist Player");
+  mp3BadgeBtn.onClick = [this] {
+    if (onShowMp3Player)
+      onShowMp3Player();
+  };
 
   addAndMakeVisible(noteRangeLabel);
   noteRangeLabel.setJustificationType(juce::Justification::centred);
@@ -582,6 +586,8 @@ bool RackSlotComponent::isUnusedEmptyStrip() const {
     return false;
   if (slot.getInputChannelIndex() >= 0)
     return false;
+  if (kMp3DecksEnabled && slot.getMp3Player().hasAnyTracks())
+    return false;
   for (int i = 0; i < 3; ++i) {
     if (slot.getPluginInstance(i) != nullptr || slot.isChainSlotMidiOut(i))
       return false;
@@ -590,6 +596,82 @@ bool RackSlotComponent::isUnusedEmptyStrip() const {
   if (n.isNotEmpty() && !n.startsWithIgnoreCase("Slot "))
     return false;
   return true;
+}
+
+void RackSlotComponent::Mp3BadgeButton::paintButton(juce::Graphics &g,
+                                                    bool isOver,
+                                                    bool isDown) {
+  const auto &t = ThemeManager::getInstance().active();
+  auto r = getLocalBounds().toFloat().reduced(0.5f);
+  if (r.isEmpty())
+    return;
+
+  const juce::Colour baseCol = playing ? t.ok : t.accent;
+  const float fillAlpha =
+      isDown ? 0.30f
+             : (isOver ? 0.24f
+                       : (playing ? (0.18f + 0.08f * pulsePhase) : 0.16f));
+  const float borderAlpha = (isOver || playing) ? 0.90f : 0.65f;
+  const float radius = compact ? 3.0f : 3.5f;
+
+  g.setColour(baseCol.withAlpha(fillAlpha));
+  g.fillRoundedRectangle(r, radius);
+  g.setColour(baseCol.withAlpha(borderAlpha));
+  g.drawRoundedRectangle(r, radius, 1.0f);
+
+  const juce::Colour fgCol =
+      isOver ? t.text : baseCol.interpolatedWith(t.text, 0.32f);
+  g.setColour(fgCol);
+
+  if (compact) {
+    g.setFont(t.isStudio() ? BoutiqueLookAndFeel::monoFont(9.5f, true)
+                           : BoutiqueLookAndFeel::condensedFont(9.5f, 0.04f));
+    g.drawFittedText("MP3", getLocalBounds().reduced(1, 0),
+                     juce::Justification::centred, 1, 0.75f);
+    return;
+  }
+
+  auto inner = r.reduced(6.0f, 0.0f);
+  auto iconArea = inner.removeFromLeft(13.0f).withSizeKeepingCentre(11.0f, 11.0f);
+
+  if (playing) {
+    // Crisp play triangle
+    juce::Path tri;
+    tri.addTriangle(iconArea.getX() + 1.5f, iconArea.getY() + 1.2f,
+                    iconArea.getX() + 1.5f, iconArea.getBottom() - 1.2f,
+                    iconArea.getRight() - 1.0f, iconArea.getCentreY());
+    g.fillPath(tri);
+  } else {
+    // Crisp beamed eighth-notes icon
+    const float xL = iconArea.getX() + 2.6f;
+    const float xR = iconArea.getRight() - 2.0f;
+    const float yTop = iconArea.getY() + 1.5f;
+    const float yBotL = iconArea.getBottom() - 2.2f;
+    const float yBotR = iconArea.getBottom() - 2.8f;
+
+    juce::Path notes;
+    notes.addEllipse(xL - 2.3f, yBotL - 1.6f, 3.8f, 3.0f);
+    notes.addEllipse(xR - 2.3f, yBotR - 1.6f, 3.8f, 3.0f);
+    g.fillPath(notes);
+
+    juce::Path stems;
+    stems.startNewSubPath(xL + 1.1f, yBotL);
+    stems.lineTo(xL + 1.1f, yTop + 1.2f);
+    stems.lineTo(xR + 1.1f, yTop);
+    stems.lineTo(xR + 1.1f, yBotR);
+    g.strokePath(stems, juce::PathStrokeType(1.35f, juce::PathStrokeType::curved,
+                                             juce::PathStrokeType::rounded));
+  }
+
+  inner.removeFromLeft(3.0f);
+  juce::String label = "MP3";
+  if (trackCount > 0 && getWidth() >= 84)
+    label << "  " << juce::String(trackCount);
+
+  g.setFont(t.isStudio() ? BoutiqueLookAndFeel::uiFont(11.0f, true)
+                         : BoutiqueLookAndFeel::condensedFont(11.5f, 0.05f));
+  g.drawFittedText(label, inner.toNearestInt(), juce::Justification::centredLeft,
+                   1, 0.85f);
 }
 
 void RackSlotComponent::timerCallback() {
@@ -606,17 +688,43 @@ void RackSlotComponent::timerCallback() {
   if (slot.getAndClearMidiActivity())
     midiLed.flash();
 
-  // MP3 indicator: blinking bright = playing, steady dim = loaded, dark = empty
-  if (kMp3DecksEnabled) {
+  // MP3 strip badge/button: visible whenever MP3 tracks/playlists are loaded on this strip
+  if (kMp3DecksEnabled && !isReturn && !isMonitorIn) {
     auto &mp3 = slot.getMp3Player();
-    const bool mp3Loaded = mp3.hasLoadedTrack();
+    const bool mp3Loaded = mp3.hasAnyTracks();
     const bool mp3Playing = mp3Loaded && mp3.isPlaying();
-    prevMp3Loaded = mp3Loaded;
-    prevMp3Playing = mp3Playing;
-    if (mp3Playing)
-      mp3Led.setIntensity((juce::Time::getMillisecondCounter() % 800) < 400 ? 1.0f : 0.25f);
-    else
-      mp3Led.setIntensity(mp3Loaded ? 0.5f : 0.0f);
+    const int mp3Count = mp3Loaded ? mp3.getPlaylistCount() : 0;
+    const float pulse =
+        mp3Playing ? (0.5f + 0.5f * std::sin((float)juce::Time::getMillisecondCounter() * 0.008f))
+                   : 0.0f;
+
+    mp3BadgeBtn.setState(mp3Count, mp3Playing, pulse);
+
+    if (mp3Loaded != prevMp3Loaded) {
+      prevMp3Loaded = mp3Loaded;
+      Fanfare::setButtonRole(mp3Button, mp3Loaded ? Fanfare::ButtonRole::Primary
+                                                  : Fanfare::ButtonRole::Standard);
+      mp3Button.setToggleState(mp3Loaded, juce::dontSendNotification);
+      resized();
+      repaint();
+    }
+    if (mp3Playing != prevMp3Playing || mp3Count != prevMp3Count) {
+      prevMp3Playing = mp3Playing;
+      prevMp3Count = mp3Count;
+      const juce::String curTitle = mp3Loaded ? mp3.getCurrentOrFirstTrackTitle() : juce::String();
+      prevMp3Title = curTitle;
+      juce::String tip = "Open MP3 Playlist Player";
+      if (mp3Loaded) {
+        tip = mp3Playing ? "MP3 Player (Playing" : "MP3 Player (Loaded";
+        if (mp3Count > 0)
+          tip << " - " << juce::String(mp3Count) << (mp3Count == 1 ? " track" : " tracks");
+        if (curTitle.isNotEmpty())
+          tip << ": " << curTitle;
+        tip << ") - Click to open";
+      }
+      mp3BadgeBtn.setTooltip(tip);
+      mp3Button.setTooltip(tip);
+    }
   }
 
   const auto rangeStr = getActiveNoteRangeString();
@@ -818,7 +926,10 @@ void RackSlotComponent::paint(juce::Graphics &g) {
     g.drawRoundedRectangle(bounds, 3.0f, 1.0f);
 
     // Vertical strip title
-    auto textArea = juce::Rectangle<float>(3.0f, 36.0f, bounds.getWidth() - 10.0f, bounds.getHeight() - 68.0f);
+    const float titleTop = mp3BadgeBtn.isVisible() ? 58.0f : 36.0f;
+    const float titleBottomPad = mp3BadgeBtn.isVisible() ? 90.0f : 68.0f;
+    auto textArea = juce::Rectangle<float>(3.0f, titleTop, bounds.getWidth() - 10.0f,
+                                           bounds.getHeight() - titleBottomPad);
     if (textArea.getHeight() > 30.0f) {
       juce::Graphics::ScopedSaveState sss(g);
       float cx = textArea.getCentreX();
@@ -965,6 +1076,7 @@ void RackSlotComponent::resized() {
       expandBtn.setVisible(false);
       collapsedMuteBtn.setVisible(false);
       midiLed.setVisible(false);
+      mp3BadgeBtn.setVisible(false);
       cachedMeterArea = {};
       setTooltip("Empty Strip " + juce::String(slotIndex + 1) +
                  " - Click to expand next strip (Right-click to choose any empty strip)");
@@ -979,11 +1091,20 @@ void RackSlotComponent::resized() {
     collapsedMuteBtn.setBounds(2, getHeight() - 25, getWidth() - 4, 20);
     collapsedMuteBtn.setToggleState(slot.isBypassed(), juce::dontSendNotification);
 
-    midiLed.setVisible(true);
-    midiLed.setBounds(getWidth() / 2 - 4, 27, 8, 8);
-    mp3Led.setVisible(kMp3DecksEnabled);
-    mp3Led.setBounds(getWidth() / 2 - 15, 27, 8, 8);
-    cachedMeterArea = juce::Rectangle<int>(getWidth() - 7, 38, 5, juce::jmax(0, getHeight() - 68));
+    const bool showMp3Badge =
+        kMp3DecksEnabled && !isReturn && !isMonitorIn && slot.getMp3Player().hasAnyTracks();
+    mp3BadgeBtn.setCompact(true);
+    mp3BadgeBtn.setVisible(showMp3Badge);
+    if (showMp3Badge) {
+      mp3BadgeBtn.setBounds(2, 27, getWidth() - 4, 18);
+      midiLed.setVisible(true);
+      midiLed.setBounds(getWidth() / 2 - 4, 48, 8, 8);
+      cachedMeterArea = juce::Rectangle<int>(getWidth() - 7, 58, 5, juce::jmax(0, getHeight() - 88));
+    } else {
+      midiLed.setVisible(true);
+      midiLed.setBounds(getWidth() / 2 - 4, 27, 8, 8);
+      cachedMeterArea = juce::Rectangle<int>(getWidth() - 7, 38, 5, juce::jmax(0, getHeight() - 68));
+    }
     return;
   }
 
@@ -1016,6 +1137,11 @@ void RackSlotComponent::resized() {
   linkButton.setVisible(false);
   iemSlider.setVisible(false);
   midiLed.setVisible(true);
+
+  const bool showMp3Badge =
+      kMp3DecksEnabled && !isReturn && !isMonitorIn && slot.getMp3Player().hasAnyTracks();
+  mp3BadgeBtn.setCompact(false);
+  mp3BadgeBtn.setVisible(showMp3Badge);
 
   auto bounds = getLocalBounds();
   bounds.removeFromTop(5); // clear 3px top tape + bevel
@@ -1079,6 +1205,10 @@ void RackSlotComponent::resized() {
 
   bounds.removeFromBottom(2);
   auto faderArea = bounds.reduced(2, 2);
+  if (showMp3Badge) {
+    mp3BadgeBtn.setBounds(faderArea.removeFromTop(21).reduced(2, 0));
+    faderArea.removeFromTop(3);
+  }
 
   // Side utility buttons (Front Panel) + dedicated non-overlapping fader & stereo LED meter
   const int w = getWidth();

@@ -143,8 +143,40 @@ private:
   juce::ComboBox outputSelector;
   juce::Label noteRangeLabel;
 
+  // Clickable strip pill shown whenever MP3 tracks/playlists are loaded on
+  // this strip, so scrolling the mixer immediately reveals the MP3 strip and
+  // one click opens the MP3 player.
+  class Mp3BadgeButton : public juce::Button {
+  public:
+    Mp3BadgeButton() : juce::Button("Mp3Badge") {
+      setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    }
+    void setState(int numTracks, bool isNowPlaying, float pulse) {
+      if (trackCount != numTracks || playing != isNowPlaying ||
+          std::abs(pulsePhase - pulse) > 0.02f) {
+        trackCount = numTracks;
+        playing = isNowPlaying;
+        pulsePhase = pulse;
+        repaint();
+      }
+    }
+    void setCompact(bool isCompact) {
+      if (compact != isCompact) {
+        compact = isCompact;
+        repaint();
+      }
+    }
+    void paintButton(juce::Graphics &g, bool isOver, bool isDown) override;
+
+  private:
+    int trackCount = 0;
+    bool playing = false;
+    bool compact = false;
+    float pulsePhase = 0.0f;
+  };
+
   LEDIndicator midiLed{ThemeManager::get(Theme::Role::midiNote)};
-  LEDIndicator mp3Led{ThemeManager::get(Theme::Role::accent)};
+  Mp3BadgeButton mp3BadgeBtn;
 
   float curLeft = 0.0f;
   float curRight = 0.0f;
@@ -167,6 +199,8 @@ private:
   bool prevUnusedEmpty = false;
   bool prevMp3Loaded = false;
   bool prevMp3Playing = false;
+  int prevMp3Count = -1;
+  juce::String prevMp3Title;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RackSlotComponent)
 };
