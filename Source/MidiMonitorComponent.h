@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "BoutiqueLookAndFeel.h"
 #include "ButtonRoles.h"
+#include "ControllerProfile.h"
 #include "MidiLearnBus.h"
 #include "ThemeManager.h"
 #include "FanfareConstants.h"
@@ -52,8 +53,10 @@ public:
     } else if (msg.isController()) {
       MidiEvent ev;
       bool armed = Fanfare::MidiLearnBus::getInstance().isArmed();
-      juce::String text = "CC " + juce::String(msg.getControllerNumber()).paddedLeft('0', 3) +
-                          "    VAL " + juce::String(msg.getControllerValue()).paddedLeft('0', 3);
+      const int ccNum = msg.getControllerNumber();
+      const auto desc = Fanfare::ControllerProfile::get().describeCC(ccNum);
+      juce::String text = desc.paddedRight(' ', 16) +
+                          "  VAL " + juce::String(msg.getControllerValue()).paddedLeft('0', 3);
       if (armed)
         text += "  [CAPTURED]";
       ev.text = text;
@@ -106,6 +109,13 @@ public:
     g.setFont(BoutiqueLookAndFeel::monoFont(11.5f, false));
 
     juce::GenericScopedLock<juce::CriticalSection> sl(lock);
+    if (displayEvents.empty() && armedLabelNow.isEmpty()) {
+      g.setColour(t.textFaint);
+      g.setFont(BoutiqueLookAndFeel::uiFont(12.5f, false));
+      g.drawText("Waiting for MIDI input...", getLocalBounds().reduced(12),
+                 juce::Justification::centred, false);
+      return;
+    }
     for (int i = 0; i < visibleRows && i < (int)displayEvents.size(); ++i) {
       auto &ev = displayEvents[i];
       float age = (float)(juce::Time::getCurrentTime().toMilliseconds() - ev.timestamp) / 2200.0f;

@@ -44,9 +44,9 @@ target_include_directories(Fanfare PRIVATE
     JuceLibraryCode
 )
 
-# Module configuration. Mirrors the Projurer AppConfig.h, EXCEPT ASIO is left
-# off — it needs Steinberg's proprietary SDK which CI cannot obtain. WASAPI /
-# DirectSound cover a release build.
+# Module configuration. Mirrors the Projucer AppConfig.h. JUCE 8+ bundles the
+# Steinberg ASIO headers under juce_audio_devices/native/asio, so enable ASIO
+# automatically on Windows when present.
 target_compile_definitions(Fanfare PUBLIC
     JUCE_PLUGINHOST_VST3=1
     JUCE_PLUGINHOST_VST=0
@@ -54,6 +54,10 @@ target_compile_definitions(Fanfare PUBLIC
     JUCE_STANDALONE_APPLICATION=1
     JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
 )
+
+if(WIN32 AND EXISTS "${JUCE_ROOT}/modules/juce_audio_devices/native/asio")
+    target_compile_definitions(Fanfare PUBLIC JUCE_ASIO=1)
+endif()
 
 target_link_libraries(Fanfare PRIVATE
     juce::juce_audio_basics

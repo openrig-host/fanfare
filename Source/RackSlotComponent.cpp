@@ -534,12 +534,19 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
       showLoadStripMenu();
   };
 
+  addChildComponent(stripMenuBtn);
+  Fanfare::setButtonRole(stripMenuBtn, Fanfare::ButtonRole::Subtle);
+  stripMenuBtn.setTooltip("Strip actions: Note range, MIDI FX, Sampler, Save/Load strip, Rename, Colour");
+  stripMenuBtn.onClick = [this] { showStripActionsMenu(); };
+
   addAndMakeVisible(midiLed);
 
   addAndMakeVisible(noteRangeLabel);
   noteRangeLabel.setJustificationType(juce::Justification::centred);
   noteRangeLabel.setFont(BoutiqueLookAndFeel::monoFont(9.5f, true));
   noteRangeLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
+  noteRangeLabel.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+  noteRangeLabel.setTooltip("Click to edit note range & keyboard split");
   noteRangeLabelListener.owner = this;
   noteRangeLabel.addMouseListener(&noteRangeLabelListener, false);
 
@@ -564,6 +571,8 @@ void RackSlotComponent::lookAndFeelChanged() {
   noteRangeLabel.setColour(juce::Label::textColourId,
                            isCustomSplit ? ThemeManager::get(Theme::Role::foh)
                                          : ThemeManager::get(Theme::Role::engrave));
+  resized();
+  repaint();
 }
 
 bool RackSlotComponent::isUnusedEmptyStrip() const {
@@ -752,23 +761,26 @@ void RackSlotComponent::paint(juce::Graphics &g) {
       g.setColour(hovered ? t.accent.withAlpha(0.75f) : t.hairline);
       g.drawRoundedRectangle(bounds, 3.0f, 1.0f);
 
-      // Top engraved strip number
-      g.setFont(BoutiqueLookAndFeel::condensedFont(10.5f, 0.04f));
+      // Top strip number
+      g.setFont(t.isStudio() ? BoutiqueLookAndFeel::monoFont(10.5f, false)
+                             : BoutiqueLookAndFeel::condensedFont(10.5f, 0.04f));
       g.setColour(hovered ? t.text : t.textDim);
       g.drawText(juce::String(slotIndex + 1),
                  juce::Rectangle<float>(bounds.getX(), bounds.getY() + 4.0f, bounds.getWidth(), 14.0f),
                  juce::Justification::centred, false);
 
-      // Center "+" badge + engraved ADD label
-      g.setFont(BoutiqueLookAndFeel::condensedFont(18.0f, 0.0f));
+      // Center "+" badge + Add label
+      g.setFont(t.isStudio() ? BoutiqueLookAndFeel::uiFont(17.0f, false)
+                             : BoutiqueLookAndFeel::condensedFont(18.0f, 0.0f));
       g.setColour(hovered ? t.accent : t.textDim);
       g.drawText("+",
                  juce::Rectangle<float>(bounds.getX(), bounds.getCentreY() - 18.0f,
                                         bounds.getWidth(), 20.0f),
                  juce::Justification::centred, false);
-      g.setFont(BoutiqueLookAndFeel::condensedFont(9.5f, 0.05f));
+      g.setFont(t.isStudio() ? BoutiqueLookAndFeel::uiFont(10.0f, false)
+                             : BoutiqueLookAndFeel::condensedFont(9.5f, 0.05f));
       g.setColour(hovered ? t.accent : t.engrave);
-      g.drawText("ADD",
+      g.drawText(t.isStudio() ? "Add" : "ADD",
                  juce::Rectangle<float>(bounds.getX(), bounds.getCentreY() + 2.0f,
                                         bounds.getWidth(), 13.0f),
                  juce::Justification::centred, false);
@@ -781,9 +793,11 @@ void RackSlotComponent::paint(juce::Graphics &g) {
     g.setColour(bg);
     g.fillRoundedRectangle(bounds, 3.0f);
 
-    // 3px top stage-tape stripe
+    // Top stage-tape stripe (2px in Studio, 3px in Front Panel)
+    const float collapsedTapeH = t.isStudio() ? 2.0f : 3.0f;
     g.setColour(slot.isBypassed() ? categoryCol.withAlpha(0.45f) : categoryCol);
-    g.fillRect(bounds.getX() + 1.0f, bounds.getY() + 1.0f, bounds.getWidth() - 2.0f, 3.0f);
+    g.fillRect(bounds.getX() + 1.0f, bounds.getY() + 1.0f,
+               bounds.getWidth() - 2.0f, collapsedTapeH);
 
     g.setColour(t.border);
     g.drawRoundedRectangle(bounds, 3.0f, 1.0f);
@@ -801,14 +815,16 @@ void RackSlotComponent::paint(juce::Graphics &g) {
       juce::String label = (isReturn || isMonitorIn)
                                ? nameText
                                : (juce::String(slotIndex + 1) + ". " + nameText);
-      if (slot.isBypassed()) label += " [MUTED]";
+      if (slot.isBypassed() && !t.isStudio()) label += " [MUTED]";
 
       g.setColour(slot.isBypassed() ? t.textDim : t.text);
-      g.setFont(BoutiqueLookAndFeel::condensedFont(12.0f, 0.05f));
+      g.setFont(t.isStudio() ? BoutiqueLookAndFeel::uiFont(12.0f, true)
+                             : BoutiqueLookAndFeel::condensedFont(12.0f, 0.05f));
       juce::Rectangle<float> rotRect(cx - textArea.getHeight() / 2.0f,
                                      cy - textArea.getWidth() / 2.0f,
                                      textArea.getHeight(), textArea.getWidth());
-      g.drawText(label.toUpperCase(), rotRect, juce::Justification::centred, true);
+      g.drawText(t.isStudio() ? label : label.toUpperCase(), rotRect,
+                 juce::Justification::centred, true);
     }
 
     if (!cachedMeterArea.isEmpty()) {
@@ -818,7 +834,7 @@ void RackSlotComponent::paint(juce::Graphics &g) {
     return;
   }
 
-  // Expanded Front Panel channel strip
+  // Expanded channel strip
   auto bounds = getLocalBounds().toFloat().reduced(0.5f);
   juce::Colour panelFace = slot.isBypassed() ? t.sunken
                          : ((slotIndex % 2 == 0) ? t.panel : t.panelAlt);
@@ -826,22 +842,24 @@ void RackSlotComponent::paint(juce::Graphics &g) {
   g.setColour(panelFace);
   g.fillRoundedRectangle(bounds, 3.0f);
 
-  // 3px top stage-tape category stripe (replaces full-strip color flood)
+  // Top stage-tape category stripe (2px flat in Studio, 3px + bevel in Front Panel)
   juce::Colour tapeCol = hasDistinctColor ? categoryCol : t.borderStrong;
   if (slot.isBypassed())
     tapeCol = tapeCol.withAlpha(0.45f);
   g.setColour(tapeCol);
-  g.fillRect(bounds.getX() + 1.0f, bounds.getY() + 1.0f, bounds.getWidth() - 2.0f, 3.0f);
+  g.fillRect(bounds.getX() + 1.0f, bounds.getY() + 1.0f,
+             bounds.getWidth() - 2.0f, t.isStudio() ? 2.0f : 3.0f);
 
-  // Subtle top bevel line directly below tape
-  g.setColour(t.bevelHi);
-  g.drawHorizontalLine((int)bounds.getY() + 4, bounds.getX() + 2.0f, bounds.getRight() - 2.0f);
+  if (!t.isStudio()) {
+    g.setColour(t.bevelHi);
+    g.drawHorizontalLine((int)bounds.getY() + 4, bounds.getX() + 2.0f, bounds.getRight() - 2.0f);
+  }
 
   // Hairline strip border
   g.setColour(t.border);
   g.drawRoundedRectangle(bounds, 3.0f, 1.0f);
 
-  // Recessed engraved Strip Nameplate well (y = 107..139)
+  // Strip Nameplate well (y = 107..139)
   auto nameplateRect = juce::Rectangle<float>(3.0f, 107.0f, bounds.getWidth() - 5.0f, 32.0f);
   Fanfare::ModalFrame::paintRecessedWell(g, nameplateRect, 2.5f);
 
@@ -852,11 +870,12 @@ void RackSlotComponent::paint(juce::Graphics &g) {
   }
 
   g.setColour(slot.isBypassed() ? t.textDim : t.text);
-  g.setFont(BoutiqueLookAndFeel::condensedFont(12.5f, 0.03f));
+  g.setFont(t.isStudio() ? BoutiqueLookAndFeel::uiFont(12.5f, true)
+                         : BoutiqueLookAndFeel::condensedFont(12.5f, 0.03f));
   juce::String plateTitle = slot.getName();
   if (!isReturn && !isMonitorIn)
-    plateTitle = juce::String(slotIndex + 1) + " " + plateTitle;
-  g.drawFittedText(plateTitle.toUpperCase(),
+    plateTitle = juce::String(slotIndex + 1) + (t.isStudio() ? "  " : " ") + plateTitle;
+  g.drawFittedText(t.isStudio() ? plateTitle : plateTitle.toUpperCase(),
                    (int)nameplateRect.getX() + 4, (int)nameplateRect.getY() + 2,
                    (int)nameplateRect.getWidth() - 8, 16,
                    juce::Justification::centred, 1, 0.78f);
@@ -864,10 +883,12 @@ void RackSlotComponent::paint(juce::Graphics &g) {
   // Return strip static label in slot 3 area
   if (isReturn) {
     g.setColour(t.engrave);
-    g.setFont(BoutiqueLookAndFeel::condensedFont(10.5f, 0.06f));
+    g.setFont(t.isStudio() ? BoutiqueLookAndFeel::uiFont(11.0f, false)
+                           : BoutiqueLookAndFeel::condensedFont(10.5f, 0.06f));
     auto vacantArea = slotBtns[2].getBounds();
     if (!vacantArea.isEmpty())
-      g.drawFittedText("AUX RETURN", vacantArea, juce::Justification::centred, 1, 0.80f);
+      g.drawFittedText(t.isStudio() ? "Aux return" : "AUX RETURN",
+                       vacantArea, juce::Justification::centred, 1, 0.80f);
   }
 
   // Dedicated stereo segmented LED meter beside the fader
@@ -917,6 +938,7 @@ void RackSlotComponent::resized() {
     mp3Button.setVisible(false);
     saveStripBtn.setVisible(false);
     loadStripBtn.setVisible(false);
+    stripMenuBtn.setVisible(false);
     linkButton.setVisible(false);
     channelSlider.setVisible(false);
     iemSlider.setVisible(false);
@@ -957,6 +979,7 @@ void RackSlotComponent::resized() {
     slotBtns[i].setVisible(true);
     editGuiBtns[i].setVisible(true);
   }
+  const bool studio = ThemeManager::isStudio();
   inputSelector.setVisible(true);
   outputSelector.setVisible(!isReturn);
   bypassButton.setVisible(true);
@@ -964,13 +987,14 @@ void RackSlotComponent::resized() {
   iemRoutingBtn.setVisible(true);
   channelSlider.setVisible(true);
   ccButton.setVisible(!isReturn);
-  noteRangeButton.setVisible(!isReturn);
+  noteRangeButton.setVisible(!isReturn && !studio);
   noteRangeLabel.setVisible(!isReturn);
   customizeButton.setVisible(!isReturn && !isMonitorIn);
-  arpButton.setVisible(!isReturn && !isMonitorIn);
-  samplerButton.setVisible(!isReturn && !isMonitorIn);
-  saveStripBtn.setVisible(!isReturn);
-  loadStripBtn.setVisible(!isReturn);
+  arpButton.setVisible(!isReturn && !isMonitorIn && !studio);
+  samplerButton.setVisible(!isReturn && !isMonitorIn && !studio);
+  saveStripBtn.setVisible(!isReturn && !studio);
+  loadStripBtn.setVisible(!isReturn && !studio);
+  stripMenuBtn.setVisible(!isReturn && studio);
   iemOffsetKnob.setVisible(isAccordion);
   linkButton.setVisible(false);
   iemSlider.setVisible(false);
@@ -1016,18 +1040,56 @@ void RackSlotComponent::resized() {
   fohRoutingBtn.setBounds(buttonArea.removeFromTop(btnHeight).reduced(3, 1));
   iemRoutingBtn.setBounds(buttonArea.removeFromTop(btnHeight).reduced(3, 1));
 
-  // CC / NR / DYN row above MUTE
+  // CC / NR / DYN row above MUTE (in Studio: CC / DYN / ... menu)
   auto ctrlRow = bounds.removeFromBottom(20);
-  int colWidth = ctrlRow.getWidth() / 3;
-  ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(2, 1));
-  noteRangeButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
-  customizeButton.setBounds(ctrlRow.reduced(2, 1));
+  if (studio && !isReturn) {
+    if (isMonitorIn) {
+      int colWidth = ctrlRow.getWidth() / 2;
+      ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(2, 1));
+      stripMenuBtn.setBounds(ctrlRow.reduced(2, 1));
+    } else {
+      int colWidth = ctrlRow.getWidth() / 3;
+      ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(2, 1));
+      customizeButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
+      stripMenuBtn.setBounds(ctrlRow.reduced(2, 1));
+    }
+  } else {
+    int colWidth = ctrlRow.getWidth() / 3;
+    ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(2, 1));
+    noteRangeButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
+    customizeButton.setBounds(ctrlRow.reduced(2, 1));
+  }
 
   bounds.removeFromBottom(2);
   auto faderArea = bounds.reduced(2, 2);
 
-  // Side utility buttons + dedicated non-overlapping fader & stereo LED meter
+  // Side utility buttons (Front Panel) + dedicated non-overlapping fader & stereo LED meter
   const int w = getWidth();
+  if (studio) {
+    mp3Button.setVisible(false);
+    int centerSpanLeft = 8;
+    int centerSpanRight = w - 8;
+    int centerSpanW = juce::jmax(32, centerSpanRight - centerSpanLeft);
+
+    int meterW = juce::jlimit(10, 14, centerSpanW / 5);
+    int faderW = juce::jlimit(22, 30, centerSpanW - meterW - 4);
+    int pairW = faderW + 4 + meterW;
+    int pairX = centerSpanLeft + (centerSpanW - pairW) / 2;
+
+    if (isAccordion) {
+      int knobSize = 38;
+      iemOffsetKnob.setBounds(pairX + (pairW - knobSize) / 2, faderArea.getY(),
+                              knobSize, knobSize);
+      faderArea.removeFromTop(knobSize + 4);
+    }
+
+    channelSlider.setBounds(pairX, faderArea.getY(), faderW, faderArea.getHeight());
+    iemSlider.setVisible(false);
+    cachedMeterArea = juce::Rectangle<int>(pairX + faderW + 4, faderArea.getY() + 4,
+                                           meterW, juce::jmax(16, faderArea.getHeight() - 8));
+    return;
+  }
+
   const bool hasSideBtns = (!isReturn && !isMonitorIn);
   const int sideWidth = hasSideBtns ? juce::jlimit(23, 38, (w - 40) / 2) : 4;
   const int leftX = 3;
@@ -1095,7 +1157,11 @@ void RackSlotComponent::setSpecialModes(bool monitorIn, bool accordion, bool ret
 juce::ComboBox &RackSlotComponent::getInputSelector() { return inputSelector; }
 
 juce::Rectangle<int> RackSlotComponent::getNoteRangeButtonBounds() {
-  return getLocalArea(this, noteRangeButton.getBounds());
+  if (noteRangeButton.isVisible() && !noteRangeButton.getBounds().isEmpty())
+    return getLocalArea(this, noteRangeButton.getBounds());
+  if (noteRangeLabel.isVisible() && !noteRangeLabel.getBounds().isEmpty())
+    return getLocalArea(this, noteRangeLabel.getBounds());
+  return getLocalArea(this, stripMenuBtn.getBounds());
 }
 
 void RackSlotComponent::mouseDoubleClick(const juce::MouseEvent &e) {
@@ -1169,6 +1235,10 @@ void RackSlotComponent::mouseDown(const juce::MouseEvent &e) {
   if (e.mods.isRightButtonDown()) {
     if (e.eventComponent != nullptr && e.eventComponent != this) {
       showButtonHelpPopup(e.eventComponent);
+      return;
+    }
+    if (ThemeManager::isStudio() && !isReturn) {
+      showStripActionsMenu();
       return;
     }
     if (e.y < 140) {
@@ -1316,6 +1386,50 @@ void RackSlotComponent::showRenameDialog() {
         }
         delete alertWindow;
       }));
+}
+
+void RackSlotComponent::showStripActionsMenu() {
+  juce::PopupMenu menu;
+  const juce::String hdr = slot.getName().isNotEmpty()
+                               ? slot.getName()
+                               : ("Strip " + juce::String(slotIndex + 1));
+  menu.addSectionHeader(hdr);
+  menu.addItem(1, "Note range & transpose...");
+  if (!isMonitorIn) {
+    menu.addItem(2, "Dynamics, EQ & sends (DYN)...");
+    menu.addItem(3, "MIDI effects (Arp / Harmonizer)...");
+    menu.addItem(4, "8-pad sampler...");
+    if (kMp3DecksEnabled)
+      menu.addItem(5, "MP3 playlist deck...");
+  }
+  menu.addItem(6, "CC parameter mappings...");
+  menu.addSeparator();
+  menu.addItem(7, "Save strip preset...");
+  menu.addItem(8, "Load strip preset...");
+  menu.addSeparator();
+  menu.addItem(9, "Rename strip...");
+  menu.addItem(10, "Strip colour...");
+
+  juce::Component::SafePointer<RackSlotComponent> safe(this);
+  menu.showMenuAsync(
+      juce::PopupMenu::Options().withTargetComponent(stripMenuBtn.isVisible() ? (juce::Component*)&stripMenuBtn : this),
+      [safe](int r) {
+        if (safe == nullptr || r == 0)
+          return;
+        switch (r) {
+          case 1: if (safe->onShowNoteRangeDialog) safe->onShowNoteRangeDialog(); break;
+          case 2: if (safe->onShowChannelStrip) safe->onShowChannelStrip(); break;
+          case 3: if (safe->onShowArpeggiator) safe->onShowArpeggiator(); break;
+          case 4: if (safe->onShowSampler) safe->onShowSampler(); break;
+          case 5: if (safe->onShowMp3Player) safe->onShowMp3Player(); break;
+          case 6: if (safe->onShowCCDialog) safe->onShowCCDialog(0); break;
+          case 7: if (safe->onSaveStrip) safe->onSaveStrip(); break;
+          case 8: safe->showLoadStripMenu(); break;
+          case 9: safe->showRenameDialog(); break;
+          case 10: safe->showColorPalette(); break;
+          default: break;
+        }
+      });
 }
 
 void RackSlotComponent::showLoadStripMenu() {

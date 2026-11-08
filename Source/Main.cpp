@@ -6,6 +6,7 @@
   ==============================================================================
 */
 
+#include "FanfareSplashScreen.h"
 #include "MainComponent.h"
 #include "Version.h"
 #include <JuceHeader.h>
@@ -46,13 +47,23 @@ public:
     FanfareLog::setupCrashHandlers();
 #endif
 
+    ThemeManager::getInstance().loadFromSettings();
+    splashScreen = std::make_unique<Fanfare::FanfareSplashScreen>();
+    splashScreen->setStage(0.16f, "Initializing stage engine...");
+
     mainWindow.reset(new MainWindow(getApplicationName() + " v" + getApplicationVersion() +
                                     "  [Build: " + juce::String(__DATE__) + " " + juce::String(__TIME__) + "]"));
+
+    if (splashScreen) {
+      splashScreen->onFinished = [this] { splashScreen.reset(); };
+      splashScreen->finishAndDismiss();
+    }
   }
 
   void shutdown() override {
     LOG_INFO("Fanfare shutting down cleanly. Flushing log and terminating process...");
     FanfareLog::flushLog();
+    splashScreen = nullptr;
     mainWindow = nullptr; // (deletes our window)
 
 #ifdef _WIN32
@@ -244,6 +255,7 @@ public:
   };
 
 private:
+  std::unique_ptr<Fanfare::FanfareSplashScreen> splashScreen;
   std::unique_ptr<MainWindow> mainWindow;
 };
 

@@ -4,6 +4,7 @@
 #include "SetupMidiTriggers.h"
 #include "SetlistManager.h"
 #include "ThemeManager.h"
+#include "VersionHistoryModal.h"
 
 LibraryList::LibraryList(Kind k) : kind(k) {
   setModel(this);
@@ -386,6 +387,7 @@ void LibraryList::listBoxItemClicked(int row, const juce::MouseEvent &e) {
       menu.addSeparator();
     }
 
+    menu.addItem(7, "Version history...");
     menu.addItem(6, "Reveal in Explorer");
     menu.addItem(4, "Delete Item");
 
@@ -430,6 +432,14 @@ void LibraryList::listBoxItemClicked(int row, const juce::MouseEvent &e) {
         Fanfare::SetlistManager::getInstance().addSetup(file);
       } else if (result == 6) {
         file.revealToUser();
+      } else if (result == 7) {
+        Fanfare::showVersionHistoryDialog(file, [safeThis](const juce::File &restored) {
+          if (safeThis == nullptr)
+            return;
+          safeThis->refresh();
+          if (safeThis->kind != Kind::Strips && safeThis->onDoubleClicked)
+            safeThis->onDoubleClicked(restored);
+        });
       }
     });
   }

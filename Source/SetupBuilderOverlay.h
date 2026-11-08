@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "RigLibrary.h"
 #include "RigSerializer.h"
+#include "SaveHistory.h"
 #include "BoutiqueLookAndFeel.h"
 #include "ButtonRoles.h"
 #include "FanfareConstants.h"
@@ -344,14 +345,18 @@ private:
         root->setProperty("currentSceneIndex", 0);
 
         auto targetFile = Fanfare::RigLibrary::getSongsDirectory().getChildFile(songName + ".json");
+        SaveHistory::recordSave(targetFile);
         targetFile.deleteFile();
         targetFile.getParentDirectory().createDirectory();
 
-        juce::FileOutputStream fos(targetFile);
-        if (fos.openedOk()) {
-            juce::JSON::writeToStream(fos, juce::var(root));
-            fos.flush();
+        {
+            juce::FileOutputStream fos(targetFile);
+            if (fos.openedOk()) {
+                juce::JSON::writeToStream(fos, juce::var(root));
+                fos.flush();
+            }
         }
+        SaveHistory::recordSave(targetFile);
 
         if (actions.onBuildComplete) {
             actions.onBuildComplete(targetFile);

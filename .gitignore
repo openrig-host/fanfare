@@ -37,6 +37,12 @@ raw-soutce-openrig.txt
 
 # Local tooling & working docs (not part of the public repo)
 .kilo/
+.zcode/
+.zcodeignore
+.v2c/
+.video_agent/
+rel_auth.json
+7novreview-opus.md
 Aug30Featurelist.MD
 latestchangesjul26.md
 roadmap-aug30-gemini.md

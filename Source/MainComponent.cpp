@@ -16,6 +16,7 @@
 #include "MainComponent.h"
 #include "NoteRangeComponent.h"
 #include "RackSlotComponent.h"
+#include "SaveHistory.h"
 #include "ThemeManager.h"
 #include "FanfareLogoData.h"
 // Optional personal gig art. The file is deliberately gitignored - public
@@ -248,6 +249,7 @@ MainComponent::MainComponent() {
   // the user's saved choice on first paint.
   ThemeManager::getInstance().loadFromSettings();
   ThemeManager::getInstance().addChangeListener(this);
+  Fanfare::FanfareSplashScreen::reportProgress(0.32f, "Opening audio & MIDI devices...");
   loadAudioSettings();
 
   // Apply look and feel
@@ -259,6 +261,7 @@ MainComponent::MainComponent() {
   AssetLoader::getInstance().preloadAssets();
 
   // Setup UI components (extracted for readability)
+  Fanfare::FanfareSplashScreen::reportProgress(0.56f, "Building channel strips & buses...");
   setupSlotComponents();
   setupHeaderButtons();
   setupSetupButtons();
@@ -293,6 +296,7 @@ MainComponent::MainComponent() {
     };
   }
 
+  Fanfare::FanfareSplashScreen::reportProgress(0.78f, "Preparing Studio workspace...");
   setupStudioShell();
 
   // Final setup
@@ -330,6 +334,7 @@ MainComponent::MainComponent() {
   refreshSceneButtons();
 
   // Initialize embedded Web Server for Tablet HUD Companion
+  Fanfare::FanfareSplashScreen::reportProgress(0.90f, "Starting stage remote & telemetry...");
   webServer = std::make_unique<OpenRig::WebServer>(engine, this);
   webServer->startServer(8080);
   hotspotController = std::make_unique<OpenRig::StageHotspotController>();
@@ -356,9 +361,14 @@ MainComponent::MainComponent() {
   setWantsKeyboardFocus (true);
   addKeyListener (this);
 
-  // First-run detection: if Fanfare has never scanned/saved a VST3 plugin list
-  // on this machine, pop up the Quick Start guide offering to scan the VST3 folder now.
-  if (!engine.hasEverScannedPlugins()) {
+  // Startup Welcome window (respects "Show on startup" toggle; includes 1-click
+  // VST3 scan when no plugins have been scanned yet).
+  if (Fanfare::WelcomePrefs::getShowOnStartup()) {
+    juce::Timer::callAfterDelay(520, [safeThis = juce::Component::SafePointer<MainComponent>(this)]() {
+      if (safeThis != nullptr)
+        safeThis->showWelcomeModal();
+    });
+  } else if (!engine.hasEverScannedPlugins()) {
     juce::Timer::callAfterDelay(650, [safeThis = juce::Component::SafePointer<MainComponent>(this)]() {
       if (safeThis != nullptr && !safeThis->engine.hasEverScannedPlugins()) {
         safeThis->showQuickStartDialog(true);
@@ -1219,8 +1229,12 @@ void MainComponent::setupHeaderButtons() {
               file = file.withFileExtension(".json");
 
             juce::String json = engine.exportRigToJson();
+            SaveHistory::recordSave(file);
             if (Fanfare::RigSerializer::save(file, json)) {
+              SaveHistory::recordSave(file);
               currentRigFile = file;
+              setupNameLabel.setText(file.getFileNameWithoutExtension(), juce::dontSendNotification);
+              Fanfare::RecentSongs::record(file);
               LOG_INFO("Rig saved to: " + file.getFullPathName());
             } else {
               LOG_ERROR("Failed to save rig to: " + file.getFullPathName());
@@ -1347,10 +1361,12 @@ void MainComponent::setupHeaderButtons() {
     }
 
     if (targetFile.existsAsFile()) {
+      SaveHistory::recordSave(targetFile);
       auto parsed = juce::JSON::parse(targetFile);
       if (auto *obj = parsed.getDynamicObject()) {
         obj->setProperty("freshBuild", isFresh);
-        Fanfare::RigSerializer::save(targetFile, juce::JSON::toString(parsed));
+        if (Fanfare::RigSerializer::save(targetFile, juce::JSON::toString(parsed)))
+          SaveHistory::recordSave(targetFile);
         LOG_INFO("Setup flagged on disk: " + targetFile.getFileName() + " -> freshBuild=" + juce::String((int)isFresh));
       }
     }
@@ -2742,11 +2758,11 @@ void MainComponent::showQuickStartDialog(bool isFirstRunPrompt) {
   }
 
   body << "GETTING SOUND IN TWO STEPS:\n\n"
-       << "1. Scan for VST3s in Settings\n"
-       << "   Click the Gear icon (top-left) -> SCAN FOR PLUGINS (or click 'Scan VST3 Folder Now' below) so Fanfare registers your installed instruments & effects. You can also choose your ASIO audio driver & MIDI keyboard in AUDIO SETTINGS.\n\n"
+       << "1. Scan for VST3s\n"
+       << "   Open Rig -> Scan for plugins (or click 'Scan VST3 Folder Now' below) so Fanfare registers your installed instruments & effects. Choose your ASIO audio driver & MIDI keyboard in Rig -> Audio & MIDI settings.\n\n"
        << "2. Add a VST to a Strip Slot\n"
        << "   On any channel strip (start with Strip 2: Keyboard), click one of the 3 plugin slots (Slot 1, 2, or 3) to load an instrument, and click [E] to open its editor window.\n\n"
-       << "Tip: Need help on any screen? Click the amber HAAALP! button to jump straight to that chapter of the Stage Survival Manual.";
+       << "Tip: Need help on any screen? Click the Help button (or press F1) to jump straight to that chapter of the User Manual.";
 
   auto *w = new juce::AlertWindow(title, body, juce::MessageBoxIconType::InfoIcon);
   w->addButton("Scan VST3 Folder Now", 1, juce::KeyPress(juce::KeyPress::returnKey));
@@ -3414,6 +3430,8 @@ void MainComponent::resized() {
     engineTuningModal->centreWithSize(juce::jmin(getWidth() - 32, 640), juce::jmin(getHeight() - 32, 560));
   if (stageRemoteOverlay)
     stageRemoteOverlay->setBounds(getLocalBounds());
+  if (welcomeOverlay)
+    welcomeOverlay->setBounds(getLocalBounds());
   if (missingPluginsToast)
     updateMissingPluginsToastBounds();
 }
@@ -3482,6 +3500,7 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
   }
 
   closeAllPluginWindows();
+  SaveHistory::snapshotBeforeLoadAsync(file);
   showLoadingOverlay("SWITCHING SONG",
                      "Loading " + file.getFileNameWithoutExtension() + "...");
 
@@ -3504,6 +3523,7 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
                     audioUnderrunCount.store(0);
                     engineStallCount.store(0);
                     currentRigFile = file;
+                    Fanfare::RecentSongs::record(file);
                     setupNameLabel.setText(fileName, juce::dontSendNotification);
                     freshBuildToggle.setToggleState(engine.isCurrentRigFreshBuild(), juce::dontSendNotification);
                     for (auto *comp : rackSlotComponents) {
@@ -3896,13 +3916,21 @@ void MainComponent::saveSetToFile() {
                   obj->setProperty("setup_" + juce::String(i), setupFilePaths[i]);
           }
           
+          SaveHistory::recordSave(file);
           file.getParentDirectory().createDirectory();
-          juce::FileOutputStream fos(file);
-          if (fos.openedOk()) {
-              fos.setPosition(0);
-              fos.truncate();
-              juce::JSON::writeToStream(fos, juce::var(obj.get()));
+          bool wroteOk = false;
+          {
+              juce::FileOutputStream fos(file);
+              if (fos.openedOk()) {
+                  fos.setPosition(0);
+                  fos.truncate();
+                  juce::JSON::writeToStream(fos, juce::var(obj.get()));
+                  fos.flush();
+                  wroteOk = true;
+              }
           }
+          if (wroteOk)
+              SaveHistory::recordSave(file);
       });
 }
 
@@ -3924,6 +3952,7 @@ void MainComponent::loadSetFromFile() {
 void MainComponent::applySetlistFromFile(const juce::File &file) {
   if (!file.existsAsFile())
     return;
+  SaveHistory::snapshotBeforeLoadAsync(file);
   auto json = juce::JSON::parse(file);
   auto *obj = json.getDynamicObject();
   if (!obj)
@@ -4234,14 +4263,14 @@ void MainComponent::showWebRemoteDialog() {
 //==============================================================================
 namespace {
 enum MenuIds {
-  miLoadSong = 1, miSaveSong, miBuildSong, miLoadMap, miSaveMap, miQuit,
+  miNewSong = 1, miLoadSong, miSaveSong, miBuildSong, miLoadMap, miSaveMap, miQuit,
   miViewContextBase = 100, // + ToolRail context index
   miCompact = 120, miCleanSlate,
   miWidthBase = 130,       // + preset index
   miThemeBase = 150,       // + theme index
   miAudio = 200, miBus, miEngine, miControllerProfile, miScan, miResetAudio, miSettings,
   miNotepad = 300, miInspector, miRemote,
-  miManual = 400, miQuickStart, miUpdate, miAbout
+  miManual = 400, miWelcome, miQuickStart, miUpdate, miAbout
 };
 constexpr int kStripWidthPresets[] = {96, 124, 160, 220};
 const char *const kStripWidthNames[] = {"Narrow", "Normal", "Wide", "Extra wide"};
@@ -4398,6 +4427,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
   juce::PopupMenu m;
   switch (topLevelMenuIndex) {
     case 0: // File
+      m.addItem(menuItem(miNewSong, "New song"));
       m.addItem(menuItem(miLoadSong, "Load song...", "Ctrl+O"));
       m.addItem(menuItem(miSaveSong, "Save song as...", "Ctrl+S"));
       m.addItem(menuItem(miBuildSong, "Build song from strips..."));
@@ -4449,6 +4479,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce
       break;
     case 4: // Help
       m.addItem(menuItem(miManual, "User manual", "F1"));
+      m.addItem(menuItem(miWelcome, "Welcome screen..."));
       m.addItem(menuItem(miQuickStart, "Quick start..."));
       if (latestReleaseUrl.isNotEmpty())
         m.addItem(menuItem(miUpdate, "Get the new release..."));
@@ -4479,6 +4510,7 @@ void MainComponent::menuItemSelected(int id, int) {
     return;
   }
   switch (id) {
+    case miNewSong:    resetToNewSong(); break;
     case miLoadSong:   click(loadBtn); break;
     case miSaveSong:   click(saveBtn); break;
     case miBuildSong:  click(setupBuilderBtn); break;
@@ -4504,9 +4536,100 @@ void MainComponent::menuItemSelected(int id, int) {
     case miInspector:  showResourceInspectorModal(); break;
     case miRemote:     showWebRemoteDialog(); break;
     case miManual:     Fanfare::openHelpManual("#main-mixer"); break;
+    case miWelcome:    showWelcomeModal(); break;
     case miQuickStart: showQuickStartDialog(false); break;
     case miUpdate:     click(updateBadgeBtn); break;
     case miAbout:      showAboutDialog(); break;
     default: break;
   }
+}
+
+void MainComponent::showWelcomeModal() {
+  Fanfare::StartupWelcomeModal::Actions a;
+  a.onNewSong = [this] { resetToNewSong(); };
+  a.onOpenSong = [this] {
+    if (loadBtn.onClick)
+      loadBtn.onClick();
+  };
+  a.onBuildSong = [this] {
+    if (setupBuilderBtn.onClick)
+      setupBuilderBtn.onClick();
+  };
+  a.onScanPlugins = [this] {
+    if (scanButton.onClick)
+      scanButton.onClick();
+  };
+  a.onLoadRecentSong = [this](const juce::File &file) {
+    loadRigFromFile(file);
+  };
+  a.onOpenSettings = [this] { showConfigOverlay(); };
+  a.onClose = [this] {
+    welcomeOverlay.reset();
+    resized();
+    repaint();
+  };
+
+  welcomeOverlay = std::make_unique<Fanfare::StartupWelcomeModal>(
+      std::move(a), engine.getNumAvailablePlugins());
+  addAndMakeVisible(welcomeOverlay.get());
+  welcomeOverlay->setBounds(getLocalBounds());
+  welcomeOverlay->toFront(true);
+}
+
+void MainComponent::resetToNewSong() {
+  bool anyLoaded = false;
+  for (int i = 0; i < engine.getNumSlots() && !anyLoaded; ++i)
+    if (auto *s = engine.getSlot(i))
+      for (int c = 0; c < 3; ++c)
+        if (s->getPluginInstance(c) != nullptr || s->isChainSlotMidiOut(c))
+          anyLoaded = true;
+  for (int i = 0; i < 3 && !anyLoaded; ++i)
+    if (!engine.getMasterPluginName(true, i).isEmpty() ||
+        !engine.getMasterPluginName(false, i).isEmpty())
+      anyLoaded = true;
+
+  auto performReset = [this] {
+    closeAllPluginWindows();
+    engine.clearAllRacks();
+    engine.resetScenesToDefault();
+    currentRigFile = juce::File{};
+    currentSetupIndex = -1;
+    setupNameLabel.setText("Untitled song", juce::dontSendNotification);
+    for (int i = 0; i < engine.getNumSlots(); ++i) {
+      if (auto *s = engine.getSlot(i)) {
+        if (i == 0)
+          s->setName("Monitor In");
+        else if (i == 1)
+          s->setName("Keyboard");
+        else
+          s->setName("Slot " + juce::String(i + 1));
+      }
+    }
+    for (auto *c : rackSlotComponents) {
+      c->updateOutputSelector();
+      c->repaint();
+    }
+    refreshSceneButtons();
+    updatePreloadStatus();
+    resized();
+    repaint();
+  };
+
+  if (!anyLoaded) {
+    performReset();
+    return;
+  }
+
+  juce::Component::SafePointer<MainComponent> safeThis(this);
+  juce::AlertWindow::showAsync(
+      juce::MessageBoxOptions()
+          .withIconType(juce::MessageBoxIconType::QuestionIcon)
+          .withTitle("New song")
+          .withMessage("Start a new empty song? Currently loaded plugins will be unloaded.")
+          .withButton("New song")
+          .withButton("Cancel"),
+      [safeThis, performReset](int result) {
+        if (result == 1 && safeThis != nullptr)
+          performReset();
+      });
 }

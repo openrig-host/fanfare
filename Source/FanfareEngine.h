@@ -6,6 +6,7 @@
 #include "RigModel.h"
 #include "Version.h"
 #include "RigSerializer.h"
+#include "SaveHistory.h"
 #include <JuceHeader.h>
 #include "FanfareConstants.h"
 #include <algorithm>
@@ -2747,12 +2748,15 @@ public:
   }
 
   void saveStripToFile(int slotIdx, const juce::File& file) {
+    SaveHistory::recordSave(file);
     auto songSlot = exportSlot(slotIdx);
     auto json = Fanfare::RigSerializer::serializeStrip(songSlot);
-    Fanfare::RigSerializer::save(file, json);
+    if (Fanfare::RigSerializer::save(file, json))
+      SaveHistory::recordSave(file);
   }
 
   bool loadStripFromFile(int slotIdx, const juce::File& file) {
+    SaveHistory::snapshotBeforeLoadAsync(file);
     Fanfare::SongSlot songSlot;
     if (!Fanfare::RigSerializer::readStripFromFile(file, songSlot))
       return false;
@@ -3272,6 +3276,11 @@ public:
 
   void setSelectedSlot(int index) {
     selectedSlotIndex = juce::jlimit(0, (int)slots.size() - 1, index);
+  }
+
+  void resetScenesToDefault() {
+    initializeDefaultScenes();
+    currentSceneIndex = 0;
   }
 
 private:

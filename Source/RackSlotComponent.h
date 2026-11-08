@@ -74,6 +74,7 @@ public:
   void showColorPalette();
   void showRenameDialog();
   void showLoadStripMenu();
+  void showStripActionsMenu();
   void showPluginConfigMenu(int chainIndex);
   juce::String getActiveNoteRangeString() const;
 
@@ -123,6 +124,7 @@ private:
   juce::TextButton mp3Button;
   juce::TextButton saveStripBtn;
   juce::TextButton loadStripBtn;
+  juce::TextButton stripMenuBtn{"..."};
   juce::TextButton expandBtn{"+"};
   juce::TextButton collapseBtn{"-"};
   juce::TextButton collapsedMuteBtn{"M"};

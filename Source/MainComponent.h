@@ -32,6 +32,7 @@
 #include "UpdateChecker.h"
 #include "ToolRail.h"
 #include "QueueTilesPanel.h"
+#include "StartupWelcomeModal.h"
 #include "Web/OpenRigWebServer.h"
 #include "Web/StageHotspotController.h"
 #include "Web/StageRemoteModalOverlay.h"
@@ -88,6 +89,8 @@ public:
   void saveAuxLogoPreference() const;
   void showAboutDialog();
   void showQuickStartDialog(bool isFirstRunPrompt = false);
+  void showWelcomeModal();
+  void resetToNewSong();
   void showConfigOverlay();
   void setActiveMidiNoteLearner(juce::Component* learner) {
     activeMidiNoteLearner = learner;
@@ -352,6 +355,7 @@ private:
 
   // ===== Studio shell (Nov 2026): menu bar + tool rail + context sidebar =====
   std::unique_ptr<juce::MenuBarComponent> menuBar;
+  std::unique_ptr<Fanfare::StartupWelcomeModal> welcomeOverlay;
   Fanfare::ToolRail toolRail;
   Fanfare::QueueTilesPanel queueTilesPanel;
   juce::TextButton sceneMenuBtn{"..."};

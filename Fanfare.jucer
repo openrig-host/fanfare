@@ -70,6 +70,22 @@
             resource="0" file="Source/Mp3PlayerProcessor.h"/>
       <FILE id="mp3PlayerComponentH" name="Mp3PlayerComponent.h" compile="0"
             resource="0" file="Source/Mp3PlayerComponent.h"/>
+      <FILE id="embeddedMonoFontsH" name="EmbeddedMonoFonts.h" compile="0"
+            resource="0" file="Source/EmbeddedMonoFonts.h"/>
+      <FILE id="toolRailH" name="ToolRail.h" compile="0"
+            resource="0" file="Source/ToolRail.h"/>
+      <FILE id="queueTilesPanelH" name="QueueTilesPanel.h" compile="0"
+            resource="0" file="Source/QueueTilesPanel.h"/>
+      <FILE id="controllerProfileH" name="ControllerProfile.h" compile="0"
+            resource="0" file="Source/ControllerProfile.h"/>
+      <FILE id="fanfareSplashScreenH" name="FanfareSplashScreen.h" compile="0"
+            resource="0" file="Source/FanfareSplashScreen.h"/>
+      <FILE id="startupWelcomeModalH" name="StartupWelcomeModal.h" compile="0"
+            resource="0" file="Source/StartupWelcomeModal.h"/>
+      <FILE id="saveHistoryH" name="SaveHistory.h" compile="0"
+            resource="0" file="Source/SaveHistory.h"/>
+      <FILE id="versionHistoryModalH" name="VersionHistoryModal.h" compile="0"
+            resource="0" file="Source/VersionHistoryModal.h"/>
       <FILE id="webServerH" name="OpenRigWebServer.h" compile="0" resource="0"
             file="Source/Web/OpenRigWebServer.h"/>
       <FILE id="webServerCpp" name="OpenRigWebServer.cpp" compile="1" resource="0"
