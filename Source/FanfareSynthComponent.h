@@ -72,7 +72,11 @@ public:
       // BEFORE the first setValue() or preset values render unformatted.
       slider.setSliderStyle(vertical ? juce::Slider::LinearVertical
                                      : juce::Slider::RotaryHorizontalVerticalDrag);
-      slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 54, 14);
+      // Narrow Juno-style faders carry no text box; a value readout label sits
+      // underneath instead (see resized()). Knobs keep their attached readout.
+      slider.setTextBoxStyle(vertical ? juce::Slider::NoTextBox
+                                      : juce::Slider::TextBoxBelow,
+                             false, 46, 14);
       slider.setColour(juce::Slider::rotarySliderFillColourId,
                        ThemeManager::get(Theme::Role::accent));
       slider.setColour(juce::Slider::thumbColourId,
@@ -88,8 +92,25 @@ public:
       slider.setValue(proc.getParam(idx), juce::dontSendNotification);
       slider.updateText();
       slider.setTooltip(juce::String(d.label));
+      if (vertical) {
+        valueLabel.setText(
+            SynthUIHelpers::formatParamValue(
+                FanfareSynthProcessor::paramDefs()[idx], proc.getParam(idx)),
+            juce::dontSendNotification);
+        valueLabel.setFont(juce::FontOptions(10.5f));
+        valueLabel.setColour(juce::Label::textColourId,
+                             ThemeManager::get(Theme::Role::text));
+        valueLabel.setJustificationType(juce::Justification::centred);
+        addAndMakeVisible(valueLabel);
+      }
       slider.onValueChange = [this] {
         procRef.setParam(idx, (float)slider.getValue());
+        if (this->vertical)
+          valueLabel.setText(
+              SynthUIHelpers::formatParamValue(
+                  FanfareSynthProcessor::paramDefs()[idx],
+                  (float)slider.getValue()),
+              juce::dontSendNotification);
       };
       addAndMakeVisible(slider);
     }
@@ -123,6 +144,10 @@ public:
           juce::dontSendNotification);
     } else {
       slider.setValue(procRef.getParam(idx), juce::dontSendNotification);
+      if (vertical)
+        valueLabel.setText(
+            SynthUIHelpers::formatParamValue(d, procRef.getParam(idx)),
+            juce::dontSendNotification);
     }
   }
 
@@ -142,10 +167,14 @@ public:
     if (ccBtn.isVisible())
       ccBtn.setBounds(b.removeFromBottom(14).reduced(3, 1));
     nameLabel.setBounds(b.removeFromTop(13));
-    if (isEnum)
+    if (vertical) {
+      valueLabel.setBounds(b.removeFromBottom(15));
+      slider.setBounds(b.withSizeKeepingCentre(16, b.getHeight()));
+    } else if (isEnum) {
       combo.setBounds(b.reduced(2, 10));
-    else
+    } else {
       slider.setBounds(b);
+    }
   }
 
 private:
@@ -210,6 +239,7 @@ private:
   bool isEnum;
 
   juce::Label nameLabel;
+  juce::Label valueLabel;
   juce::Slider slider;
   juce::ComboBox combo;
   juce::TextButton ccBtn{"CC"};
@@ -239,7 +269,7 @@ public:
     controls.add(c); // panel owns the control
   }
 
-  static constexpr int kCellW = 56;
+  static constexpr int kCellW = 50;
   static constexpr int kCellH = 96;
 
   void syncAll() {
@@ -333,7 +363,7 @@ public:
 
   // ===== Layout ===============================================================
 
-  static constexpr int kCellW = 56;
+  static constexpr int kCellW = 50;
   static constexpr int kCellH = 96;
   static constexpr int kHeaderH = 34;
   static constexpr int kPanelPad = 6;
@@ -581,18 +611,39 @@ public:
 private:
   void addSection(int sec, std::vector<int> &params, const char *name) {
     auto *panel = new SynthSectionPanel(name);
-    // Column-major fill, 2 rows of cells per section band
+    // Column-major fill, 2 rows of cells per section band. The two envelope
+    // sections are special-cased Juno-style: ADSR as four narrow faders side
+    // by side on the top row (velocity depth as a knob below right on AMP).
     const int rows = 2;
-    const int cols = (int)((params.size() + rows - 1) / rows);
     const bool vertical = (sec == FanfareSynthProcessor::SecOsc ||
                            sec == FanfareSynthProcessor::SecAmpEnv ||
                            sec == FanfareSynthProcessor::SecFltEnv);
+    (void)vertical;
+    int maxCol = 0;
     for (int i = 0; i < (int)params.size(); ++i) {
-      const int col = i / rows, row = i % rows;
+      int col, row;
+      if (sec == FanfareSynthProcessor::SecFltEnv) {
+        col = i;
+        row = 0;
+      } else if (sec == FanfareSynthProcessor::SecAmpEnv) {
+        if (i < 4) {
+          col = i;
+          row = 0;
+        } else {
+          col = 3;
+          row = 1;
+        }
+      } else {
+        col = i / rows;
+        row = i % rows;
+      }
       panel->addControl(new SynthParamControl(synth, params[i], vertical),
                         kPanelPad + col * kCellW, kHeaderH + row * kCellH + 2);
+      maxCol = juce::jmax(maxCol, col);
     }
-    panel->setSize(kPanelPad * 2 + cols * kCellW, kHeaderH + rows * kCellH + 4);
+    // Uniform panel heights keep the two section bands aligned
+    panel->setSize(kPanelPad * 2 + (maxCol + 1) * kCellW,
+                   kHeaderH + rows * kCellH + 4);
     addAndMakeVisible(panel);
     ownedPanels.add(panel); // component owns the panel
     panels[(size_t)sec] = panel;
