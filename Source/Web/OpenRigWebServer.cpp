@@ -1704,17 +1704,66 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
     juce::Array<juce::File> docsDirs;
     docsDirs.add(exeDir.getChildFile("docs"));
     docsDirs.add(cwdDir.getChildFile("docs"));
+    docsDirs.add(FanfareConstants::getAppDirectory().getChildFile("docs"));
 
     if (tryServeFromDirs(docsDirs))
         return true;
 
-    // Also allow manual.html inside packaged Web/static if docs/ folder is absent
+    // Also allow manual.html inside packaged Web/static or right beside Fanfare.exe (exact filename only)
     if (cleanPath.equalsIgnoreCase("/manual.html")) {
         juce::Array<juce::File> fallbackManualDirs;
         fallbackManualDirs.add(exeDir.getChildFile("Web/static"));
         fallbackManualDirs.add(exeDir.getChildFile("static"));
         if (tryServeFromDirs(fallbackManualDirs))
             return true;
+
+        juce::File directManual = exeDir.getChildFile("manual.html");
+        if (!directManual.isSymbolicLink() && directManual.existsAsFile()) {
+            juce::MemoryBlock block;
+            if (directManual.loadFileAsData(block)) {
+                sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", block.getData(), block.getSize(), extraHeader);
+                return true;
+            }
+        }
+    }
+
+    // 4. Compiled-in Offline Stage Manual Fallback (works from standalone Fanfare.exe with no docs/ folder!)
+    struct EmbeddedAsset {
+        const char* path;
+        const unsigned char* data;
+        size_t len;
+        const char* mime;
+    };
+    static const EmbeddedAsset kEmbeddedManualAssets[] = {
+        { "/manual.html", EmbeddedWebAssets::MANUAL_HTML_DATA, EmbeddedWebAssets::MANUAL_HTML_DATA_LEN, "text/html; charset=utf-8" },
+        { "/Fanfare_Icon.png", EmbeddedWebAssets::MANUAL_ICON_PNG_DATA, EmbeddedWebAssets::MANUAL_ICON_PNG_DATA_LEN, "image/png" },
+        { "/assets-readonly/css/main.css", EmbeddedWebAssets::MANUAL_MAIN_CSS_DATA, EmbeddedWebAssets::MANUAL_MAIN_CSS_DATA_LEN, "text/css; charset=utf-8" },
+        { "/assets-readonly/css/fontawesome-all.min.css", EmbeddedWebAssets::MANUAL_FA_CSS_DATA, EmbeddedWebAssets::MANUAL_FA_CSS_DATA_LEN, "text/css; charset=utf-8" },
+        { "/assets-readonly/js/jquery.min.js", EmbeddedWebAssets::MANUAL_JQUERY_JS_DATA, EmbeddedWebAssets::MANUAL_JQUERY_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+        { "/assets-readonly/js/jquery.scrollex.min.js", EmbeddedWebAssets::MANUAL_SCROLLEX_JS_DATA, EmbeddedWebAssets::MANUAL_SCROLLEX_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+        { "/assets-readonly/js/jquery.scrolly.min.js", EmbeddedWebAssets::MANUAL_SCROLLY_JS_DATA, EmbeddedWebAssets::MANUAL_SCROLLY_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+        { "/assets-readonly/js/browser.min.js", EmbeddedWebAssets::MANUAL_BROWSER_JS_DATA, EmbeddedWebAssets::MANUAL_BROWSER_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+        { "/assets-readonly/js/breakpoints.min.js", EmbeddedWebAssets::MANUAL_BREAKPOINTS_JS_DATA, EmbeddedWebAssets::MANUAL_BREAKPOINTS_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+        { "/assets-readonly/js/util.js", EmbeddedWebAssets::MANUAL_UTIL_JS_DATA, EmbeddedWebAssets::MANUAL_UTIL_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+        { "/assets-readonly/js/main.js", EmbeddedWebAssets::MANUAL_MAIN_JS_DATA, EmbeddedWebAssets::MANUAL_MAIN_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+    };
+    for (const auto& asset : kEmbeddedManualAssets) {
+        if (cleanPath.equalsIgnoreCase(asset.path)) {
+            sendHttpDataResponse(socketHandle, 200, asset.mime, asset.data, asset.len, extraHeader);
+            return true;
+        }
+    }
+
+    // 5. For standalone Fanfare.exe without local docs/, redirect manual screenshots/webfonts
+    // to GitHub Pages when online (fails gracefully via alt text when offline on stage).
+    if (cleanPath.endsWithIgnoreCase(".png")
+        || cleanPath.endsWithIgnoreCase(".jpg")
+        || cleanPath.endsWithIgnoreCase(".jpeg")
+        || cleanPath.startsWithIgnoreCase("/assets-readonly/webfonts/")) {
+        const juce::String redirectHdr =
+            extraHeader + "Location: https://openrig-host.github.io/fanfare" + cleanPath + "\r\n";
+        sendHttpResponse(socketHandle, 302, "text/plain", "", redirectHdr);
+        return true;
     }
 
     sendHttpResponse(socketHandle, 404, "text/plain", "404 Not Found");
@@ -1745,6 +1794,7 @@ void WebServer::sendHttpDataResponse(void* socketHandle, int statusCode, const j
     switch (statusCode) {
         case 200: statusText = "OK"; break;
         case 204: statusText = "No Content"; break;
+        case 302: statusText = "Found"; break;
         case 400: statusText = "Bad Request"; break;
         case 401: statusText = "Unauthorized"; break;
         case 403: statusText = "Forbidden"; break;

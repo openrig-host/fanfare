@@ -12,18 +12,10 @@ inline void openHelpManual(const juce::String& anchor = {}) {
     if (frag.startsWithChar('#'))
         frag = frag.substring(1);
 
-    auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
-    bool hasLocalManual =
-        exeDir.getChildFile("manual.html").existsAsFile() ||
-        exeDir.getChildFile("docs/manual.html").existsAsFile() ||
-        exeDir.getChildFile("Web/static/manual.html").existsAsFile() ||
-        exeDir.getChildFile("Source/Web/static/manual.html").existsAsFile() ||
-        juce::File("Z:/davecore/docs/manual.html").existsAsFile() ||
-        juce::File("C:/davecore/docs/manual.html").existsAsFile();
-
-    juce::String urlStr = hasLocalManual
-        ? ("http://127.0.0.1:8080/manual.html?v=" OPENRIG_VERSION_STRING)
-        : "https://openrig-host.github.io/fanfare/manual.html";
+    // manual.html + its CSS/JS are compiled directly into EmbeddedWebAssets, so
+    // the local server always serves the latest v1.50 manual offline from any
+    // folder (including a standalone Fanfare.exe on the Desktop).
+    juce::String urlStr = "http://127.0.0.1:8080/manual.html?v=" OPENRIG_VERSION_STRING;
 
     if (frag.isNotEmpty())
         urlStr += "#" + frag;

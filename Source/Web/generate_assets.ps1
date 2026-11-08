@@ -25,9 +25,22 @@ $sbAll = [System.Text.StringBuilder]::new()
 [void]$sbAll.AppendLine("namespace EmbeddedWebAssets {")
 [void]$sbAll.AppendLine()
 
+$docsRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\docs")).Path
+
 [void]$sbAll.Append((Convert-FileToByteArray (Join-Path $PSScriptRoot "static\index.html") "INDEX_HTML_DATA"))
 [void]$sbAll.Append((Convert-FileToByteArray (Join-Path $PSScriptRoot "static\style.css") "STYLE_CSS_DATA"))
 [void]$sbAll.Append((Convert-FileToByteArray (Join-Path $PSScriptRoot "static\app.js") "APP_JS_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "manual.html") "MANUAL_HTML_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "Fanfare_Icon.png") "MANUAL_ICON_PNG_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "assets-readonly\css\main.css") "MANUAL_MAIN_CSS_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "assets-readonly\css\fontawesome-all.min.css") "MANUAL_FA_CSS_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "assets-readonly\js\jquery.min.js") "MANUAL_JQUERY_JS_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "assets-readonly\js\jquery.scrollex.min.js") "MANUAL_SCROLLEX_JS_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "assets-readonly\js\jquery.scrolly.min.js") "MANUAL_SCROLLY_JS_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "assets-readonly\js\browser.min.js") "MANUAL_BROWSER_JS_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "assets-readonly\js\breakpoints.min.js") "MANUAL_BREAKPOINTS_JS_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "assets-readonly\js\util.js") "MANUAL_UTIL_JS_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "assets-readonly\js\main.js") "MANUAL_MAIN_JS_DATA"))
 
 [void]$sbAll.AppendLine("} // namespace EmbeddedWebAssets")
 [void]$sbAll.AppendLine("} // namespace OpenRig")
