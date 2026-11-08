@@ -78,11 +78,12 @@ target_link_libraries(Fanfare PRIVATE
 if(WIN32)
     set_property(TARGET Fanfare PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
-    # Deploy latest binary to Google Drive shared folder if present
+    # Deploy latest binary to workspace root and Google Drive shared folder if present
     add_custom_command(TARGET Fanfare POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Fanfare>" "${CMAKE_CURRENT_SOURCE_DIR}/Fanfare.exe"
         COMMAND ${CMAKE_COMMAND} -E echo "Checking for Google Drive deployment folder..."
         COMMAND cmd /c "if exist \"E:\\My Drive\\Fanfare - Latest versions\" (copy /Y \"$<TARGET_FILE:Fanfare>\" \"E:\\My Drive\\Fanfare - Latest versions\\Fanfare.exe\")"
-        COMMENT "Deploying latest binary to E:/My Drive/Fanfare - Latest versions"
+        COMMENT "Deploying latest Fanfare.exe to workspace root and E:/My Drive/Fanfare - Latest versions"
     )
 endif()
 

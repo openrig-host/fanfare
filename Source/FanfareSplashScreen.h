@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "BoutiqueLookAndFeel.h"
+#include "FanfareSplashArtData.h"
 #include "Version.h"
 
 #ifdef _WIN32
@@ -13,51 +14,40 @@
 
 namespace Fanfare {
 
-// Shared brand icon badge (used in both FanfareSplashScreen and StartupWelcomeModal):
-// dark rounded square with recessed dial ring, #FFA02F orange sweep arc, and crisp white needle.
+inline const juce::Image& getBrandBadgeEmblem() {
+    static const juce::Image img = juce::ImageFileFormat::loadFrom(
+        SplashAssets::BADGE_EMBLEM_PNG, SplashAssets::BADGE_EMBLEM_PNG_LEN);
+    return img;
+}
+
+inline const juce::Image& getSplashHeroArtwork() {
+    static const juce::Image img = juce::ImageFileFormat::loadFrom(
+        SplashAssets::SPLASH_ART_JPG, SplashAssets::SPLASH_ART_JPG_LEN);
+    return img;
+}
+
+// Shared Fanfare brand icon badge (used in both FanfareSplashScreen and StartupWelcomeModal):
+// dark Studio rounded square with Fanfare's signature forte 'f' (#FFA02F) + treble clef (#F4F5F7).
 inline void drawBrandBadge(juce::Graphics& g, juce::Rectangle<float> box) {
-    const float radius = box.getWidth() * 0.21f;
+    const float radius = box.getWidth() * 0.19f;
     g.setColour(juce::Colour(0xFF202226));
     g.fillRoundedRectangle(box, radius);
-    g.setColour(juce::Colour(0xFF2F3138));
+    g.setColour(juce::Colour(0xFF31343C));
     g.drawRoundedRectangle(box.reduced(0.5f), radius, 1.0f);
 
-    const float cx = box.getCentreX();
-    const float cy = box.getCentreY() + box.getHeight() * 0.03f;
-    const float r  = box.getWidth() * 0.29f;
-    const float strokeW = juce::jmax(2.2f, box.getWidth() * 0.068f);
-
-    const float startAng = juce::MathConstants<float>::pi * 1.22f; // ~7:30
-    const float endAng   = juce::MathConstants<float>::pi * 2.78f; // ~4:30
-    const float valAng   = juce::MathConstants<float>::pi * 2.16f; // ~1:00
-
-    // Inactive dark track arc
-    juce::Path track;
-    track.addCentredArc(cx, cy, r, r, 0.0f, startAng, endAng, true);
-    g.setColour(juce::Colour(0xFF32353D));
-    g.strokePath(track, juce::PathStrokeType(strokeW, juce::PathStrokeType::curved,
-                                             juce::PathStrokeType::rounded));
-
-    // Signature #FFA02F orange arc
-    juce::Path arc;
-    arc.addCentredArc(cx, cy, r, r, 0.0f, startAng, valAng, true);
-    g.setColour(juce::Colour(0xFFFFA02F));
-    g.strokePath(arc, juce::PathStrokeType(strokeW, juce::PathStrokeType::curved,
-                                           juce::PathStrokeType::rounded));
-
-    // Crisp white pointer needle from center toward 1 o'clock
-    const float needleAngle = valAng - juce::MathConstants<float>::halfPi;
-    const float nx0 = cx + std::cos(needleAngle) * (r * 0.12f);
-    const float ny0 = cy + std::sin(needleAngle) * (r * 0.12f);
-    const float nx1 = cx + std::cos(needleAngle) * (r * 1.02f);
-    const float ny1 = cy + std::sin(needleAngle) * (r * 1.02f);
-    g.setColour(juce::Colour(0xFFF4F5F7));
-    g.drawLine(nx0, ny0, nx1, ny1, strokeW * 0.78f);
+    const auto& emblem = getBrandBadgeEmblem();
+    if (emblem.isValid()) {
+        juce::Graphics::ScopedSaveState state(g);
+        g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+        const auto pad = box.getWidth() * 0.055f;
+        g.drawImage(emblem, box.reduced(pad), juce::RectanglePlacement::centred);
+    }
 }
 
 //==============================================================================
-// Borderless Studio splash screen with synchronous pre-loop painting, smooth
-// progress pill, and orbital stage-routing artwork on the right pane.
+// Borderless Studio splash screen with synchronous pre-loop painting, sleek
+// #FFA02F progress bar, Fanfare f-clef emblem badge, and bespoke stage-keyboard
+// & fader spotlight artwork on the right pane.
 class FanfareSplashScreen : public juce::Component, private juce::Timer {
 public:
     std::function<void()> onFinished;
@@ -66,6 +56,10 @@ public:
         activeInstance() = this;
         setOpaque(true);
         setSize(kWidth, kHeight);
+
+        // Pre-decode splash art once before showing window so first paint is instant
+        (void)getBrandBadgeEmblem();
+        (void)getSplashHeroArtwork();
 
         const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();
         const auto area = display != nullptr ? display->userArea
@@ -101,8 +95,8 @@ public:
         forceImmediatePaint();
     }
 
-    // Smoothly completes the bar + needle sweep, holds briefly so the splash
-    // never flashes abruptly, and fades out over 240ms.
+    // Smoothly completes the bar, holds briefly so the splash never flashes
+    // abruptly, and fades out over ~240ms.
     void finishAndDismiss() {
         targetProgress = 1.0f;
         stageLabel = "Ready";
@@ -113,107 +107,76 @@ public:
 
     void paint(juce::Graphics& g) override {
         const auto bounds = getLocalBounds().toFloat();
-        constexpr float leftW = 214.0f;
+        constexpr float leftW = 220.0f;
 
         // 1. Left identity column (#151618)
-        juce::Rectangle<float> leftCol(0.0f, 0.0f, leftW, bounds.getHeight());
+        const juce::Rectangle<float> leftCol(0.0f, 0.0f, leftW, bounds.getHeight());
         g.setColour(juce::Colour(0xFF151618));
         g.fillRect(leftCol);
 
-        // Brand badge
-        drawBrandBadge(g, {34.0f, 98.0f, 48.0f, 48.0f});
+        // Fanfare f+clef brand badge
+        drawBrandBadge(g, {34.0f, 104.0f, 54.0f, 54.0f});
 
         // Product name
-        g.setColour(juce::Colour(0xFFF0F1F4));
-        g.setFont(BoutiqueLookAndFeel::uiFont(30.0f, true));
-        g.drawText("Fanfare", 34, 162, 160, 34, juce::Justification::centredLeft, false);
+        g.setColour(juce::Colour(0xFFF3F4F6));
+        g.setFont(BoutiqueLookAndFeel::uiFont(29.0f, true));
+        g.drawText("Fanfare", 34, 174, 168, 34, juce::Justification::centredLeft, false);
 
-        // Version string
-        g.setColour(juce::Colour(0xFF888A92));
-        g.setFont(BoutiqueLookAndFeel::uiFont(14.5f, false));
-        g.drawText("Version " OPENRIG_VERSION_STRING, 34, 200, 160, 20,
+        // Version string in JetBrains Mono
+        g.setColour(juce::Colour(0xFF8A8E96));
+        g.setFont(BoutiqueLookAndFeel::monoFont(12.5f, false));
+        g.drawText("Version " OPENRIG_VERSION_STRING, 34, 211, 168, 18,
                    juce::Justification::centredLeft, false);
 
-        // Sleek Nota-style pill progress bar
-        const juce::Rectangle<float> trackRect(34.0f, 238.0f, 144.0f, 5.5f);
-        g.setColour(juce::Colour(0xFF0C0D0F));
-        g.fillRoundedRectangle(trackRect, 2.75f);
+        // Sleek #FFA02F pill progress bar
+        const juce::Rectangle<float> trackRect(34.0f, 246.0f, 152.0f, 5.0f);
+        g.setColour(juce::Colour(0xFF23252A));
+        g.fillRoundedRectangle(trackRect, 2.5f);
 
         const float p = juce::jlimit(0.06f, 1.0f, displayedProgress);
         const float fillW = trackRect.getWidth() * p;
         g.setColour(juce::Colour(0xFFFFA02F));
-        g.fillRoundedRectangle(trackRect.withWidth(fillW), 2.75f);
+        g.fillRoundedRectangle(trackRect.withWidth(fillW), 2.5f);
 
         if (stageLabel.isNotEmpty()) {
-            g.setColour(juce::Colour(0xFF5D6068));
+            g.setColour(juce::Colour(0xFF676B74));
             g.setFont(BoutiqueLookAndFeel::uiFont(11.5f, false));
-            g.drawText(stageLabel, 34, 252, 164, 16, juce::Justification::centredLeft, true);
+            g.drawText(stageLabel, 34, 260, 172, 16, juce::Justification::centredLeft, true);
         }
 
-        // 2. Right orbital console artwork (#1B1D20 + subtle radial teal-slate glow)
+        // 2. Right pane: bespoke Fanfare stage-keyboard & fader spotlight artwork
         const juce::Rectangle<float> rightPane(leftW, 0.0f, bounds.getWidth() - leftW, bounds.getHeight());
         {
             juce::Graphics::ScopedSaveState clipState(g);
             g.reduceClipRegion(rightPane.toNearestInt());
+            g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
 
-            g.setColour(juce::Colour(0xFF1A1C1F));
-            g.fillRect(rightPane);
-
-            const float hubX = leftW + rightPane.getWidth() * 0.72f;
-            const float hubY = bounds.getHeight() * 0.515f;
-
-            juce::ColourGradient glow(juce::Colour(0xFF27393D), hubX, hubY,
-                                      juce::Colour(0xFF17191C), leftW + 10.0f, 24.0f, true);
-            glow.addColour(0.52, juce::Colour(0xFF1D2427));
-            g.setGradientFill(glow);
-            g.fillRect(rightPane);
-
-            // Concentric orbital rings + strip/scene node markers
-            const float radii[3]   = {48.0f, 110.0f, 178.0f};
-            const int   nodeCnt[3] = {6, 8, 12};
-            const float phaseOff[3]= {0.35f, 0.18f, 0.08f};
-
-            for (int ri = 0; ri < 3; ++ri) {
-                const float rr = radii[ri];
-                g.setColour(juce::Colour(0xFF393C42));
-                g.drawEllipse(hubX - rr, hubY - rr, rr * 2.0f, rr * 2.0f, 2.4f);
-
-                g.setColour(juce::Colour(0xFF2E3137));
-                for (int n = 0; n < nodeCnt[ri]; ++n) {
-                    const float a = phaseOff[ri] +
-                                    juce::MathConstants<float>::twoPi * (float)n / (float)nodeCnt[ri];
-                    const float nx = hubX + std::cos(a) * rr;
-                    const float ny = hubY + std::sin(a) * rr;
-                    g.fillEllipse(nx - 3.4f, ny - 3.4f, 6.8f, 6.8f);
-                }
+            const auto& art = getSplashHeroArtwork();
+            if (art.isValid()) {
+                g.drawImage(art, rightPane, juce::RectanglePlacement::fillDestination);
+            } else {
+                g.setColour(juce::Colour(0xFF181A1E));
+                g.fillRect(rightPane);
             }
 
-            // Highlighted bus/routing nodes (cyan-blue stereo buses + silver reference node)
-            auto drawAccentNode = [&](float radius, float angleRad, juce::Colour col) {
-                const float nx = hubX + std::cos(angleRad) * radius;
-                const float ny = hubY + std::sin(angleRad) * radius;
-                g.setColour(juce::Colour(0xFF1A1C1F));
-                g.fillEllipse(nx - 10.0f, ny - 10.0f, 20.0f, 20.0f);
-                g.setColour(col);
-                g.fillEllipse(nx - 8.2f, ny - 8.2f, 16.4f, 16.4f);
-            };
+            // Soft left-edge blend into the #151618 identity column
+            juce::ColourGradient seamBlend(juce::Colour(0xEA151618), leftW, 0.0f,
+                                           juce::Colour(0x00151618), leftW + 44.0f, 0.0f, false);
+            g.setGradientFill(seamBlend);
+            g.fillRect(juce::Rectangle<float>(leftW, 0.0f, 44.0f, bounds.getHeight()));
 
-            drawAccentNode(radii[0], -1.12f, juce::Colour(0xFF9EA3AC)); // inner silver node
-            drawAccentNode(radii[1],  2.86f, juce::Colour(0xFF55B4D4)); // middle upper-left cyan
-            drawAccentNode(radii[1],  1.95f, juce::Colour(0xFF55B4D4)); // middle lower-left cyan
-            drawAccentNode(radii[2], -0.62f, juce::Colour(0xFF55B4D4)); // outer upper-right cyan
-
-            // Signature #FFA02F orange vector ray sweeping subtly with progress
-            const float sweepAngle = 0.22f + displayedProgress * 0.16f; // ~13 deg -> ~22 deg
-            const float rayLen = 220.0f;
-            const float rx = hubX + std::cos(sweepAngle) * rayLen;
-            const float ry = hubY + std::sin(sweepAngle) * rayLen;
-            g.setColour(juce::Colour(0xFFFFA02F));
-            g.drawLine(hubX, hubY, rx, ry, 3.2f);
+            // Subtle stage spotlight warm-up bloom as startup progresses
+            const float bloomAlpha = 0.04f + 0.09f * displayedProgress;
+            const float glowX = leftW + rightPane.getWidth() * 0.67f;
+            const float glowY = bounds.getHeight() * 0.34f;
+            juce::ColourGradient stageBloom(juce::Colour(0xFFFFA02F).withAlpha(bloomAlpha), glowX, glowY,
+                                            juce::Colour(0x00FFA02F), glowX - 180.0f, glowY + 140.0f, true);
+            g.setGradientFill(stageBloom);
+            g.fillRect(rightPane);
         }
 
-        // Divider between left identity column and right artwork + subtle 1px card border
-        g.setColour(juce::Colour(0xFF24262B));
+        // Hairline divider + outer 1px window frame
+        g.setColour(juce::Colour(0x8826282D));
         g.drawVerticalLine((int)leftW, 0.0f, bounds.getHeight());
 
         g.setColour(juce::Colour(0xFF2E3036));

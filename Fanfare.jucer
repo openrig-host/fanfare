@@ -80,6 +80,8 @@
             resource="0" file="Source/ControllerProfile.h"/>
       <FILE id="fanfareSplashScreenH" name="FanfareSplashScreen.h" compile="0"
             resource="0" file="Source/FanfareSplashScreen.h"/>
+      <FILE id="fanfareSplashArtDataH" name="FanfareSplashArtData.h" compile="0"
+            resource="0" file="Source/FanfareSplashArtData.h"/>
       <FILE id="startupWelcomeModalH" name="StartupWelcomeModal.h" compile="0"
             resource="0" file="Source/StartupWelcomeModal.h"/>
       <FILE id="saveHistoryH" name="SaveHistory.h" compile="0"
