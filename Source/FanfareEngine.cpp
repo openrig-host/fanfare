@@ -890,6 +890,9 @@ void FanfareEngine::loadPluginList()
       sampObj->setProperty("slots", samplerSlots);
       st->setProperty("sampler", sampObj);
 
+      // Fanfare Synth (native) — whole patch as one JSON object
+      st->setProperty("synth", s->getSynth().getState());
+
       // Save MP3 Player / Backing Track Settings
       auto *mp3Obj = new juce::DynamicObject();
       auto &mp3 = s->getMp3Player();
@@ -1355,6 +1358,13 @@ void FanfareEngine::applyRig(const juce::var &rig)
               }
             }
           }
+        }
+
+        // Restore Fanfare Synth (native)
+        if (auto *synthObj =
+                v.getProperty("synth", juce::var()).getDynamicObject()) {
+          auto &synthLive = s->getSynth();
+          synthLive.applyState(juce::var(synthObj));
         }
 
         // Restore MP3 Player / Backing Track Settings
@@ -1876,6 +1886,10 @@ Fanfare::SongSlot FanfareEngine::exportSlot(int slotIdx)
       songSlot.sampler.slots[idx].volumeCC = cfg.volumeCC;
     }
 
+    auto& synthExport = s->getSynth();
+    songSlot.synth.enabled = synthExport.enabled.load();
+    songSlot.synth.state = synthExport.getState();
+
     auto& mp3Live = s->getMp3Player();
     songSlot.mp3Player.loopMode = (int)mp3Live.getLoopMode();
     songSlot.mp3Player.shuffle = mp3Live.isShuffleEnabled();
@@ -2042,6 +2056,11 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
       cfg.volumeCC = songSlot.sampler.slots[idx].volumeCC;
       samplerLive.setSlotConfig(idx, cfg);
     }
+
+    auto& synthLive = s->getSynth();
+    synthLive.enabled.store(songSlot.synth.enabled);
+    if (songSlot.synth.state.isObject())
+      synthLive.applyState(songSlot.synth.state);
 
     auto& mp3Live = s->getMp3Player();
     mp3Live.clearPlaylist();

@@ -68,6 +68,10 @@
             resource="0" file="Source/SamplerProcessor.h"/>
       <FILE id="samplerComponentH" name="SamplerComponent.h" compile="0"
             resource="0" file="Source/SamplerComponent.h"/>
+      <FILE id="fanfareSynthProcH" name="FanfareSynthProcessor.h" compile="0"
+            resource="0" file="Source/FanfareSynthProcessor.h"/>
+      <FILE id="fanfareSynthCompH" name="FanfareSynthComponent.h" compile="0"
+            resource="0" file="Source/FanfareSynthComponent.h"/>
       <FILE id="waveformSpliceEditorH" name="WaveformSpliceEditor.h" compile="0"
             resource="0" file="Source/WaveformSpliceEditor.h"/>
       <FILE id="midiRemoteSettingsH" name="MidiRemoteSettings.h" compile="0"

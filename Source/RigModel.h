@@ -110,6 +110,13 @@ struct Mp3PlayerSettings {
     float gain = 1.0f;
 };
 
+// Native synth (FanfareSynthProcessor). The full patch rides as a single
+// JSON var produced/consumed by the processor's getState()/applyState().
+struct SynthSettings {
+    bool enabled = false;
+    juce::var state;
+};
+
 struct SongSlot {
     juce::String name;
     int iconIndex = 0;
@@ -162,6 +169,7 @@ struct HarmParams {
     HarmParams harmonizer;
     SamplerSettings sampler;
     Mp3PlayerSettings mp3Player;
+    SynthSettings synth;
 
     std::vector<PluginState> chain;
 };

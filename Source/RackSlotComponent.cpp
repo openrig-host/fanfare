@@ -516,6 +516,15 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
       onShowMp3Player();
   };
 
+  addAndMakeVisible(synthButton);
+  synthButton.setButtonText("SYN");
+  Fanfare::setButtonRole(synthButton, Fanfare::ButtonRole::Standard);
+  synthButton.setTooltip("Open the native Fanfare Synth (pads / leads / basses)");
+  synthButton.onClick = [this] {
+    if (onShowSynth)
+      onShowSynth();
+  };
+
   addAndMakeVisible(saveStripBtn);
   saveStripBtn.setButtonText("SAVE");
   Fanfare::setButtonRole(saveStripBtn, Fanfare::ButtonRole::Standard);
@@ -557,7 +566,7 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   noteRangeLabel.addMouseListener(&noteRangeLabelListener, false);
 
   for (auto *b : {&ccButton, &noteRangeButton, &customizeButton, &arpButton,
-                  &samplerButton, &mp3Button, &bypassButton, &fohRoutingBtn, &iemRoutingBtn,
+                  &samplerButton, &mp3Button, &synthButton, &bypassButton, &fohRoutingBtn, &iemRoutingBtn,
                   &saveStripBtn, &loadStripBtn})
     b->addMouseListener(this, false);
 
@@ -1061,6 +1070,7 @@ void RackSlotComponent::resized() {
     customizeButton.setVisible(false);
     arpButton.setVisible(false);
     samplerButton.setVisible(false);
+    synthButton.setVisible(false);
     mp3Button.setVisible(false);
     saveStripBtn.setVisible(false);
     loadStripBtn.setVisible(false);
@@ -1130,6 +1140,7 @@ void RackSlotComponent::resized() {
   customizeButton.setVisible(!isReturn && !isMonitorIn);
   arpButton.setVisible(!isReturn && !isMonitorIn && !studio);
   samplerButton.setVisible(!isReturn && !isMonitorIn && !studio);
+  synthButton.setVisible(!isReturn && !isMonitorIn && !studio);
   saveStripBtn.setVisible(!isReturn && !studio);
   loadStripBtn.setVisible(!isReturn && !studio);
   stripMenuBtn.setVisible(!isReturn && studio);
@@ -1244,8 +1255,9 @@ void RackSlotComponent::resized() {
 
   arpButton.setBounds(leftX, centerY - 26, sideWidth, 22);
   samplerButton.setBounds(leftX, centerY, sideWidth, 22);
+  synthButton.setBounds(leftX, centerY + 26, sideWidth, 22);
   mp3Button.setVisible(kMp3DecksEnabled && !isReturn && !isMonitorIn);
-  mp3Button.setBounds(leftX, centerY + 26, sideWidth, 22);
+  mp3Button.setBounds(leftX, centerY + 52, sideWidth, 22);
 
   if (!isReturn) {
     int utilW = hasSideBtns ? sideWidth : juce::jlimit(24, 36, (w - 40) / 2);
@@ -1290,6 +1302,7 @@ void RackSlotComponent::setSpecialModes(bool monitorIn, bool accordion, bool ret
   customizeButton.setVisible(!isReturn && !isMonitorIn);
   arpButton.setVisible(!isReturn && !isMonitorIn);
   samplerButton.setVisible(!isReturn && !isMonitorIn);
+  synthButton.setVisible(!isReturn && !isMonitorIn);
 
   ccButton.setVisible(!isReturn);
   noteRangeButton.setVisible(!isReturn);
@@ -1546,16 +1559,17 @@ void RackSlotComponent::showStripActionsMenu() {
     menu.addItem(2, "Dynamics, EQ & sends (DYN)...");
     menu.addItem(3, "MIDI effects (Arp / Harmonizer)...");
     menu.addItem(4, "8-pad sampler...");
+    menu.addItem(5, "Fanfare synth...");
     if (kMp3DecksEnabled)
-      menu.addItem(5, "MP3 playlist deck...");
+      menu.addItem(6, "MP3 playlist deck...");
   }
-  menu.addItem(6, "CC parameter mappings...");
+  menu.addItem(7, "CC parameter mappings...");
   menu.addSeparator();
-  menu.addItem(7, "Save strip preset...");
-  menu.addItem(8, "Load strip preset...");
+  menu.addItem(8, "Save strip preset...");
+  menu.addItem(9, "Load strip preset...");
   menu.addSeparator();
-  menu.addItem(9, "Rename strip...");
-  menu.addItem(10, "Strip colour...");
+  menu.addItem(10, "Rename strip...");
+  menu.addItem(11, "Strip colour...");
 
   juce::Component::SafePointer<RackSlotComponent> safe(this);
   menu.showMenuAsync(
@@ -1568,12 +1582,13 @@ void RackSlotComponent::showStripActionsMenu() {
           case 2: if (safe->onShowChannelStrip) safe->onShowChannelStrip(); break;
           case 3: if (safe->onShowArpeggiator) safe->onShowArpeggiator(); break;
           case 4: if (safe->onShowSampler) safe->onShowSampler(); break;
-          case 5: if (safe->onShowMp3Player) safe->onShowMp3Player(); break;
-          case 6: if (safe->onShowCCDialog) safe->onShowCCDialog(0); break;
-          case 7: if (safe->onSaveStrip) safe->onSaveStrip(); break;
-          case 8: safe->showLoadStripMenu(); break;
-          case 9: safe->showRenameDialog(); break;
-          case 10: safe->showColorPalette(); break;
+          case 5: if (safe->onShowSynth) safe->onShowSynth(); break;
+          case 6: if (safe->onShowMp3Player) safe->onShowMp3Player(); break;
+          case 7: if (safe->onShowCCDialog) safe->onShowCCDialog(0); break;
+          case 8: if (safe->onSaveStrip) safe->onSaveStrip(); break;
+          case 9: safe->showLoadStripMenu(); break;
+          case 10: safe->showRenameDialog(); break;
+          case 11: safe->showColorPalette(); break;
           default: break;
         }
       });

@@ -15,6 +15,7 @@
 #include "OctaveHarmonizer.h"
 #include "SamplerProcessor.h"
 #include "Mp3PlayerProcessor.h"
+#include "FanfareSynthProcessor.h"
 #include <atomic>
 #include <map>
 #include <memory>
@@ -39,6 +40,7 @@ public:
     arpeggiator.prepare(sampleRate);
     harmonizer.prepare(sampleRate);
     sampler.prepare(sampleRate);
+    synth.prepare(sampleRate, maxBlockSize);
     mp3Player.prepare(sampleRate, maxBlockSize);
 
     // Pre-allocate scratch buffer for summed instrument rendering (audio-thread safe)
@@ -59,6 +61,7 @@ public:
   OctaveHarmonizer& getHarmonizer() { return harmonizer; }
   SamplerProcessor& getSampler() { return sampler; }
   Mp3PlayerProcessor& getMp3Player() { return mp3Player; }
+  FanfareSynthProcessor& getSynth() { return synth; }
 
   // Per-plugin-chain-slot settings for instrument stacking (note range, level, enable)
   struct ChainSlotSettings {
@@ -218,6 +221,27 @@ public:
 
     // MP3 Player audio streaming
     mp3Player.processBlock(slotBuffer);
+
+    // Fanfare Synth (native instrument, alongside the sampler — before the
+    // plugin chain). Notes are filtered by the slot's note range like the
+    // chain instruments; CCs reach it unfiltered so its built-in mappings
+    // (cutoff/reso/atk/rel/volume) work without touching the CC allow list.
+    if (synth.enabled.load()) {
+      synthMidiScratch.clear();
+      int lo = lowNote.load();
+      int hi = highNote.load();
+      for (const auto meta : midiMessages) {
+        auto msg = meta.getMessage();
+        if (msg.isNoteOnOrOff()) {
+          int n = msg.getNoteNumber();
+          if (n >= lo && n <= hi)
+            synthMidiScratch.addEvent(msg, meta.samplePosition);
+        } else {
+          synthMidiScratch.addEvent(msg, meta.samplePosition);
+        }
+      }
+      synth.processBlock(slotBuffer, synthMidiScratch);
+    }
 
     // Harmonizer with redirection support: generated harmony notes go to harmonyScratch
     harmonyScratch.clear();
@@ -1360,6 +1384,8 @@ private:
   OctaveHarmonizer harmonizer;
   SamplerProcessor sampler;
   Mp3PlayerProcessor mp3Player;
+  FanfareSynthProcessor synth;
+  juce::MidiBuffer synthMidiScratch; // note-range-filtered MIDI for the synth
 
   FanfareDSP::ChannelStripProcessor strip;
 

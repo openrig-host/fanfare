@@ -141,6 +141,11 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
                     }
                 }
             }
+            // Fanfare Synth (native) — whole patch rides as one JSON object
+            if (auto* syv = cv.getProperty("synth", juce::var()).getDynamicObject()) {
+                slot.synth.enabled = syv->getProperty("enabled");
+                slot.synth.state = juce::var(syv);
+            }
             if (auto* mp3Obj = cv.getProperty("mp3Player", juce::var()).getDynamicObject()) {
                 slot.mp3Player.loopMode = mp3Obj->hasProperty("loopMode") ? (int)mp3Obj->getProperty("loopMode") : 0;
                 slot.mp3Player.shuffle = mp3Obj->hasProperty("shuffle") ? (bool)mp3Obj->getProperty("shuffle") : false;
@@ -496,6 +501,10 @@ juce::var RigSerializer::songToVar(const Song& song) {
         samplerObj->setProperty("slots", samplerSlots);
         st->setProperty("sampler", samplerObj);
 
+        // Fanfare Synth (native) — state var already includes "enabled"
+        if (s.synth.state.isObject())
+            st->setProperty("synth", s.synth.state);
+
         auto* mp3Obj = new juce::DynamicObject();
         mp3Obj->setProperty("loopMode", s.mp3Player.loopMode);
         mp3Obj->setProperty("shuffle", s.mp3Player.shuffle);
@@ -769,6 +778,10 @@ juce::String RigSerializer::serializeStrip(const SongSlot& slot) {
         samplerObj->setProperty("slots", samplerSlots);
         st->setProperty("sampler", samplerObj);
 
+        // Fanfare Synth (native) — state var already includes "enabled"
+        if (slot.synth.state.isObject())
+            st->setProperty("synth", slot.synth.state);
+
         auto* mp3Obj = new juce::DynamicObject();
         mp3Obj->setProperty("loopMode", slot.mp3Player.loopMode);
         mp3Obj->setProperty("shuffle", slot.mp3Player.shuffle);
@@ -939,6 +952,11 @@ bool RigSerializer::readStripFromFile(const juce::File& file, SongSlot& outSlot)
                 }
             }
         }
+    }
+
+    if (auto* syv = cv.getProperty("synth", juce::var()).getDynamicObject()) {
+        outSlot.synth.enabled = syv->getProperty("enabled");
+        outSlot.synth.state = juce::var(syv);
     }
 
     if (auto* mp3Obj = cv.getProperty("mp3Player", juce::var()).getDynamicObject()) {

@@ -271,6 +271,16 @@ void MainComponent::setupSlotComponents() {
       mp3Overlay->centreWithSize(780, 580);
     };
 
+    // Fanfare Synth Dialog (native instrument)
+    comp->onShowSynth = [this, slot] {
+      synthOverlay.reset(new FanfareSynthComponent(*slot, [this] {
+        synthOverlay.reset();
+        resized();
+      }));
+      addAndMakeVisible(synthOverlay.get());
+      synthOverlay->centreWithSize(980, 560);
+    };
+
     // Note Range Dialog (CallOutBox)
     comp->onShowNoteRangeDialog = [this, slot, comp] {
       auto *nrComp = new NoteRangeComponent(*slot);
