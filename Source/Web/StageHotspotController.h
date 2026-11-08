@@ -27,8 +27,8 @@ public:
     /**
      * Start the stage Wi-Fi hotspot in the background.
      */
-    void startHotspot(const juce::String& ssid = "OpenRig-Stage",
-                      const juce::String& password = "openrig2026",
+    void startHotspot(const juce::String& ssid = "Fanfare-Stage",
+                      const juce::String& password = "fanfare2026",
                       std::function<void(bool success, juce::String message)> onFinished = nullptr);
 
     /**
@@ -67,8 +67,8 @@ private:
     std::atomic<State> currentState{State::Stopped};
     std::atomic<TaskType> pendingTask{TaskType::None};
 
-    juce::String activeSsid{"OpenRig-Stage"};
-    juce::String activePassword{"openrig2026"};
+    juce::String activeSsid{"Fanfare-Stage"};
+    juce::String activePassword{"fanfare2026"};
     juce::String lastMessage{"Hotspot Stopped"};
 
     std::function<void(bool, juce::String)> pendingCallback;

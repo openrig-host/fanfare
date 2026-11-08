@@ -245,9 +245,10 @@ void StageRemoteModalOverlay::resized() {
     hotspotToggleBtn.setBounds(leftCol.removeFromTop(32));
     hotspotStatusLabel.setBounds(leftCol.removeFromTop(22));
 
-    leftCol.removeFromTop(6);
-    auto wifiQrArea = leftCol.removeFromTop(130).withSizeKeepingCentre(130, 130);
+    leftCol.removeFromTop(10);
+    auto wifiQrArea = leftCol.removeFromTop(180).withSizeKeepingCentre(180, 180);
     wifiQrComponent.setBounds(wifiQrArea);
+    leftCol.removeFromTop(4);
     wifiQrCaption.setBounds(leftCol.removeFromTop(20));
 
     // Right Column (Web Companion HUD)
@@ -262,9 +263,10 @@ void StageRemoteModalOverlay::resized() {
 
     otherIpsLabel.setBounds(rightCol.removeFromTop(26));
 
-    rightCol.removeFromTop(6);
-    auto webQrArea = rightCol.removeFromTop(130).withSizeKeepingCentre(130, 130);
+    rightCol.removeFromTop(10);
+    auto webQrArea = rightCol.removeFromTop(180).withSizeKeepingCentre(180, 180);
     webQrComponent.setBounds(webQrArea);
+    rightCol.removeFromTop(4);
     webQrCaption.setBounds(rightCol.removeFromTop(20));
 }
 

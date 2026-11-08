@@ -15,8 +15,8 @@ void StageHotspotController::startHotspot(const juce::String& ssid,
                                           std::function<void(bool, juce::String)> onFinished) {
     {
         std::lock_guard<std::mutex> lock(taskMutex);
-        activeSsid = ssid.isNotEmpty() ? ssid : "OpenRig-Stage";
-        activePassword = password.length() >= 8 ? password : "openrig2026";
+        activeSsid = ssid.isNotEmpty() ? ssid : "Fanfare-Stage";
+        activePassword = password.length() >= 8 ? password : "fanfare2026";
         pendingCallback = onFinished;
         pendingTask = TaskType::Start;
         currentState = State::Starting;
@@ -177,14 +177,31 @@ bool StageHotspotController::executeWindowsHotspotScript(bool enable,
 }
 
 juce::StringArray StageHotspotController::getAvailableIpAddresses() {
-    juce::StringArray ips;
+    juce::StringArray preferredLanIps;
+    juce::StringArray otherUnicastIps;
     auto addrs = juce::IPAddress::getAllAddresses();
     for (const auto& addr : addrs) {
-        juce::String s = addr.toString();
-        if (!addr.isNull() && s != "127.0.0.1" && s.contains(".")) {
-            ips.add(s);
-        }
+        if (addr.isNull() || addr.isIPv6)
+            continue;
+        const uint8_t a = addr.address[0];
+        const uint8_t b = addr.address[1];
+        // Exclude 0.x.x.x, loopback 127.x.x.x, dead link-local APIPA 169.254.x.x, and multicast/broadcast 224..255.x.x.x
+        if (a == 0 || a == 127 || (a == 169 && b == 254) || a >= 224)
+            continue;
+
+        const juce::String s = addr.toString();
+        const bool isPrivateLan = (a == 192 && b == 168)
+                               || (a == 10)
+                               || (a == 172 && b >= 16 && b <= 31);
+        if (isPrivateLan)
+            preferredLanIps.addIfNotAlreadyThere(s);
+        else
+            otherUnicastIps.addIfNotAlreadyThere(s);
     }
+
+    juce::StringArray ips;
+    ips.addArray(preferredLanIps);
+    ips.addArray(otherUnicastIps);
     if (ips.isEmpty()) {
         ips.add("192.168.137.1"); // Windows default hotspot IP
     }
