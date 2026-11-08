@@ -293,9 +293,23 @@ public:
     return -1;
   }
 
+  // UI-thread note injection (onscreen keyboard / future tools). Events are
+  // queued under a spin lock and merged at the next audio block — same
+  // convention as RackSlot::injectMidi.
+  void injectNote(int note, bool on, float vel = 0.85f) {
+    juce::SpinLock::ScopedLockType sl(uiMidiLock);
+    uiMidiQueue.addEvent(on ? juce::MidiMessage::noteOn(1, note, vel)
+                            : juce::MidiMessage::noteOff(1, note), 0);
+  }
+
   // ===== Audio =================================================================
 
   void allNotesOff() {
+    {
+      juce::SpinLock::ScopedTryLockType sl(uiMidiLock);
+      if (sl.isLocked())
+        uiMidiQueue.clear();
+    }
     for (auto &u : units) {
       u.active = false;
       u.reservedMono = false;
@@ -329,6 +343,18 @@ public:
         u.active = false;
         u.reservedMono = false;
       }
+
+    { // Merge UI-injected notes (onscreen keyboard); skip this block if the
+      // UI thread holds the lock — the queue just rides to the next block
+      juce::MidiBuffer ui;
+      {
+        juce::SpinLock::ScopedTryLockType sl(uiMidiLock);
+        if (sl.isLocked())
+          ui.swapWith(uiMidiQueue);
+      }
+      if (!ui.isEmpty())
+        midiMessages.addEvents(ui, 0, -1, 0);
+    }
 
     // --- MIDI ---
     for (const auto meta : midiMessages) {
@@ -1094,6 +1120,9 @@ private:
   std::array<std::atomic<float>, kNumParams> p{};
   std::atomic<float> pitchBend{0.0f};
   std::atomic<float> modWheel{0.0f};
+
+  juce::SpinLock uiMidiLock;      // guards uiMidiQueue (UI thread <-> audio)
+  juce::MidiBuffer uiMidiQueue;   // notes injected from the message thread
 
   bool sustainOn = false;
   std::vector<int> monoStack;      // currently held notes (mono/legato/unison)

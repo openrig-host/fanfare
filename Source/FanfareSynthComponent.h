@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <array>
+#include <map>
 #include <vector>
 #include "RackSlot.h"
 #include "FanfareConstants.h"
@@ -284,10 +285,305 @@ private:
   juce::OwnedArray<SynthParamControl> controls;
 };
 
+
+// ==============================================================================
+// OnscreenKeyboard — piano strip driven by the QWERTY rows (Z-M = lower
+// octave, Q-U = upper octave, cursor keys shift octave) so the synth can be
+// played without a MIDI controller. Mouse click/drag works too. Notes go to
+// the processor via injectNote(); pressed keys are highlighted.
+// ==============================================================================
+class OnscreenKeyboard : public juce::Component {
+public:
+  explicit OnscreenKeyboard(FanfareSynthProcessor &p) : proc(p) {
+    setWantsKeyboardFocus(true);
+
+    int offset = 0;
+    for (const char *row : {rowLo, rowHi}) {
+      for (int i = 0; row[i] != 0; ++i)
+        keyMap.push_back({(int)std::toupper((unsigned char)row[i]), offset + i});
+      offset += 12;
+    }
+
+    octDownBtn.setButtonText("OCT -");
+    octDownBtn.setColour(juce::TextButton::buttonColourId,
+                         ThemeManager::get(Theme::Role::panel));
+    octDownBtn.setTooltip("Shift the keyboard down an octave (cursor left)");
+    octDownBtn.onClick = [this] { shiftOctave(-12); };
+    addAndMakeVisible(octDownBtn);
+
+    octUpBtn.setButtonText("OCT +");
+    octUpBtn.setColour(juce::TextButton::buttonColourId,
+                       ThemeManager::get(Theme::Role::panel));
+    octUpBtn.setTooltip("Shift the keyboard up an octave (cursor right)");
+    octUpBtn.onClick = [this] { shiftOctave(12); };
+    addAndMakeVisible(octUpBtn);
+
+    panicBtn.setButtonText("ALL OFF");
+    panicBtn.setColour(juce::TextButton::buttonColourId,
+                       ThemeManager::get(Theme::Role::danger).darker(0.4f));
+    panicBtn.setTooltip("Silence all synth voices");
+    panicBtn.onClick = [this] {
+      releaseAll();
+      proc.allNotesOff();
+    };
+    addAndMakeVisible(panicBtn);
+  }
+
+  void shiftOctave(int semis) {
+    releaseAll();
+    baseNote = juce::jlimit(12, 96, baseNote + semis);
+    repaint();
+  }
+
+  void paint(juce::Graphics &g) override {
+    auto b = getLocalBounds().toFloat();
+    g.setColour(ThemeManager::get(Theme::Role::panelAlt));
+    g.fillRoundedRectangle(b, 5.0f);
+    g.setColour(ThemeManager::get(Theme::Role::border));
+    g.drawRoundedRectangle(b.reduced(0.5f), 5.0f, 1.0f);
+
+    g.setColour(ThemeManager::get(Theme::Role::textDim));
+    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    g.drawText(noteName(baseNote) + juce::String(" - ") + noteName(baseNote + 24) +
+                   juce::String("   QWERTY: Z-M lower / Q-U upper, cursor keys = octave"),
+               getLocalBounds().reduced(8, 0).removeFromTop(17),
+               juce::Justification::centredLeft);
+
+    auto keys = keysArea().toFloat();
+    const int numWhites = 15;
+    const float wW = keys.getWidth() / (float)numWhites;
+
+    for (int s = 0; s <= 24; ++s) {
+      if (isBlackPc(s % 12))
+        continue;
+      auto r = juce::Rectangle<float>(
+          keys.getX() + whiteIndexOf(s) * wW, keys.getY(), wW - 1.0f,
+          keys.getHeight());
+      const bool on = isNoteOn(baseNote + s);
+      g.setColour(on ? ThemeManager::get(Theme::Role::accent).withAlpha(0.75f)
+                     : ThemeManager::get(Theme::Role::raised));
+      g.fillRoundedRectangle(r, 3.0f);
+      g.setColour(ThemeManager::get(Theme::Role::border));
+      g.drawRoundedRectangle(r, 3.0f, 1.0f);
+      const char ch = charForOffset(s);
+      if (ch != 0) {
+        g.setColour(on ? ThemeManager::get(Theme::Role::textOnAccent)
+                       : ThemeManager::get(Theme::Role::textFaint));
+        g.setFont(juce::FontOptions(10.0f));
+        g.drawText(juce::String::charToString(
+                       (juce::juce_wchar)std::toupper((unsigned char)ch)),
+                   r.toNearestInt().removeFromBottom(13),
+                   juce::Justification::centred);
+      }
+    }
+
+    for (int s = 0; s <= 24; ++s) {
+      if (!isBlackPc(s % 12))
+        continue;
+      const float bx =
+          keys.getX() + (float)whiteIndexOf(s) * wW - wW * 0.3f;
+      auto r = juce::Rectangle<float>(bx, keys.getY(), wW * 0.6f,
+                                      keys.getHeight() * 0.58f);
+      const bool on = isNoteOn(baseNote + s);
+      g.setColour(on ? ThemeManager::get(Theme::Role::accent)
+                     : juce::Colours::black);
+      g.fillRoundedRectangle(r, 2.0f);
+    }
+  }
+
+  void resized() override {
+    auto b = getLocalBounds().reduced(4);
+    panicBtn.setBounds(b.removeFromRight(58).removeFromTop(18).reduced(1));
+    octUpBtn.setBounds(b.removeFromRight(44).removeFromTop(18).reduced(1));
+    octDownBtn.setBounds(b.removeFromRight(44).removeFromTop(18).reduced(1));
+  }
+
+  bool keyPressed(const juce::KeyPress &key) override {
+    if (key.isKeyCode(juce::KeyPress::leftKey)) {
+      shiftOctave(-12);
+      return true;
+    }
+    if (key.isKeyCode(juce::KeyPress::rightKey)) {
+      shiftOctave(12);
+      return true;
+    }
+    const int code = normalizeCode(key.getKeyCode());
+    for (auto &km : keyMap) {
+      if (km.first != code)
+        continue;
+      if (keyHeldByCode.find(km.first) == keyHeldByCode.end()) {
+        const int n = baseNote + km.second;
+        keyHeldByCode[km.first] = n;
+        proc.injectNote(n, true);
+        repaint();
+      }
+      return true;
+    }
+    return false;
+  }
+
+  bool keyStateChanged(bool /*isKeyDown*/) override {
+    // Poll every mapped key: self-heals missed key-ups after focus switches
+    for (auto &km : keyMap) {
+      const bool down = juce::KeyPress::isKeyCurrentlyDown(km.first);
+      auto it = keyHeldByCode.find(km.first);
+      if (down && it == keyHeldByCode.end()) {
+        const int n = baseNote + km.second;
+        keyHeldByCode[km.first] = n;
+        proc.injectNote(n, true);
+        repaint();
+      } else if (!down && it != keyHeldByCode.end()) {
+        proc.injectNote(it->second, false);
+        keyHeldByCode.erase(it);
+        repaint();
+      }
+    }
+    return !keyHeldByCode.empty();
+  }
+
+  void focusLost(juce::Component::FocusChangeType) override { releaseAll(); }
+
+  // Public escape hatch for the owner's destructor (releaseAll is private)
+  void releaseAllNotes() { releaseAll(); }
+
+  void mouseDown(const juce::MouseEvent &e) override {
+    grabKeyboardFocus();
+    mouseNote = noteFromPos(e.position);
+    if (mouseNote >= 0)
+      proc.injectNote(mouseNote, true);
+    repaint();
+  }
+
+  void mouseDrag(const juce::MouseEvent &e) override {
+    const int n = noteFromPos(e.position);
+    if (n != mouseNote) {
+      if (mouseNote >= 0)
+        proc.injectNote(mouseNote, false);
+      mouseNote = n;
+      if (n >= 0)
+        proc.injectNote(n, true);
+      repaint();
+    }
+  }
+
+  void mouseUp(const juce::MouseEvent &) override {
+    if (mouseNote >= 0)
+      proc.injectNote(mouseNote, false);
+    mouseNote = -1;
+    repaint();
+  }
+
+  void mouseExit(const juce::MouseEvent &) override {
+    if (mouseNote >= 0) {
+      proc.injectNote(mouseNote, false);
+      mouseNote = -1;
+      repaint();
+    }
+  }
+
+private:
+  FanfareSynthProcessor &proc;
+  int baseNote = 48; // C3 — leftmost visible key
+  int mouseNote = -1;
+  std::vector<std::pair<int, int>> keyMap; // keycode -> semitone offset
+  std::map<int, int> keyHeldByCode;        // keycode -> sounding note
+
+  juce::TextButton octDownBtn, octUpBtn, panicBtn;
+
+  static inline const char *rowLo = "zsxdcvgbhnjm"; // Z-M: base octave
+  static inline const char *rowHi = "q2w3er5t6y7ui"; // Q-U: base+12 octave
+
+  static bool isBlackPc(int pc) {
+    return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
+  }
+
+  static int normalizeCode(int code) {
+    return (code >= 'a' && code <= 'z') ? code - 32 : code;
+  }
+
+  static char charForOffset(int s) {
+    if (s >= 0 && s < 12)
+      return rowLo[s];
+    if (s >= 12 && s < 24)
+      return rowHi[s - 12];
+    return 0;
+  }
+
+  static int whiteIndexOf(int s) {
+    int w = 0;
+    for (int i = 0; i < s; ++i)
+      if (!isBlackPc(i % 12))
+        ++w;
+    return w;
+  }
+
+  static juce::String noteName(int midi) {
+    static const char *names[] = {"C",  "C#", "D",  "D#", "E",  "F",
+                                  "F#", "G",  "G#", "A",  "A#", "B"};
+    return juce::String(names[midi % 12]) + juce::String(midi / 12 - 1);
+  }
+
+  juce::Rectangle<int> keysArea() const {
+    return getLocalBounds().reduced(6).withTrimmedTop(18);
+  }
+
+  bool isNoteOn(int n) const {
+    if (n == mouseNote)
+      return true;
+    for (auto &kv : keyHeldByCode)
+      if (kv.second == n)
+        return true;
+    return false;
+  }
+
+  int noteFromPos(juce::Point<float> p) const {
+    auto keys = keysArea().toFloat();
+    if (!keys.contains(p))
+      return -1;
+    const int numWhites = 15;
+    const float wW = keys.getWidth() / (float)numWhites;
+    if (p.y < keys.getY() + keys.getHeight() * 0.58f) {
+      for (int s = 0; s <= 24; ++s) {
+        if (!isBlackPc(s % 12))
+          continue;
+        const float bx =
+            keys.getX() + (float)whiteIndexOf(s) * wW - wW * 0.3f;
+        if (p.x >= bx && p.x < bx + wW * 0.6f)
+          return baseNote + s;
+      }
+    }
+    int wi = juce::jlimit(0, numWhites - 1,
+                          (int)((p.x - keys.getX()) / wW));
+    int w = 0;
+    for (int s = 0; s <= 24; ++s) {
+      if (!isBlackPc(s % 12)) {
+        if (w == wi)
+          return baseNote + s;
+        ++w;
+      }
+    }
+    return -1;
+  }
+
+  void releaseAll() {
+    for (auto &kv : keyHeldByCode)
+      proc.injectNote(kv.second, false);
+    keyHeldByCode.clear();
+    if (mouseNote >= 0) {
+      proc.injectNote(mouseNote, false);
+      mouseNote = -1;
+    }
+    repaint();
+  }
+
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OnscreenKeyboard)
+};
+
 class FanfareSynthComponent : public juce::Component {
 public:
   FanfareSynthComponent(RackSlot &slot, std::function<void()> onClose)
-      : slotRef(slot), synth(slot.getSynth()), closeCallback(onClose) {
+      : slotRef(slot), synth(slot.getSynth()), closeCallback(onClose),
+        keyboard(synth) {
     titleLabel.setText("FANFARE SYNTH", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(17.0f, juce::Font::bold));
     titleLabel.setColour(juce::Label::textColourId,
@@ -358,7 +654,14 @@ public:
   }
 
   ~FanfareSynthComponent() override {
+    keyboard.releaseAllNotes();
+    synth.allNotesOff();
     Fanfare::MidiLearnBus::getInstance().disarmIfOwner(this);
+  }
+
+  void visibilityChanged() override {
+    if (isVisible())
+      keyboard.grabKeyboardFocus();
   }
 
   // ===== Layout ===============================================================
@@ -413,7 +716,9 @@ public:
     b.removeFromTop(4);
     auto hint = b.removeFromBottom(16);
     hintLabel.setBounds(hint);
-    b.removeFromBottom(4);
+    b.removeFromBottom(2);
+    keyboard.setBounds(b.removeFromBottom(106));
+    b.removeFromBottom(2);
 
     // Row A: OSC | FILTER | AMP ENV | FILTER ENV
     const juce::Point<int> origin = b.getPosition();
@@ -665,6 +970,7 @@ private:
   juce::TextButton prevBtn, nextBtn, saveBtn, delBtn;
   juce::TextButton closeBtn{"X"};
   juce::Label hintLabel;
+  OnscreenKeyboard keyboard;
 
   juce::OwnedArray<SynthSectionPanel> ownedPanels;
   std::array<SynthSectionPanel *, FanfareSynthProcessor::kNumSections> panels{};
