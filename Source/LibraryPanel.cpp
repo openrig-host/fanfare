@@ -465,6 +465,14 @@ juce::File LibraryList::getSelectedFile() const {
 }
 
 LibraryPanel::LibraryPanel() {
+  addAndMakeVisible(titleLabel);
+  titleLabel.setFont(BoutiqueLookAndFeel::uiFont(14.0f, true));
+  titleLabel.setJustificationType(juce::Justification::centredLeft);
+
+  addAndMakeVisible(countLabel);
+  countLabel.setFont(BoutiqueLookAndFeel::monoFont(11.0f));
+  countLabel.setJustificationType(juce::Justification::centredRight);
+
   addAndMakeVisible(searchEditor);
   searchEditor.setFont(BoutiqueLookAndFeel::uiFont(13.0f, false));
   searchEditor.onTextChange = [this] {
@@ -475,21 +483,14 @@ LibraryPanel::LibraryPanel() {
   };
 
   addAndMakeVisible(newFolderBtn);
-  newFolderBtn.setButtonText("+ FOLDER");
-  Fanfare::setButtonRole(newFolderBtn, Fanfare::ButtonRole::Standard);
-  newFolderBtn.setTooltip("Create a new category folder for songs/strips");
+  newFolderBtn.setButtonText("+ Folder");
+  Fanfare::setButtonRole(newFolderBtn, Fanfare::ButtonRole::Subtle);
+  newFolderBtn.setTooltip("Create a new category folder");
   newFolderBtn.onClick = [this] {
-    int activeTab = tabs->getCurrentTabIndex();
-    if (activeTab == 0 && setupsList) setupsList->createNewFolder();
-    else if (activeTab == 1 && stripsList) stripsList->createNewFolder();
-    else if (activeTab == 3 && setsList) setsList->createNewFolder();
+    if (context == Context::Songs && setupsList) setupsList->createNewFolder();
+    else if (context == Context::Strips && stripsList) stripsList->createNewFolder();
+    else if (context == Context::Queue && setsList) setsList->createNewFolder();
   };
-
-  // Horizontal Front Panel top tabs (no sideways text)
-  tabs = std::make_unique<juce::TabbedComponent>(
-      juce::TabbedButtonBar::TabsAtTop);
-  tabs->setTabBarDepth(26);
-  tabs->setOutline(0);
 
   setupsList = std::make_unique<LibraryList>(LibraryList::Kind::Setups);
   setupsList->setDirectory(Fanfare::RigLibrary::getSongsDirectory(), "*.json");
@@ -497,31 +498,91 @@ LibraryPanel::LibraryPanel() {
     if (onSetupDoubleClicked)
       onSetupDoubleClicked(f);
   };
-  tabs->addTab("SONGS", ThemeManager::get(Theme::Role::panel), setupsList.get(), false);
+  addChildComponent(setupsList.get());
 
   stripsList = std::make_unique<LibraryList>(LibraryList::Kind::Strips);
   stripsList->setDirectory(Fanfare::RigLibrary::getPresetsDirectory(), "*.orstrip");
-  tabs->addTab("STRIPS", ThemeManager::get(Theme::Role::panel), stripsList.get(), false);
+  addChildComponent(stripsList.get());
 
   setlistPanel = std::make_unique<Fanfare::SetlistPanel>();
-  tabs->addTab("SETLIST", ThemeManager::get(Theme::Role::panel), setlistPanel.get(), false);
+  addChildComponent(setlistPanel.get());
 
+  // Queue context: live queue tiles on top, saved queue maps (.orset) below
   setsList = std::make_unique<LibraryList>(LibraryList::Kind::Sets);
   setsList->setDirectory(Fanfare::RigLibrary::getSetsDirectory(), "*.orset");
   setsList->onDoubleClicked = [this](const juce::File &f) {
     if (onSetDoubleClicked)
       onSetDoubleClicked(f);
   };
-  tabs->addTab("MAPS", ThemeManager::get(Theme::Role::panel), setsList.get(), false);
+  mapsLabel.setText("Saved queue maps", juce::dontSendNotification);
+  mapsLabel.setFont(BoutiqueLookAndFeel::uiFont(12.0f, true));
+  queueContainer.addAndMakeVisible(mapsLabel);
+  queueContainer.addAndMakeVisible(setsList.get());
+  addChildComponent(queueContainer);
 
-  addAndMakeVisible(tabs.get());
   ThemeManager::getInstance().addChangeListener(this);
   applyTheme();
+  setContext(Context::Songs);
   setSize(240, 400);
 }
 
 LibraryPanel::~LibraryPanel() {
   ThemeManager::getInstance().removeChangeListener(this);
+}
+
+juce::String LibraryPanel::contextTitle(Context c) {
+  switch (c) {
+    case Context::Songs:   return "Songs";
+    case Context::Strips:  return "Strips";
+    case Context::Setlist: return "Setlist";
+    case Context::Queue:   return "Queue";
+    case Context::Midi:    return "MIDI monitor";
+    default:               return {};
+  }
+}
+
+juce::Component *LibraryPanel::contentFor(Context c) const {
+  switch (c) {
+    case Context::Songs:   return setupsList.get();
+    case Context::Strips:  return stripsList.get();
+    case Context::Setlist: return setlistPanel.get();
+    case Context::Queue:   return const_cast<juce::Component *>(&queueContainer);
+    case Context::Midi:    return midiMonitor;
+    default:               return nullptr;
+  }
+}
+
+bool LibraryPanel::contextHasSearch() const {
+  return context == Context::Songs || context == Context::Strips || context == Context::Queue;
+}
+
+void LibraryPanel::setContext(Context c) {
+  context = c;
+  for (int i = 0; i < (int)Context::NumContexts; ++i)
+    if (auto *comp = contentFor((Context)i))
+      comp->setVisible((Context)i == c);
+  titleLabel.setText(contextTitle(c), juce::dontSendNotification);
+  searchEditor.setVisible(contextHasSearch());
+  newFolderBtn.setVisible(contextHasSearch());
+  refreshAll();
+  resized();
+  repaint();
+}
+
+void LibraryPanel::setQueueContent(juce::Component *tiles) {
+  queueTiles = tiles;
+  if (queueTiles != nullptr)
+    queueContainer.addAndMakeVisible(queueTiles);
+  resized();
+}
+
+void LibraryPanel::setMidiMonitorContent(juce::Component *monitor) {
+  midiMonitor = monitor;
+  if (midiMonitor != nullptr) {
+    addChildComponent(midiMonitor);
+    midiMonitor->setVisible(context == Context::Midi);
+  }
+  resized();
 }
 
 void LibraryPanel::changeListenerCallback(juce::ChangeBroadcaster*) {
@@ -532,17 +593,15 @@ void LibraryPanel::changeListenerCallback(juce::ChangeBroadcaster*) {
 
 void LibraryPanel::applyTheme() {
   const auto &t = ThemeManager::getInstance().active();
-  searchEditor.setTextToShowWhenEmpty("Filter library...", t.textFaint);
+  searchEditor.setTextToShowWhenEmpty(ThemeManager::isStudio() ? "Search" : "Filter library...", t.textFaint);
   searchEditor.setColour(juce::TextEditor::backgroundColourId, t.dark ? t.sunken : t.raised);
   searchEditor.setColour(juce::TextEditor::outlineColourId, t.dark ? t.border : t.borderStrong);
   searchEditor.setColour(juce::TextEditor::focusedOutlineColourId, t.accent);
   searchEditor.setColour(juce::TextEditor::textColourId, t.text);
   searchEditor.applyColourToAllText(t.text, true);
-
-  if (tabs) {
-    for (int i = 0; i < tabs->getNumTabs(); ++i)
-      tabs->setTabBackgroundColour(i, t.panel);
-  }
+  titleLabel.setColour(juce::Label::textColourId, t.text);
+  countLabel.setColour(juce::Label::textColourId, t.textFaint);
+  mapsLabel.setColour(juce::Label::textColourId, t.textDim);
 }
 
 void LibraryPanel::refreshAll() {
@@ -552,6 +611,17 @@ void LibraryPanel::refreshAll() {
     setupsList->refresh();
   if (stripsList)
     stripsList->refresh();
+
+  int n = -1;
+  juce::String unit;
+  switch (context) {
+    case Context::Songs:   n = setupsList ? setupsList->getFileCount() : 0; unit = "songs"; break;
+    case Context::Strips:  n = stripsList ? stripsList->getFileCount() : 0; unit = "strips"; break;
+    case Context::Queue:   n = setsList ? setsList->getFileCount() : 0; unit = "maps"; break;
+    case Context::Setlist: n = Fanfare::SetlistManager::getInstance().getSetups().size(); unit = "in set"; break;
+    default: break;
+  }
+  countLabel.setText(n >= 0 ? juce::String(n) + " " + unit : juce::String(), juce::dontSendNotification);
 }
 
 void LibraryPanel::visibilityChanged() {
@@ -560,7 +630,7 @@ void LibraryPanel::visibilityChanged() {
 }
 
 juce::File LibraryPanel::getSelectedPresetFile() const {
-  if (tabs->getCurrentTabIndex() == 1 && stripsList != nullptr)
+  if (context == Context::Strips && stripsList != nullptr)
     return stripsList->getSelectedFile();
   return {};
 }
@@ -582,16 +652,48 @@ void LibraryPanel::assignLearnedTrigger(SetupMidiTrigger t) {
 }
 
 void LibraryPanel::resized() {
-  const int btnW = 62;
-  searchEditor.setBounds(5, 5, getWidth() - 10 - btnW - 4, 24);
-  newFolderBtn.setBounds(getWidth() - 5 - btnW, 5, btnW, 24);
-  tabs->setBounds(1, 33, getWidth() - 2, getHeight() - 34);
+  auto b = getLocalBounds().reduced(8, 6);
+  auto header = b.removeFromTop(26);
+  countLabel.setBounds(header.removeFromRight(80));
+  titleLabel.setBounds(header);
+  b.removeFromTop(4);
+
+  if (contextHasSearch()) {
+    auto row = b.removeFromTop(26);
+    newFolderBtn.setBounds(row.removeFromRight(68));
+    row.removeFromRight(6);
+    searchEditor.setBounds(row);
+    b.removeFromTop(6);
+  }
+
+  auto content = b.withTrimmedLeft(-8).withTrimmedRight(-8); // lists run edge to edge
+  setupsList->setBounds(content);
+  stripsList->setBounds(content);
+  setlistPanel->setBounds(b);
+  if (midiMonitor != nullptr)
+    midiMonitor->setBounds(b);
+
+  queueContainer.setBounds(content);
+  auto q = queueContainer.getLocalBounds();
+  if (queueTiles != nullptr) {
+    const int tilesH = juce::jmin(q.getHeight() * 2 / 3, 10 * 30 + 40);
+    queueTiles->setBounds(q.removeFromTop(tilesH).reduced(8, 0));
+  }
+  q.removeFromTop(6);
+  mapsLabel.setBounds(q.removeFromTop(20).reduced(8, 0));
+  setsList->setBounds(q);
 }
 
 void LibraryPanel::paint(juce::Graphics &g) {
   const auto &t = ThemeManager::getInstance().active();
   auto bounds = getLocalBounds().toFloat();
   g.setColour(t.panel);
+  if (t.isStudio()) {
+    g.fillRect(bounds);
+    g.setColour(t.border);
+    g.drawVerticalLine(getWidth() - 1, 0.0f, (float)getHeight());
+    return;
+  }
   g.fillRoundedRectangle(bounds, 3.0f);
   g.setColour(t.border);
   g.drawRoundedRectangle(bounds.reduced(0.5f), 3.0f, 1.0f);

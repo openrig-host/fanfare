@@ -37,6 +37,7 @@ public:
 
   juce::File getSelectedFile() const;
   juce::File getDirectory() const { return directory; }
+  int getFileCount() const { return (int)allFiles.size(); }
 
   void toggleFolderCollapsed(const juce::String &category);
   void createNewFolder();
@@ -66,10 +67,15 @@ private:
 
 #include "SetlistPanel.h"
 
+// LibraryPanel - the context sidebar beside the ToolRail. One context is
+// shown at a time (Songs, Strips, Setlist, Queue, MIDI monitor); the rail
+// switches it. Replaces the old tab strip ("vertical ribbon" layout).
 class LibraryPanel : public juce::Component,
                      public juce::DragAndDropContainer,
                      private juce::ChangeListener {
 public:
+  enum class Context { Songs = 0, Strips, Setlist, Queue, Midi, NumContexts };
+
   LibraryPanel();
   ~LibraryPanel() override;
 
@@ -83,6 +89,15 @@ public:
   bool isLearning() const;
   void assignLearnedTrigger(struct SetupMidiTrigger t);
 
+  void setContext(Context c);
+  Context getContext() const { return context; }
+  static juce::String contextTitle(Context c);
+
+  // Hosted content owned elsewhere (MainComponent): the queue tiles panel is
+  // shown above the saved queue maps; the MIDI monitor fills its context.
+  void setQueueContent(juce::Component *queueTiles);
+  void setMidiMonitorContent(juce::Component *monitor);
+
   std::function<void(const juce::File &)> onSetupDoubleClicked;
   std::function<void(const juce::File &)> onSetDoubleClicked;
 
@@ -91,11 +106,18 @@ public:
 private:
   void changeListenerCallback(juce::ChangeBroadcaster*) override;
   void applyTheme();
+  juce::Component *contentFor(Context c) const;
+  bool contextHasSearch() const;
+
+  Context context = Context::Songs;
+  juce::Label titleLabel, countLabel, mapsLabel;
   juce::TextEditor searchEditor;
   juce::TextButton newFolderBtn;
-  std::unique_ptr<juce::TabbedComponent> tabs;
   std::unique_ptr<LibraryList> setsList, setupsList, stripsList;
   std::unique_ptr<Fanfare::SetlistPanel> setlistPanel;
+  juce::Component queueContainer;
+  juce::Component *queueTiles = nullptr;
+  juce::Component *midiMonitor = nullptr;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LibraryPanel)
 };

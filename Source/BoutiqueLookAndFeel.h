@@ -94,6 +94,14 @@ public:
 
   void drawPopupMenuBackground(juce::Graphics &g, int width, int height) override;
 
+  // Menu bar (File / View / Rig / Tools / Help) - flat, text-only items
+  juce::Font getMenuBarFont(juce::MenuBarComponent &, int itemIndex, const juce::String &itemText) override;
+  void drawMenuBarBackground(juce::Graphics &g, int width, int height, bool isMouseOverBar,
+                             juce::MenuBarComponent &) override;
+  void drawMenuBarItem(juce::Graphics &g, int width, int height, int itemIndex,
+                       const juce::String &itemText, bool isMouseOverItem, bool isMenuOpen,
+                       bool isMouseOverBar, juce::MenuBarComponent &) override;
+
   void drawScrollbar(juce::Graphics &g, juce::ScrollBar &scrollbar, int x, int y,
                      int width, int height, bool isScrollbarVertical,
                      int thumbStartPosition, int thumbSize, bool isMouseOver,

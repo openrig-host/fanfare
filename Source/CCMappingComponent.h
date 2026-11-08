@@ -3,7 +3,9 @@
 #include "MidiLearnBus.h"
 #include "RackSlot.h"
 #include <JuceHeader.h>
+#include "BoutiqueLookAndFeel.h"
 #include "ButtonRoles.h"
+#include "ControllerProfile.h"
 #include "HelpLauncher.h"
 #include "ThemeManager.h"
 
@@ -49,7 +51,7 @@ public:
     paramDetector.safeOwner = this;
     // --- Fader CC row ---
     addAndMakeVisible(fohLabel);
-    Fanfare::styleHelpButton(helpBtn, "#cc-assignments", "HAAALP! Open the CC Assignments & Inverse Drawbar section of the User's Manual");
+    Fanfare::styleHelpButton(helpBtn, "#cc-assignments", "Open the CC Assignments & Inverse Drawbar section of the User's Manual");
     addAndMakeVisible(helpBtn);
     fohLabel.setText("FOH CC:", juce::dontSendNotification);
     addAndMakeVisible(fohCCEditor);
@@ -219,10 +221,18 @@ public:
     passBtn.addListener(this);
 
     addAndMakeVisible(ck88PresetBtn);
-    ck88PresetBtn.setButtonText("CK88");
+    ck88PresetBtn.setButtonText("PROFILE");
     Fanfare::setButtonRole(ck88PresetBtn, Fanfare::ButtonRole::Standard);
-    ck88PresetBtn.setTooltip("Allow common CK88 CCs on this slot (mod, volume, expression, etc.)");
+    ck88PresetBtn.setTooltip("Allow every control in your controller profile on this strip "
+                             "(click). Right-click or press Edit to configure your controller's knobs once.");
     ck88PresetBtn.addListener(this);
+    ck88PresetBtn.addMouseListener(this, false);
+
+    addAndMakeVisible(editProfileBtn);
+    editProfileBtn.setButtonText("EDIT...");
+    Fanfare::setButtonRole(editProfileBtn, Fanfare::ButtonRole::Subtle);
+    editProfileBtn.setTooltip("Define your controller's knobs, faders and pedals once (saved globally)");
+    editProfileBtn.onClick = [] { Fanfare::showControllerProfileEditor(); };
 
     // --- Quick Learn ---
     addAndMakeVisible(quickLearnBtn);
@@ -274,10 +284,13 @@ public:
     Fanfare::setButtonRole(delBtn, Fanfare::ButtonRole::Danger);
     delBtn.onClick = [this] { deleteSelected(); };
 
+    const auto lblFont = ThemeManager::isStudio()
+                             ? BoutiqueLookAndFeel::uiFont(12.0f, true)
+                             : juce::Font(juce::FontOptions("Barlow Condensed", 12.0f, juce::Font::bold));
     for (auto* lbl : { &fohLabel, &iemLabel, &muteLabel, &swapLabel, &chLabel,
                        &minLabel, &maxLabel, &ccLabel, &passFromLabel, &passToLabel,
                        &selMinLabel, &selMaxLabel }) {
-      lbl->setFont(juce::FontOptions("Barlow Condensed", 12.0f, juce::Font::bold));
+      lbl->setFont(lblFont);
       lbl->setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
     }
     fohLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::foh));
@@ -285,11 +298,11 @@ public:
 
     addAndMakeVisible(statusLabel);
     statusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
-    statusLabel.setFont(juce::FontOptions(12.0f));
+    statusLabel.setFont(BoutiqueLookAndFeel::uiFont(12.0f));
 
     updateMappingList();
     mappingList.updateContent();
-    setSize(660, 510);
+    setSize(700, 520);
 
     // Opened via long-press on the strip's MUTE / FOH / IEM button - arm the
     // matching learn right away so the next CC captured binds it.
@@ -371,7 +384,15 @@ public:
     else if (b == &passBtn)
       addPassthroughMapping();
     else if (b == &ck88PresetBtn)
-      applyCK88Preset();
+      applyControllerProfile();
+  }
+
+  void mouseDown(const juce::MouseEvent &e) override {
+    if (e.eventComponent == &ck88PresetBtn && e.mods.isPopupMenu()) {
+      Fanfare::showControllerProfileEditor();
+      return;
+    }
+    juce::Component::mouseDown(e);
   }
 
   // ---- Learn wiring (uses the MidiLearnBus singleton + LearnTarget) ----
@@ -728,14 +749,16 @@ public:
     g.fillRect(0, 0, width, height - 1);
 
     g.setColour(ThemeManager::get(Theme::Role::text));
-    g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
+    g.setFont(BoutiqueLookAndFeel::monoFont(12.0f));
+
+    const auto ccDesc = Fanfare::ControllerProfile::get().describeCC(m.cc);
 
     if (m.type == MappingItem::Passthrough) {
-      juce::String text = "CC" + juce::String(m.cc).paddedLeft('0', 3) +
-                          "  >  CC" + juce::String(m.outgoingCC).paddedLeft('0', 3) +
+      juce::String text = ccDesc + "  ->  CC" +
+                          juce::String(m.outgoingCC).paddedLeft('0', 3) +
                           "  [PASSTHRU]";
       g.setColour(ThemeManager::get(Theme::Role::foh));
-      g.drawText(text, 6, 0, width - 8, height, juce::Justification::centredLeft,
+      g.drawText(text, 8, 0, width - 12, height, juce::Justification::centredLeft,
                  true);
     } else {
       juce::String pluginName = slot.getPluginName(m.mapping.chainIndex);
@@ -743,13 +766,12 @@ public:
       juce::String paramName = (m.mapping.parameterIndex < params.size())
                                    ? params[m.mapping.parameterIndex]
                                    : "Unknown";
-      juce::String text = "CC" + juce::String(m.cc).paddedLeft('0', 3) + "  " +
-                          pluginName + " : " + paramName + "  [" +
-                          juce::String(m.mapping.minValue, 2) + "-" +
+      juce::String text = ccDesc + "   " + pluginName + " : " + paramName +
+                          "  [" + juce::String(m.mapping.minValue, 2) + "-" +
                           juce::String(m.mapping.maxValue, 2) + "]" +
                           (m.mapping.invert ? " [INV]" : "") +
                           (m.mapping.toggle ? " [TOG]" : "");
-      g.drawText(text, 6, 0, width - 8, height, juce::Justification::centredLeft,
+      g.drawText(text, 8, 0, width - 12, height, juce::Justification::centredLeft,
                  true);
     }
   }
@@ -828,22 +850,18 @@ public:
                         juce::dontSendNotification);
   }
 
-  void applyCK88Preset() {
-    using namespace FanfareConstants;
-    slot.allowCC(kCk88ModWheelCC);
-    slot.allowCC(kCk88SustainCC);
-    slot.allowCC(kCk88ChorusCC);
-    slot.allowCC(kCk88ReverbCC);
-    slot.allowCC(kCk88Drawbar16CC);
-    slot.allowCC(kCk88Drawbar513CC);
-    slot.allowCC(kCk88Drawbar8CC);
-    slot.allowCC(kCk88Drawbar4CC);
-    slot.allowCC(kCk88Drawbar223CC);
-    slot.allowCC(kCk88Drawbar2CC);
-    slot.allowCC(kCk88Drawbar135CC);
-    slot.allowCC(kCk88Drawbar113CC);
-    slot.allowCC(kCk88Drawbar1CC);
-    statusLabel.setText("CK88 preset: mod(9) drawbars(77-86) delay(92,93) sus(64)",
+  void applyControllerProfile() {
+    auto &prof = Fanfare::ControllerProfile::get();
+    auto ccs = prof.assignedCCs();
+    if (ccs.empty()) {
+      Fanfare::showControllerProfileEditor();
+      return;
+    }
+    for (int cc : ccs)
+      slot.allowCC(cc);
+    const juce::String label = prof.name.isNotEmpty() ? prof.name : "Controller profile";
+    statusLabel.setText(label + ": allowed " + juce::String((int)ccs.size()) +
+                            " controls on this strip (right-click Profile or press Edit to customize).",
                         juce::dontSendNotification);
   }
 
@@ -937,105 +955,148 @@ public:
   }
 
   void resized() override {
-    auto r = getLocalBounds().reduced(10);
-    helpBtn.setBounds(getWidth() - 88, 10, 74, 24);
-    r.removeFromTop(40);
+    auto r = getLocalBounds().reduced(12);
+    helpBtn.setBounds(getWidth() - 78, 8, 64, 24);
+    r.removeFromTop(38);
 
-    // Fader row
-    auto faderRow = r.removeFromTop(28);
-    int lblW = 60, editW = 50, btnW = 26;
-    fohLabel.setBounds(faderRow.removeFromLeft(lblW));
-    fohCCEditor.setBounds(faderRow.removeFromLeft(editW));
-    fohLearnBtn.setBounds(faderRow.removeFromLeft(btnW));
-    faderRow.removeFromLeft(16);
-    iemLabel.setBounds(faderRow.removeFromLeft(lblW));
-    iemCCEditor.setBounds(faderRow.removeFromLeft(editW));
-    iemLearnBtn.setBounds(faderRow.removeFromLeft(btnW));
-    faderRow.removeFromLeft(16);
-    muteLabel.setBounds(faderRow.removeFromLeft(46));
-    muteCCEditor.setBounds(faderRow.removeFromLeft(editW));
-    muteLearnBtn.setBounds(faderRow.removeFromLeft(btnW));
-    faderRow.removeFromLeft(16);
-    chLabel.setBounds(faderRow.removeFromLeft(55));
-    chSelector.setBounds(faderRow);
+    const int rowH = 26;
+    const int gap = 8;
+    const int lblW = 52, edW = 48, sBtnW = 50, lBtnW = 78;
 
-    r.removeFromTop(6);
+    for (auto *l : {&fohLabel, &iemLabel, &muteLabel, &swapLabel, &minLabel,
+                    &maxLabel, &selMinLabel, &selMaxLabel, &chLabel, &ccLabel,
+                    &passFromLabel, &passToLabel})
+      l->setJustificationType(juce::Justification::centredRight);
 
-    // List
-    auto listArea = r.removeFromTop(r.getHeight() - 28 - 28 - 28 - 30 - 22 - 30);
+    // ---- Row A: bus CCs - four balanced cells (FOH / IEM / MUTE / MIDI Ch) ----
+    {
+      auto row = r.removeFromTop(rowH);
+      int cw = (row.getWidth() - 3 * gap) / 4;
+      auto cell = row.removeFromLeft(cw);
+      row.removeFromLeft(gap);
+      fohLabel.setBounds(cell.removeFromLeft(lblW));
+      cell.removeFromLeft(4);
+      fohCCEditor.setBounds(cell.removeFromLeft(edW));
+      cell.removeFromLeft(4);
+      fohLearnBtn.setBounds(cell.removeFromLeft(30).reduced(0, 1));
+
+      cell = row.removeFromLeft(cw);
+      row.removeFromLeft(gap);
+      iemLabel.setBounds(cell.removeFromLeft(lblW));
+      cell.removeFromLeft(4);
+      iemCCEditor.setBounds(cell.removeFromLeft(edW));
+      cell.removeFromLeft(4);
+      iemLearnBtn.setBounds(cell.removeFromLeft(30).reduced(0, 1));
+
+      cell = row.removeFromLeft(cw);
+      row.removeFromLeft(gap);
+      muteLabel.setBounds(cell.removeFromLeft(lblW - 6));
+      cell.removeFromLeft(4);
+      muteCCEditor.setBounds(cell.removeFromLeft(edW));
+      cell.removeFromLeft(4);
+      muteLearnBtn.setBounds(cell.removeFromLeft(30).reduced(0, 1));
+
+      chLabel.setBounds(row.removeFromLeft(lblW + 4));
+      row.removeFromLeft(4);
+      chSelector.setBounds(row);
+    }
+
+    r.removeFromTop(8);
+
+    // ---- Mapping list ----
+    auto listArea = r.removeFromTop(r.getHeight() - 8 - 4 * rowH - 4 * gap - 22);
     mappingList.setBounds(listArea);
 
-    r.removeFromTop(6);
+    r.removeFromTop(gap);
 
-    // Selected-mapping editor row
-    auto selRow = r.removeFromTop(26);
-    selMinLabel.setBounds(selRow.removeFromLeft(56));
-    selMinEditor.setBounds(selRow.removeFromLeft(50));
-    selRow.removeFromLeft(6);
-    selMaxLabel.setBounds(selRow.removeFromLeft(36));
-    selMaxEditor.setBounds(selRow.removeFromLeft(50));
-    selRow.removeFromLeft(8);
-    selLearnBtn.setBounds(selRow.removeFromLeft(80));
-    selRow.removeFromLeft(4);
-    selInvBtn.setBounds(selRow.removeFromLeft(36));
-    selRow.removeFromLeft(4);
-    selTogBtn.setBounds(selRow.removeFromLeft(36));
-    selRow.removeFromLeft(6);
-    delBtn.setBounds(selRow.removeFromLeft(70));
+    // ---- Row B: selected mapping - fields left, Delete docked right ----
+    {
+      auto row = r.removeFromTop(rowH);
+      selMinLabel.setBounds(row.removeFromLeft(lblW + 6));
+      row.removeFromLeft(4);
+      selMinEditor.setBounds(row.removeFromLeft(edW));
+      row.removeFromLeft(gap);
+      selMaxLabel.setBounds(row.removeFromLeft(34));
+      row.removeFromLeft(4);
+      selMaxEditor.setBounds(row.removeFromLeft(edW));
+      row.removeFromLeft(gap + 4);
+      selLearnBtn.setBounds(row.removeFromLeft(lBtnW).reduced(0, 1));
+      row.removeFromLeft(6);
+      selInvBtn.setBounds(row.removeFromLeft(40).reduced(0, 1));
+      row.removeFromLeft(6);
+      selTogBtn.setBounds(row.removeFromLeft(40).reduced(0, 1));
+      delBtn.setBounds(row.removeFromRight(72).reduced(0, 1));
+    }
 
-    r.removeFromTop(6);
+    r.removeFromTop(gap);
 
-    // Add row
-    auto addRow = r.removeFromTop(26);
-    learnBtn.setBounds(addRow.removeFromRight(70));
-    addRow.removeFromRight(6);
-    mapBtn.setBounds(addRow.removeFromRight(60));
-    addRow.removeFromRight(4);
-    invBtn.setBounds(addRow.removeFromRight(36));
-    addRow.removeFromRight(4);
-    togBtn.setBounds(addRow.removeFromRight(36));
-    addRow.removeFromRight(6);
-    maxEditor.setBounds(addRow.removeFromRight(44)); maxLabel.setBounds(addRow.removeFromRight(30));
-    addRow.removeFromRight(6);
-    minEditor.setBounds(addRow.removeFromRight(44)); minLabel.setBounds(addRow.removeFromRight(30));
-    addRow.removeFromRight(6);
-    ccEditor.setBounds(addRow.removeFromRight(36)); ccLabel.setBounds(addRow.removeFromRight(34));
-    addRow.removeFromRight(6);
-    paramSelector.setBounds(addRow.removeFromRight(130));
-    addRow.removeFromRight(6);
-    pluginSelector.setBounds(addRow);
+    // ---- Row C: new mapping - plugin, param, CC, min, max; actions right ----
+    {
+      auto row = r.removeFromTop(rowH);
+      learnBtn.setBounds(row.removeFromRight(62).reduced(0, 1));
+      row.removeFromRight(5);
+      mapBtn.setBounds(row.removeFromRight(50).reduced(0, 1));
+      row.removeFromRight(5);
+      invBtn.setBounds(row.removeFromRight(38).reduced(0, 1));
+      row.removeFromRight(5);
+      togBtn.setBounds(row.removeFromRight(38).reduced(0, 1));
+      row.removeFromRight(6);
 
-    r.removeFromTop(4);
+      maxEditor.setBounds(row.removeFromRight(44));
+      row.removeFromRight(3);
+      maxLabel.setBounds(row.removeFromRight(32));
+      row.removeFromRight(6);
+      minEditor.setBounds(row.removeFromRight(44));
+      row.removeFromRight(3);
+      minLabel.setBounds(row.removeFromRight(32));
+      row.removeFromRight(6);
+      ccEditor.setBounds(row.removeFromRight(40));
+      row.removeFromRight(3);
+      ccLabel.setBounds(row.removeFromRight(32));
+      row.removeFromRight(6);
+      paramSelector.setBounds(row.removeFromRight(136));
+      row.removeFromRight(6);
+      pluginSelector.setBounds(row);
+    }
 
-    // Passthrough row
-    auto passRow = r.removeFromTop(26);
-    quickLearnBtn.setBounds(passRow.removeFromRight(50));
-    passRow.removeFromRight(6);
-    ck88PresetBtn.setBounds(passRow.removeFromRight(50));
-    passRow.removeFromRight(6);
-    passBtn.setBounds(passRow.removeFromRight(50));
-    passRow.removeFromRight(6);
-    passToEditor.setBounds(passRow.removeFromRight(36));
-    passRow.removeFromRight(2);
-    passToLabel.setBounds(passRow.removeFromRight(14));
-    passRow.removeFromRight(2);
-    passFromEditor.setBounds(passRow.removeFromRight(36));
-    passRow.removeFromRight(2);
-    passFromLabel.setBounds(passRow.removeFromRight(36));
+    r.removeFromTop(gap);
 
-    r.removeFromTop(4);
+    // ---- Row D: passthrough + controller profile + Quick Learn ----
+    {
+      auto row = r.removeFromTop(rowH);
+      quickLearnBtn.setBounds(row.removeFromRight(60).reduced(0, 1));
+      row.removeFromRight(6);
+      editProfileBtn.setBounds(row.removeFromRight(54).reduced(0, 1));
+      row.removeFromRight(4);
+      ck88PresetBtn.setBounds(row.removeFromRight(68).reduced(0, 1));
+      row.removeFromRight(10);
+      passBtn.setBounds(row.removeFromRight(sBtnW).reduced(0, 1));
 
-    // Instrument swap row
-    auto swapRow = r.removeFromTop(26);
-    swapLearnBtn.setBounds(swapRow.removeFromRight(26));
-    swapRow.removeFromRight(6);
-    swapCCEditor.setBounds(swapRow.removeFromRight(40));
-    swapRow.removeFromRight(6);
-    swapBCombo.setBounds(swapRow.removeFromRight(130));
-    swapRow.removeFromRight(6);
-    swapACombo.setBounds(swapRow.removeFromRight(130));
-    swapRow.removeFromRight(6);
-    swapLabel.setBounds(swapRow.removeFromLeft(46));
+      passFromLabel.setBounds(row.removeFromLeft(42));
+      row.removeFromLeft(4);
+      passFromEditor.setBounds(row.removeFromLeft(48));
+      row.removeFromLeft(4);
+      passToLabel.setBounds(row.removeFromLeft(18));
+      row.removeFromLeft(4);
+      passToEditor.setBounds(row.removeFromLeft(48));
+    }
+
+    r.removeFromTop(gap);
+
+    // ---- Row E: instrument swap - label left, two combos, CC, learn ----
+    {
+      auto row = r.removeFromTop(rowH);
+      swapLabel.setBounds(row.removeFromLeft(42));
+      row.removeFromLeft(4);
+      swapLearnBtn.setBounds(row.removeFromRight(32).reduced(0, 1));
+      row.removeFromRight(5);
+      swapCCEditor.setBounds(row.removeFromRight(46));
+      row.removeFromRight(6);
+      auto combos = row;
+      swapBCombo.setBounds(combos.removeFromRight(combos.getWidth() / 2 - 3));
+      combos.removeFromRight(6);
+      swapACombo.setBounds(combos);
+    }
 
     r.removeFromTop(4);
     statusLabel.setBounds(r);
@@ -1053,8 +1114,9 @@ private:
   juce::ComboBox pluginSelector, paramSelector, chSelector, swapACombo,
       swapBCombo;
   juce::TextButton fohLearnBtn, iemLearnBtn, muteLearnBtn, swapLearnBtn,
-      learnBtn, mapBtn, selLearnBtn, delBtn, passBtn, ck88PresetBtn, invBtn,
-      togBtn, selInvBtn, selTogBtn, quickLearnBtn, helpBtn;
+      learnBtn, mapBtn, selLearnBtn, delBtn, passBtn, ck88PresetBtn,
+      editProfileBtn, invBtn, togBtn, selInvBtn, selTogBtn, quickLearnBtn,
+      helpBtn;
   juce::ListBox mappingList;
 
   struct MappingItem {

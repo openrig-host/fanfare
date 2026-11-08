@@ -264,18 +264,9 @@ MainComponent::MainComponent() {
   setupSetupButtons();
   setupMasterSection();
 
-  // Collapsible library sidebar
-  addAndMakeVisible(toggleLibraryBtn);
-  Fanfare::setButtonRole(toggleLibraryBtn, Fanfare::ButtonRole::Subtle);
-  toggleLibraryBtn.setTooltip("Toggle Library Sidebar");
+  // Library toggle retired: the tool rail opens / closes the context sidebar.
+  toggleLibraryBtn.setVisible(false);
   refreshThemeDependentStyles();
-  toggleLibraryBtn.onClick = [this] {
-    libraryVisible = !libraryVisible;
-    toggleLibraryBtn.setButtonText(libraryVisible ? "<<" : ">>");
-    if (libraryPanel)
-      libraryPanel->setVisible(libraryVisible);
-    resized();
-  };
 
   Fanfare::SetlistManager::getInstance().setEngine(&engine);
 
@@ -301,6 +292,8 @@ MainComponent::MainComponent() {
       loadRigFromFile(file, row);
     };
   }
+
+  setupStudioShell();
 
   // Final setup
   setSize(FanfareConstants::kDefaultWindowWidth,
@@ -375,6 +368,8 @@ MainComponent::MainComponent() {
 }
 
 MainComponent::~MainComponent() {
+  if (menuBar)
+    menuBar->setModel(nullptr);
   rackHScrollBar.removeListener(&rackScrollListener);
   if (webServer)
     webServer->stopServer();
@@ -3023,7 +3018,11 @@ void MainComponent::refreshThemeDependentStyles() {
   xrunsLabel.setColour(juce::Label::textColourId,
                        (audioUnderrunCount.load() + engineStallCount.load() > 0) ? t.warn : t.ok);
   thermalLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-  clockLabel.setColour(juce::Label::textColourId, t.accent);
+  clockLabel.setColour(juce::Label::textColourId, t.isStudio() ? t.textDim : t.accent);
+  if (t.isStudio()) {
+    cpuLabel.setColour(juce::Label::textColourId, t.textDim);
+    midiMonitorLabel.setColour(juce::Label::textColourId, t.textDim);
+  }
   freshBuildToggle.setColour(juce::ToggleButton::textColourId, t.textDim);
   autoCollapseToggle.setColour(juce::ToggleButton::textColourId, t.textDim);
 
@@ -3042,66 +3041,57 @@ void MainComponent::paint(juce::Graphics &g) {
   const auto& t = ThemeManager::getInstance().active();
   g.fillAll(t.canvas);
 
-  // Row 1: Stage Header Face
+  // Top bar
   if (!stageHeaderBounds.isEmpty()) {
-    g.setColour(t.panel);
+    g.setColour(t.isStudio() ? t.panelAlt : t.panel);
     g.fillRect(stageHeaderBounds);
-    g.setColour(t.bevelHi);
-    g.drawHorizontalLine(stageHeaderBounds.getY(), 0.0f, (float)getWidth());
-    g.setColour(t.hairline);
+    g.setColour(t.isStudio() ? t.border : t.hairline);
     g.drawHorizontalLine(stageHeaderBounds.getBottom() - 1, 0.0f, (float)getWidth());
 
-    // Keep white Fanfare emblem legible on warm paper (Front Panel Bright)
+    // Song title capsule (Nota-style grouped control)
+    if (setupNameLabel.isVisible()) {
+      auto cap = prevSetlistBtn.getBounds().getUnion(nextSetlistBtn.getBounds())
+                     .getUnion(setupNameLabel.getBounds()).toFloat().expanded(3.0f, 1.0f);
+      cap = cap.withTop((float)stageHeaderBounds.getY() + 5.0f)
+               .withBottom((float)stageHeaderBounds.getBottom() - 6.0f);
+      g.setColour(t.isStudio() ? t.panel : t.sunken);
+      g.fillRoundedRectangle(cap, 5.0f);
+      g.setColour(t.border);
+      g.drawRoundedRectangle(cap.reduced(0.5f), 5.0f, 1.0f);
+    }
+
+    // Keep white Fanfare emblem legible on light themes
     if (logoComponent.isVisible() && !t.dark) {
       g.setColour(juce::Colour(0xFF1F2428));
       g.fillRoundedRectangle(logoComponent.getBounds().toFloat().expanded(1.0f), 3.0f);
     }
   }
 
-  // Row 2: Control & Telemetry Bar
-  if (!controlBarBounds.isEmpty()) {
-    g.setColour(t.panelAlt);
-    g.fillRect(controlBarBounds);
-    g.setColour(t.hairlineStrong);
-    g.drawHorizontalLine(controlBarBounds.getBottom() - 1, 0.0f, (float)getWidth());
-  }
-
-  // Recessed LCD wells for MIDI activity & system telemetry
-  if (!midiWellBounds.isEmpty()) {
-    Fanfare::ModalFrame::paintRecessedWell(g, midiWellBounds.toFloat(), 2.5f);
-  }
-  if (!telemetryWellBounds.isEmpty()) {
-    Fanfare::ModalFrame::paintRecessedWell(g, telemetryWellBounds.toFloat(), 2.5f);
-    if (thermalLabel.isVisible() && !thermalLabel.getBounds().isEmpty()) {
-      auto tb = thermalLabel.getBounds().toFloat().reduced(1.5f, 2.0f);
-      g.setColour(t.panic);
-      g.fillRoundedRectangle(tb, 2.0f);
-      g.setColour(juce::Colours::white.withAlpha(0.28f));
-      g.drawRoundedRectangle(tb.reduced(0.5f), 2.0f, 1.0f);
-    }
-    g.setColour(t.hairline);
-    const int topY = telemetryWellBounds.getY() + 4;
-    const int botY = telemetryWellBounds.getBottom() - 4;
-    for (auto* lbl : {&cpuLabel, &ramLabel, &latencyLabel, &xrunsLabel}) {
-      g.drawVerticalLine(lbl->getRight(), (float)topY, (float)botY);
-    }
-    if (thermalLabel.isVisible() && !thermalLabel.getBounds().isEmpty()) {
-      g.drawVerticalLine(thermalLabel.getRight(), (float)topY, (float)botY);
-    }
-  }
-
-  // Rows 3 & 4: Stage Queue & Scene Trays
-  if (!queueRowBounds.isEmpty()) {
-    g.setColour(t.panel);
-    g.fillRect(queueRowBounds);
-    g.setColour(t.hairline);
-    g.drawHorizontalLine(queueRowBounds.getBottom() - 1, 0.0f, (float)getWidth());
-  }
+  // Scene bar
   if (!sceneRowBounds.isEmpty()) {
-    g.setColour(t.sunken);
+    g.setColour(t.isStudio() ? t.panel : t.sunken);
     g.fillRect(sceneRowBounds);
-    g.setColour(t.hairlineStrong);
+    g.setColour(t.isStudio() ? t.border : t.hairlineStrong);
     g.drawHorizontalLine(sceneRowBounds.getBottom() - 1, 0.0f, (float)getWidth());
+  }
+
+  // Status bar
+  if (!statusBarBounds.isEmpty()) {
+    g.setColour(t.isStudio() ? t.panelAlt : t.panel);
+    g.fillRect(statusBarBounds);
+    g.setColour(t.isStudio() ? t.border : t.hairline);
+    g.drawHorizontalLine(statusBarBounds.getY(), 0.0f, (float)getWidth());
+    if (thermalLabel.isVisible() && !thermalLabel.getBounds().isEmpty()) {
+      auto tb = thermalLabel.getBounds().toFloat().reduced(1.5f, 1.0f);
+      g.setColour(t.panic);
+      g.fillRoundedRectangle(tb, 3.0f);
+    }
+    // thin separators between telemetry fields
+    g.setColour(t.isStudio() ? t.border : t.hairline);
+    for (auto* lbl : {&cpuLabel, &ramLabel, &latencyLabel})
+      if (!lbl->getBounds().isEmpty())
+        g.drawVerticalLine(lbl->getRight(), (float)statusBarBounds.getY() + 5.0f,
+                           (float)statusBarBounds.getBottom() - 5.0f);
   }
 
   // Master Console Column Face
@@ -3144,142 +3134,94 @@ void MainComponent::paint(juce::Graphics &g) {
 void MainComponent::resized() {
   auto r = getLocalBounds();
 
-  // Header Row 1: Stage View (Logo Emblem + Song Title + Compact Controls + Setlist Nav)
-  auto stageHeader = r.removeFromTop(36);
-  stageHeaderBounds = stageHeader;
-  auto sh = stageHeader.reduced(6, 0);
+  // ===== Studio shell layout (Nov 2026) =====
+  // Row 1 (top bar): logo, menu bar, < song title >, update badge, clock, PANIC
+  // Row 2 (scene bar): scene tiles, + scene, scene menu
+  // Bottom: status bar (MIDI activity, preload status, telemetry)
+  // Left: tool rail + context sidebar (Songs / Strips / Setlist / Queue / MIDI)
+  // The old queue row lives in the Queue sidebar context now.
+  auto topBar = r.removeFromTop(38);
+  stageHeaderBounds = topBar;
+  auto sh = topBar.reduced(6, 0);
 
   if (logoComponent.isVisible()) {
-    logoComponent.setBounds(sh.removeFromLeft(34).reduced(2, 4));
+    logoComponent.setBounds(sh.removeFromLeft(30).reduced(2, 6));
     sh.removeFromLeft(4);
   }
-
-  // Right side: Setlist Navigation reserved first so center toggles never clip them
-  nextSetlistBtn.setBounds(sh.removeFromRight(42).reduced(2, 5));
-  prevSetlistBtn.setBounds(sh.removeFromRight(42).reduced(2, 5));
-  if (updateBadgeBtn.isVisible())
-    updateBadgeBtn.setBounds(sh.removeFromRight(104).reduced(2, 5));
-  preloadStatusLabel.setBounds(sh.removeFromRight(juce::jlimit(90, 210, sh.getWidth() / 4)).reduced(4, 2));
-
-  int songTitleW = juce::jlimit(150, 310, sh.getWidth() - 390);
-  setupNameLabel.setBounds(sh.removeFromLeft(songTitleW).reduced(2, 2));
-  freshBuildToggle.setBounds(sh.removeFromLeft(106).reduced(2, 4));
-  autoCollapseToggle.setBounds(sh.removeFromLeft(118).reduced(2, 4));
-  stripWidthLabel.setBounds(sh.removeFromLeft(72).reduced(2, 6));
-  stripWidthSlider.setBounds(sh.removeFromLeft(juce::jmin(92, sh.getWidth())).reduced(2, 6));
-
-  // Header Row 2: Controls, Recessed Telemetry Well & Clock (overlap-proof at all widths)
-  auto controlBar = r.removeFromTop(34);
-  controlBarBounds = controlBar;
-  headerBounds = stageHeaderBounds.getUnion(controlBarBounds);
-
-  auto cb = controlBar.reduced(4, 0);
-
-  // Left Controls
-  toggleLibraryBtn.setBounds(cb.removeFromLeft(28).reduced(2, 4));
-  settingsGearBtn.setBounds(cb.removeFromLeft(32).reduced(3, 4));
-  midiWellBounds = cb.removeFromLeft(98).reduced(2, 4);
-  midiMonitorLabel.setBounds(midiWellBounds.reduced(5, 0));
-  midiMonitorToggle.setBounds(cb.removeFromLeft(66).reduced(2, 4));
-
-  // Right Actions (uniform 26px cap height)
-  exitBtn.setBounds(cb.removeFromRight(46).reduced(2, 4));
-  panicBtn.setBounds(cb.removeFromRight(68).reduced(2, 4));
-  saveBtn.setBounds(cb.removeFromRight(74).reduced(2, 4));
-  loadBtn.setBounds(cb.removeFromRight(74).reduced(2, 4));
-  webRemoteBtn.setBounds(cb.removeFromRight(58).reduced(2, 4));
-  gigNotepadBtn.setBounds(cb.removeFromRight(64).reduced(2, 4));
-  mainHelpBtn.setBounds(cb.removeFromRight(64).reduced(2, 4));
-  quickStartBtn.setBounds(cb.removeFromRight(28).reduced(2, 4));
-
-  // Center Recessed Telemetry LCD Well - strictly bounded inside remaining cb
-  int availCenter = juce::jmax(120, cb.getWidth() - 8);
-  const bool showThermal = thermalLabel.isVisible();
-  int wellW = juce::jmin(availCenter, showThermal ? 556 : 468);
-  telemetryWellBounds = cb.withSizeKeepingCentre(wellW, controlBar.getHeight() - 8);
-  auto tele = telemetryWellBounds.reduced(4, 0);
-  const int tw = tele.getWidth();
-  if (showThermal) {
-    const int cpuW   = (tw * 15) / 100;
-    const int ramW   = (tw * 24) / 100;
-    const int latW   = (tw * 15) / 100;
-    const int xrW    = (tw * 14) / 100;
-    const int thermW = (tw * 16) / 100;
-    cpuLabel.setBounds(tele.removeFromLeft(cpuW));
-    ramLabel.setBounds(tele.removeFromLeft(ramW));
-    latencyLabel.setBounds(tele.removeFromLeft(latW));
-    xrunsLabel.setBounds(tele.removeFromLeft(xrW));
-    thermalLabel.setBounds(tele.removeFromLeft(thermW));
-    clockLabel.setBounds(tele);
-  } else {
-    const int cpuW = (tw * 18) / 100;
-    const int ramW = (tw * 28) / 100;
-    const int latW = (tw * 18) / 100;
-    const int xrW  = (tw * 17) / 100;
-    cpuLabel.setBounds(tele.removeFromLeft(cpuW));
-    ramLabel.setBounds(tele.removeFromLeft(ramW));
-    latencyLabel.setBounds(tele.removeFromLeft(latW));
-    xrunsLabel.setBounds(tele.removeFromLeft(xrW));
-    thermalLabel.setBounds({});
-    clockLabel.setBounds(tele);
+  if (menuBar) {
+    menuBar->setBounds(sh.removeFromLeft(juce::jmin(250, sh.getWidth() / 4)).reduced(0, 7));
+    sh.removeFromLeft(8);
   }
 
-  // Header Row 3: Stage Queue Slots
-  auto presetRow = r.removeFromTop(38);
-  queueRowBounds = presetRow;
-  auto pr = presetRow.reduced(4, 2);
-
-  saveSetBtn.setBounds(pr.removeFromLeft(68).reduced(1, 2));
-  loadSetBtn.setBounds(pr.removeFromLeft(68).reduced(1, 2));
-  setupBuilderBtn.setBounds(pr.removeFromLeft(84).reduced(1, 2));
-  pr.removeFromLeft(3);
-
-  if (!queueButtons.isEmpty()) {
-    const int n = queueButtons.size();
-    for (int i = 0; i < n; ++i) {
-      int w = pr.getWidth() / (n - i);
-      queueButtons[i]->setBounds(pr.removeFromLeft(w).reduced(1, 1));
-    }
+  // Right side first so the title never pushes PANIC off screen.
+  panicBtn.setBounds(sh.removeFromRight(88).reduced(0, 5));
+  sh.removeFromRight(20); // keep-clear gap around PANIC
+  clockLabel.setBounds(sh.removeFromRight(92).reduced(0, 7));
+  if (updateBadgeBtn.isVisible()) {
+    sh.removeFromRight(6);
+    updateBadgeBtn.setBounds(sh.removeFromRight(104).reduced(0, 7));
   }
+  sh.removeFromRight(10);
 
-  // Header Row 4: Scene Recall Row
-  auto sceneRow = r.removeFromTop(30);
+  prevSetlistBtn.setBounds(sh.removeFromLeft(30).reduced(0, 7));
+  sh.removeFromLeft(4);
+  const int titleW = juce::jlimit(140, 460, sh.getWidth() - 40);
+  setupNameLabel.setBounds(sh.removeFromLeft(titleW).reduced(4, 4));
+  sh.removeFromLeft(4);
+  nextSetlistBtn.setBounds(sh.removeFromLeft(30).reduced(0, 7));
+
+  // Row 2: scene bar
+  auto sceneRow = r.removeFromTop(32);
   sceneRowBounds = sceneRow;
-  auto sr = sceneRow.reduced(4, 2);
-
-  addSceneBtn.setBounds(sr.removeFromLeft(64).reduced(1, 1));
-  saveSceneBtn.setBounds(sr.removeFromLeft(76).reduced(1, 1));
-  renameSceneBtn.setBounds(sr.removeFromLeft(58).reduced(1, 1));
-  deleteSceneBtn.setBounds(sr.removeFromLeft(56).reduced(1, 1));
-  sr.removeFromLeft(3);
-
-  if (!sceneButtons.isEmpty()) {
-    const int n = sceneButtons.size();
-    for (int i = 0; i < n; ++i) {
-      int w = sr.getWidth() / (n - i);
-      sceneButtons[i]->setBounds(sr.removeFromLeft(w).reduced(1, 1));
+  controlBarBounds = {};
+  queueRowBounds = {};
+  midiWellBounds = {};
+  telemetryWellBounds = {};
+  headerBounds = stageHeaderBounds.getUnion(sceneRowBounds);
+  {
+    auto sr = sceneRow.reduced(6, 4);
+    sceneMenuBtn.setBounds(sr.removeFromRight(30));
+    sr.removeFromRight(4);
+    addSceneBtn.setBounds(sr.removeFromRight(74));
+    sr.removeFromRight(8);
+    if (!sceneButtons.isEmpty()) {
+      const int n = sceneButtons.size();
+      const int maxW = 180;
+      for (int i = 0; i < n; ++i) {
+        int w = juce::jmin(maxW, sr.getWidth() / (n - i));
+        sceneButtons[i]->setBounds(sr.removeFromLeft(w).reduced(2, 0));
+      }
     }
   }
 
-  r.removeFromTop(4); // crisp chassis gap
-
-  // MIDI Monitor panel (slides open when toggled)
-  if (midiMonitorVisible && midiMonitorPanel) {
-    int monitorHeight = 180;
-    auto monitorArea = r.removeFromTop(monitorHeight);
-    midiMonitorPanel->setBounds(monitorArea);
-    r.removeFromTop(4);
+  // Bottom status bar
+  statusBarBounds = r.removeFromBottom(22);
+  {
+    auto sb = statusBarBounds.reduced(8, 0);
+    midiMonitorLabel.setBounds(sb.removeFromLeft(juce::jmin(200, sb.getWidth() / 5)));
+    const bool showThermal = thermalLabel.isVisible();
+    if (showThermal)
+      thermalLabel.setBounds(sb.removeFromRight(110).reduced(0, 2));
+    else
+      thermalLabel.setBounds({});
+    xrunsLabel.setBounds(sb.removeFromRight(118));
+    latencyLabel.setBounds(sb.removeFromRight(104));
+    ramLabel.setBounds(sb.removeFromRight(168));
+    cpuLabel.setBounds(sb.removeFromRight(92));
+    sb.removeFromRight(12);
+    preloadStatusLabel.setBounds(sb);
   }
 
-  // Library sidebar (collapsible, left side)
-  if (libraryVisible) {
-    auto libraryArea = r.removeFromLeft(238);
+  r.removeFromTop(2);
+
+  // Tool rail + context sidebar
+  toolRail.setBounds(r.removeFromLeft(44));
+  if (sidebarContext >= 0 && libraryPanel) {
+    libraryPanel->setBounds(r.removeFromLeft(256));
+    libraryPanel->setVisible(true);
     r.removeFromLeft(3);
-    if (libraryPanel)
-      libraryPanel->setBounds(libraryArea);
-  } else {
-    if (libraryPanel)
-      libraryPanel->setBounds(0, 0, 0, 0);
+  } else if (libraryPanel) {
+    libraryPanel->setVisible(false);
   }
 
   // Master Console Column (right side)
@@ -4176,6 +4118,18 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component* orig
     showGigNotepadWindow();
     return true;
   }
+  else if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'S' || key.getKeyCode() == 's')) {
+    if (saveBtn.onClick) saveBtn.onClick();
+    return true;
+  }
+  else if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'O' || key.getKeyCode() == 'o')) {
+    if (loadBtn.onClick) loadBtn.onClick();
+    return true;
+  }
+  else if (key.getKeyCode() == juce::KeyPress::F1Key) {
+    Fanfare::openHelpManual("#main-mixer");
+    return true;
+  }
   else if (!key.getModifiers().isCommandDown() && !key.getModifiers().isAltDown() && (key.isKeyCode ('P') || key.isKeyCode ('p'))) {
     engine.triggerPanic();
     return true;
@@ -4273,5 +4227,286 @@ void MainComponent::showWebRemoteDialog() {
   stageRemoteOverlay->toFront(true);
 }
 
+//==============================================================================
+// Studio shell (Nov 2026): menu bar, tool rail + context sidebar, scene menu.
+// Header controls that moved into menus / the rail stay alive (their onClick
+// handlers are reused below), they are just no longer laid out.
+//==============================================================================
+namespace {
+enum MenuIds {
+  miLoadSong = 1, miSaveSong, miBuildSong, miLoadMap, miSaveMap, miQuit,
+  miViewContextBase = 100, // + ToolRail context index
+  miCompact = 120, miCleanSlate,
+  miWidthBase = 130,       // + preset index
+  miThemeBase = 150,       // + theme index
+  miAudio = 200, miBus, miEngine, miControllerProfile, miScan, miResetAudio, miSettings,
+  miNotepad = 300, miInspector, miRemote,
+  miManual = 400, miQuickStart, miUpdate, miAbout
+};
+constexpr int kStripWidthPresets[] = {96, 124, 160, 220};
+const char *const kStripWidthNames[] = {"Narrow", "Normal", "Wide", "Extra wide"};
 
+juce::PopupMenu::Item menuItem(int id, const juce::String &text,
+                               const juce::String &shortcut = {},
+                               bool ticked = false, bool enabled = true) {
+  juce::PopupMenu::Item it(text);
+  it.setID(id);
+  it.setTicked(ticked);
+  it.setEnabled(enabled);
+  it.shortcutKeyDescription = shortcut;
+  return it;
+}
+} // namespace
 
+void MainComponent::setupStudioShell() {
+  for (juce::Component *c : std::initializer_list<juce::Component *>{
+           &saveBtn, &loadBtn, &exitBtn, &gigNotepadBtn, &webRemoteBtn,
+           &quickStartBtn, &mainHelpBtn, &midiMonitorToggle, &settingsGearBtn,
+           &toggleLibraryBtn, &setupBuilderBtn, &saveSceneBtn, &renameSceneBtn,
+           &deleteSceneBtn, &freshBuildToggle, &autoCollapseToggle,
+           &stripWidthLabel, &stripWidthSlider})
+    c->setVisible(false);
+
+  menuBar = std::make_unique<juce::MenuBarComponent>(this);
+  addAndMakeVisible(menuBar.get());
+
+  addAndMakeVisible(toolRail);
+  toolRail.onTool = [this](int t) { onToolRail(t); };
+
+  // The queue row moves into the Queue sidebar context.
+  juce::Array<Fanfare::QueueButtonComponent *> tiles;
+  for (auto *q : queueButtons)
+    tiles.add(q);
+  saveSetBtn.setButtonText("Save map");
+  loadSetBtn.setButtonText("Load map");
+  saveSetBtn.setTooltip("Save the queue tile assignments as a queue map (.orset)");
+  loadSetBtn.setTooltip("Load a saved queue map");
+  Fanfare::setButtonRole(saveSetBtn, Fanfare::ButtonRole::Subtle);
+  Fanfare::setButtonRole(loadSetBtn, Fanfare::ButtonRole::Subtle);
+  queueTilesPanel.setContent(tiles, {&loadSetBtn, &saveSetBtn});
+  libraryPanel->setQueueContent(&queueTilesPanel);
+
+  addSceneBtn.setButtonText("+ Scene");
+  addSceneBtn.setTooltip("Add a scene (snapshot of strip mutes, levels and sends)");
+  Fanfare::setButtonRole(addSceneBtn, Fanfare::ButtonRole::Subtle);
+  addAndMakeVisible(sceneMenuBtn);
+  Fanfare::setButtonRole(sceneMenuBtn, Fanfare::ButtonRole::Subtle);
+  sceneMenuBtn.setTooltip("Scene actions: save, rename, delete (right-click a scene for more)");
+  sceneMenuBtn.onClick = [this] { showSceneMenu(); };
+
+  panicBtn.setButtonText("Panic");
+  panicBtn.setTooltip("Panic (P): silences all stuck notes and flushes audio buffers.");
+  prevSetlistBtn.setButtonText("<");
+  nextSetlistBtn.setButtonText(">");
+  prevSetlistBtn.setTooltip("Previous song in the setlist");
+  nextSetlistBtn.setTooltip("Next song in the setlist (Space)");
+  Fanfare::setButtonRole(prevSetlistBtn, Fanfare::ButtonRole::Subtle);
+  Fanfare::setButtonRole(nextSetlistBtn, Fanfare::ButtonRole::Subtle);
+  setupNameLabel.setFont(BoutiqueLookAndFeel::uiFont(17.0f, true));
+  setupNameLabel.setJustificationType(juce::Justification::centred);
+  midiMonitorLabel.setFont(BoutiqueLookAndFeel::monoFont(11.0f));
+  for (auto *l : {&cpuLabel, &ramLabel, &latencyLabel, &xrunsLabel, &clockLabel})
+    l->setFont(BoutiqueLookAndFeel::monoFont(11.0f));
+  preloadStatusLabel.setFont(BoutiqueLookAndFeel::uiFont(12.0f));
+
+  setSidebarContext(Fanfare::ToolRail::Songs);
+}
+
+void MainComponent::setSidebarContext(int ctx) {
+  sidebarContext = ctx;
+  libraryVisible = ctx >= 0;
+  if (ctx == Fanfare::ToolRail::Midi && !midiMonitorPanel) {
+    midiMonitorPanel = std::make_unique<MidiMonitorComponent>();
+    libraryPanel->setMidiMonitorContent(midiMonitorPanel.get());
+  }
+  midiMonitorVisible = (ctx == Fanfare::ToolRail::Midi);
+  if (ctx >= 0 && libraryPanel)
+    libraryPanel->setContext((LibraryPanel::Context)ctx);
+  toolRail.setActiveContext(ctx);
+  resized();
+  repaint();
+}
+
+void MainComponent::onToolRail(int tool) {
+  using R = Fanfare::ToolRail;
+  if (tool < R::kNumContexts) {
+    setSidebarContext(sidebarContext == tool ? -1 : tool);
+    return;
+  }
+  switch (tool) {
+    case R::Notepad:   showGigNotepadWindow(); break;
+    case R::Inspector: showResourceInspectorModal(); break;
+    case R::Remote:    showWebRemoteDialog(); break;
+    case R::Help:      Fanfare::openHelpManual("#main-mixer"); break;
+    case R::Settings:  showConfigOverlay(); break;
+    default: break;
+  }
+}
+
+void MainComponent::showSceneMenu() {
+  const int idx = engine.getCurrentSceneIndex();
+  const bool valid = idx >= 0 && idx < engine.getNumScenes();
+  const juce::String name = valid ? engine.getSceneName(idx) : juce::String();
+  juce::PopupMenu m;
+  m.addSectionHeader(valid ? "Scene: " + name : "Scenes");
+  m.addItem(1, "Save current state to this scene", valid);
+  m.addItem(2, "Rename scene...", valid);
+  m.addSeparator();
+  m.addItem(3, "Delete scene...", valid && engine.getNumScenes() > 1);
+  m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&sceneMenuBtn),
+                  [this, name](int r) {
+    if (r == 1 && saveSceneBtn.onClick) {
+      saveSceneBtn.onClick();
+    } else if (r == 2 && renameSceneBtn.onClick) {
+      renameSceneBtn.onClick();
+    } else if (r == 3) {
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::AlertWindow::showAsync(
+          juce::MessageBoxOptions()
+              .withIconType(juce::MessageBoxIconType::WarningIcon)
+              .withTitle("Delete scene")
+              .withMessage("Delete \"" + name + "\"? This can't be undone.")
+              .withButton("Delete")
+              .withButton("Cancel"),
+          [safeThis](int result) {
+            if (result == 1 && safeThis != nullptr && safeThis->deleteSceneBtn.onClick)
+              safeThis->deleteSceneBtn.onClick();
+          });
+    }
+  });
+}
+
+void MainComponent::confirmAndQuit() {
+  juce::AlertWindow::showAsync(
+      juce::MessageBoxOptions()
+          .withIconType(juce::MessageBoxIconType::QuestionIcon)
+          .withTitle("Quit Fanfare")
+          .withMessage("Quit Fanfare? All plugins will be unloaded.")
+          .withButton("Quit")
+          .withButton("Cancel"),
+      [](int result) {
+        if (result == 1)
+          juce::JUCEApplication::quit();
+      });
+}
+
+juce::StringArray MainComponent::getMenuBarNames() {
+  return {"File", "View", "Rig", "Tools", "Help"};
+}
+
+juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex, const juce::String &) {
+  juce::PopupMenu m;
+  switch (topLevelMenuIndex) {
+    case 0: // File
+      m.addItem(menuItem(miLoadSong, "Load song...", "Ctrl+O"));
+      m.addItem(menuItem(miSaveSong, "Save song as...", "Ctrl+S"));
+      m.addItem(menuItem(miBuildSong, "Build song from strips..."));
+      m.addSeparator();
+      m.addItem(menuItem(miLoadMap, "Load queue map..."));
+      m.addItem(menuItem(miSaveMap, "Save queue map..."));
+      m.addSeparator();
+      m.addItem(menuItem(miQuit, "Quit Fanfare..."));
+      break;
+    case 1: { // View
+      for (int i = 0; i < Fanfare::ToolRail::kNumContexts; ++i)
+        m.addItem(menuItem(miViewContextBase + i,
+                           LibraryPanel::contextTitle((LibraryPanel::Context)i), {},
+                           sidebarContext == i));
+      m.addSeparator();
+      m.addItem(menuItem(miCompact, "Stage compact (collapse muted strips)", {},
+                         autoCollapseToggle.getToggleState()));
+      m.addItem(menuItem(miCleanSlate, "Clean slate for this song", {},
+                         freshBuildToggle.getToggleState()));
+      juce::PopupMenu widths;
+      for (int i = 0; i < 4; ++i)
+        widths.addItem(menuItem(miWidthBase + i, kStripWidthNames[i], {},
+                                std::abs(preferredExpandedWidth - kStripWidthPresets[i]) < 8));
+      m.addSubMenu("Strip width", widths);
+      juce::PopupMenu themes;
+      auto names = ThemeManager::getInstance().getThemeNames();
+      for (int i = 0; i < names.size(); ++i)
+        themes.addItem(menuItem(miThemeBase + i, names[i], {},
+                                ThemeManager::getInstance().getCurrentIndex() == i));
+      m.addSubMenu("Theme", themes);
+      break;
+    }
+    case 2: // Rig
+      m.addItem(menuItem(miAudio, "Audio & MIDI settings..."));
+      m.addItem(menuItem(miBus, "Bus routing..."));
+      m.addItem(menuItem(miControllerProfile, "Controller profile..."));
+      m.addItem(menuItem(miEngine, "Engine & CPU tuning..."));
+      m.addSeparator();
+      m.addItem(menuItem(miScan, "Scan for plugins"));
+      m.addItem(menuItem(miResetAudio, "Reset audio driver"));
+      m.addSeparator();
+      m.addItem(menuItem(miSettings, "All settings..."));
+      break;
+    case 3: // Tools
+      m.addItem(menuItem(miNotepad, "Gig notepad", "Ctrl+N"));
+      m.addItem(menuItem(miInspector, "Resource inspector"));
+      m.addItem(menuItem(miRemote, "Tablet remote..."));
+      m.addItem(menuItem(miViewContextBase + Fanfare::ToolRail::Midi, "MIDI monitor"));
+      break;
+    case 4: // Help
+      m.addItem(menuItem(miManual, "User manual", "F1"));
+      m.addItem(menuItem(miQuickStart, "Quick start..."));
+      if (latestReleaseUrl.isNotEmpty())
+        m.addItem(menuItem(miUpdate, "Get the new release..."));
+      m.addSeparator();
+      m.addItem(menuItem(miAbout, "About Fanfare"));
+      break;
+    default:
+      break;
+  }
+  return m;
+}
+
+void MainComponent::menuItemSelected(int id, int) {
+  auto click = [](juce::Button &b) {
+    if (b.onClick)
+      b.onClick();
+  };
+  if (id >= miViewContextBase && id < miViewContextBase + Fanfare::ToolRail::kNumContexts) {
+    setSidebarContext(id - miViewContextBase);
+    return;
+  }
+  if (id >= miWidthBase && id < miWidthBase + 4) {
+    stripWidthSlider.setValue(kStripWidthPresets[id - miWidthBase], juce::sendNotificationSync);
+    return;
+  }
+  if (id >= miThemeBase && id < miThemeBase + 32) {
+    ThemeManager::getInstance().setCurrentByIndex(id - miThemeBase);
+    return;
+  }
+  switch (id) {
+    case miLoadSong:   click(loadBtn); break;
+    case miSaveSong:   click(saveBtn); break;
+    case miBuildSong:  click(setupBuilderBtn); break;
+    case miLoadMap:    click(loadSetBtn); break;
+    case miSaveMap:    click(saveSetBtn); break;
+    case miQuit:       confirmAndQuit(); break;
+    case miCompact:
+      autoCollapseToggle.setToggleState(!autoCollapseToggle.getToggleState(), juce::dontSendNotification);
+      click(autoCollapseToggle);
+      break;
+    case miCleanSlate:
+      freshBuildToggle.setToggleState(!freshBuildToggle.getToggleState(), juce::dontSendNotification);
+      click(freshBuildToggle);
+      break;
+    case miAudio:      click(audioSettingsBtn); break;
+    case miBus:        click(busRoutingBtn); break;
+    case miControllerProfile: Fanfare::showControllerProfileEditor(); break;
+    case miEngine:     showEngineTuningModal(); break;
+    case miScan:       click(scanButton); break;
+    case miResetAudio: click(resetAudioBtn); break;
+    case miSettings:   showConfigOverlay(); break;
+    case miNotepad:    showGigNotepadWindow(); break;
+    case miInspector:  showResourceInspectorModal(); break;
+    case miRemote:     showWebRemoteDialog(); break;
+    case miManual:     Fanfare::openHelpManual("#main-mixer"); break;
+    case miQuickStart: showQuickStartDialog(false); break;
+    case miUpdate:     click(updateBadgeBtn); break;
+    case miAbout:      showAboutDialog(); break;
+    default: break;
+  }
+}

@@ -30,12 +30,12 @@ inline void openHelpManual(const juce::String& anchor = {}) {
 }
 
 inline void styleHelpButton(juce::TextButton& btn, const juce::String& anchor, const juce::String& tooltipText = {}) {
-    btn.setButtonText("HAAALP!");
+    btn.setButtonText("Help");
     setButtonRole(btn, ButtonRole::Help);
     btn.setColour(juce::TextButton::buttonColourId, ThemeManager::get(Theme::Role::helpFaceTop));
     btn.setColour(juce::TextButton::textColourOffId, ThemeManager::get(Theme::Role::helpText));
     btn.setTooltip(tooltipText.isNotEmpty()
-                       ? tooltipText
+                       ? tooltipText.replace("HAAALP! ", "")
                        : "Open the Fanfare Stage Manual to this exact section");
     btn.onClick = [anchor]() {
         openHelpManual(anchor);

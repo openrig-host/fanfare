@@ -1344,3 +1344,25 @@ void BoutiqueLookAndFeel::drawScrollbar(
       g.drawVerticalLine((int)std::round(cx + k * 3.0f), y1, y2);
   }
 }
+
+juce::Font BoutiqueLookAndFeel::getMenuBarFont(juce::MenuBarComponent &, int, const juce::String &) {
+  return uiFont(13.5f, false);
+}
+
+void BoutiqueLookAndFeel::drawMenuBarBackground(juce::Graphics &, int, int, bool,
+                                                juce::MenuBarComponent &) {
+  // Transparent: the menu bar sits inside the top bar, which paints itself.
+}
+
+void BoutiqueLookAndFeel::drawMenuBarItem(juce::Graphics &g, int width, int height, int,
+                                          const juce::String &itemText, bool isMouseOverItem,
+                                          bool isMenuOpen, bool, juce::MenuBarComponent &bar) {
+  const auto &t = ThemeManager::getInstance().active();
+  if (isMenuOpen || isMouseOverItem) {
+    g.setColour(isMenuOpen ? t.raised : t.panel);
+    g.fillRoundedRectangle(juce::Rectangle<float>(0.0f, 0.0f, (float)width, (float)height).reduced(1.0f, 0.0f), 4.0f);
+  }
+  g.setColour(bar.isEnabled() ? ((isMenuOpen || isMouseOverItem) ? t.text : t.textDim) : t.textFaint);
+  g.setFont(getMenuBarFont(bar, 0, itemText));
+  g.drawFittedText(itemText, 0, 0, width, height, juce::Justification::centred, 1);
+}

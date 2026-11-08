@@ -30,6 +30,8 @@
 #include "AnalogVuMeter.h"
 #include "ThermalMonitor.h"
 #include "UpdateChecker.h"
+#include "ToolRail.h"
+#include "QueueTilesPanel.h"
 #include "Web/OpenRigWebServer.h"
 #include "Web/StageHotspotController.h"
 #include "Web/StageRemoteModalOverlay.h"
@@ -46,7 +48,8 @@ class MainComponent : public juce::Component,
                       public juce::AudioIODeviceCallback,
                       public juce::ChangeListener,
                       public juce::Timer,
-                      public juce::KeyListener {
+                      public juce::KeyListener,
+                      public juce::MenuBarModel {
 public:
   //==============================================================================
   MainComponent();
@@ -54,6 +57,11 @@ public:
 
   void timerCallback() override;
   bool keyPressed (const juce::KeyPress& key, juce::Component* originatingComponent) override;
+
+  // --- MenuBarModel (File / View / Rig / Tools / Help) ---
+  juce::StringArray getMenuBarNames() override;
+  juce::PopupMenu getMenuForIndex(int topLevelMenuIndex, const juce::String& menuName) override;
+  void menuItemSelected(int menuItemID, int topLevelMenuIndex) override;
 
   // --- AudioIODeviceCallback ---
   void audioDeviceIOCallbackWithContext(
@@ -340,6 +348,19 @@ private:
   juce::Rectangle<int> sceneRowBounds;
   juce::Rectangle<int> telemetryWellBounds;
   juce::Rectangle<int> midiWellBounds;
+  juce::Rectangle<int> statusBarBounds;
+
+  // ===== Studio shell (Nov 2026): menu bar + tool rail + context sidebar =====
+  std::unique_ptr<juce::MenuBarComponent> menuBar;
+  Fanfare::ToolRail toolRail;
+  Fanfare::QueueTilesPanel queueTilesPanel;
+  juce::TextButton sceneMenuBtn{"..."};
+  int sidebarContext = 0; // ToolRail context index, -1 = sidebar closed
+  void setupStudioShell();
+  void setSidebarContext(int ctx);
+  void onToolRail(int tool);
+  void showSceneMenu();
+  void confirmAndQuit();
   juce::Rectangle<int> masterColumnBounds;
   juce::ComboBox schemeSelector;
 

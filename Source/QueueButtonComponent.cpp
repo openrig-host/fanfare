@@ -74,9 +74,56 @@ void QueueButtonComponent::mouseDown(const juce::MouseEvent& e) {
     juce::Button::mouseDown(e);
 }
 
+void QueueButtonComponent::paintRow(juce::Graphics& g, bool isOver, bool isDown) {
+    const auto& t = ThemeManager::getInstance().active();
+    auto r = getLocalBounds().toFloat().reduced(0.0f, 1.0f);
+    const bool isCore = (slotIndex == 0);
+    const bool hasSong = assignedFile.existsAsFile();
+
+    juce::Colour bg = isDown ? t.pressTop
+                    : (isActive ? t.accent.withAlpha(0.14f)
+                    : ((isOver || isDragHover) ? t.panelAlt : juce::Colours::transparentBlack));
+    g.setColour(bg);
+    g.fillRoundedRectangle(r, 4.0f);
+    if (isDragHover) {
+        g.setColour(t.accent);
+        g.drawRoundedRectangle(r.reduced(0.5f), 4.0f, 1.0f);
+    }
+    if (isActive) {
+        g.setColour(t.accent);
+        g.fillRoundedRectangle(r.getX(), r.getY() + 4.0f, 2.0f, r.getHeight() - 8.0f, 1.0f);
+    }
+
+    auto inner = r.reduced(8.0f, 0.0f);
+    g.setFont(BoutiqueLookAndFeel::monoFont(11.0f));
+    g.setColour(isActive ? t.accent : t.textFaint);
+    g.drawText(isCore ? "core" : juce::String(slotIndex).paddedLeft('0', 2),
+               inner.removeFromLeft(34.0f), juce::Justification::centredLeft, false);
+
+    juce::String state;
+    juce::Colour stateCol = t.textFaint;
+    if (isActive)          { state = "live";    stateCol = t.accent; }
+    else if (isPreloaded)  { state = "ready";   stateCol = t.ok; }
+    else if (isPreloading) { state = "loading"; stateCol = t.warn; }
+    if (state.isNotEmpty()) {
+        g.setColour(stateCol);
+        g.drawText(state, inner.removeFromRight(52.0f), juce::Justification::centredRight, false);
+    }
+
+    g.setFont(BoutiqueLookAndFeel::uiFont(13.0f, isActive));
+    g.setColour(hasSong ? t.text : t.textFaint);
+    g.drawText(hasSong ? assignedFile.getFileNameWithoutExtension()
+                       : (isCore ? "Core song (drop a song here)" : "Empty - drop a song"),
+               inner, juce::Justification::centredLeft, true);
+}
+
 void QueueButtonComponent::paintButton(juce::Graphics& g,
                                        bool shouldDrawButtonAsHighlighted,
                                        bool shouldDrawButtonAsDown) {
+    if (rowStyle) {
+        paintRow(g, shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
+        return;
+    }
     const auto& t = ThemeManager::getInstance().active();
     auto bounds = getLocalBounds().toFloat().reduced(0.5f);
     const float radius = 3.0f;

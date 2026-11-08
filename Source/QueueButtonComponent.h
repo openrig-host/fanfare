@@ -17,6 +17,9 @@ public:
 
     void setSlotStates(bool active, bool preloaded, bool preloading);
 
+    // Row style = one-line list row for the Queue sidebar context.
+    void setRowStyle(bool shouldUseRows) { rowStyle = shouldUseRows; repaint(); }
+
     std::function<void(int slotIdx, const juce::File& file)> onFileDropped;
     std::function<void(int slotIdx)> onClearRequested;
     std::function<void(int slotIdx)> onAssignRequested;
@@ -38,6 +41,9 @@ private:
     bool isPreloaded = false;
     bool isPreloading = false;
     bool isDragHover = false;
+    bool rowStyle = false;
+
+    void paintRow(juce::Graphics& g, bool isOver, bool isDown);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(QueueButtonComponent)
 };
