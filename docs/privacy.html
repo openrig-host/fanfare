@@ -1,0 +1,126 @@
+<!DOCTYPE HTML>
+<html lang="en">
+	<head>
+		<title>Fanfare: Privacy Policy</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="description" content="Fanfare privacy policy: the app collects no personal information, keeps everything on your machine, and names the only times it connects to the internet." />
+		<link rel="canonical" href="https://openrig-host.github.io/fanfare/privacy.html" />
+		<link rel="icon" type="image/png" href="Fanfare_Icon.png" />
+		<meta property="og:site_name" content="Fanfare" />
+		<meta property="og:type" content="website" />
+		<meta property="og:title" content="Fanfare: Privacy Policy" />
+		<meta property="og:description" content="Fanfare collects nothing: no accounts, no telemetry, no tracking. This page lists the only times the app connects to the internet." />
+		<style>
+			/* Same dark Studio palette as manual.html (single file, no build). */
+			:root {
+				--bg: #1e1e1e; --panel: #252525;
+				--border: #3a3a3a;
+				--text: #f2f2f2; --body: #dedede; --dim: #bfbfbf; --faint: #8f8f8f;
+				--accent: #ffa02f;
+			}
+			* { box-sizing: border-box; margin: 0; padding: 0; }
+			html { scroll-behavior: smooth; }
+			body {
+				background-color: var(--bg) !important;
+				color: var(--body);
+				font-family: Roboto, Arial, sans-serif;
+				font-size: 16px;
+				line-height: 1.7;
+			}
+			.topbar {
+				display: flex; align-items: center; gap: 18px;
+				padding: 14px 22px;
+				background: var(--panel);
+				border-bottom: 1px solid var(--border);
+			}
+			.topbar .brand {
+				color: var(--text); font-weight: 700; font-size: 17px;
+				text-decoration: none;
+			}
+			.topbar .brand span { color: var(--accent); }
+			.topbar a.nav { color: var(--dim); text-decoration: none; font-size: 14px; }
+			.topbar a.nav:hover { color: var(--accent); }
+			article {
+				max-width: 760px;
+				margin: 0 auto;
+				padding: 44px 26px 60px;
+			}
+			h1 {
+				color: var(--text);
+				font-size: 30px;
+				line-height: 1.25;
+				margin-bottom: 6px;
+			}
+			.updated { color: var(--faint); font-size: 14px; margin-bottom: 34px; }
+			h2 {
+				color: var(--text);
+				font-size: 19px;
+				margin: 34px 0 10px;
+				padding-bottom: 6px;
+				border-bottom: 2px solid var(--accent);
+				display: inline-block;
+			}
+			p, li { color: var(--body); }
+			p { margin: 0 0 14px; }
+			ul { margin: 0 0 14px 22px; }
+			li { margin-bottom: 10px; }
+			strong, b { color: var(--text); }
+			a { color: var(--accent); }
+			a:hover { color: #ffb964; }
+			footer {
+				text-align: center;
+				color: var(--faint);
+				font-size: 13px;
+				padding: 26px 0 34px;
+				border-top: 1px solid var(--border);
+			}
+			footer a { color: var(--faint); text-decoration: none; }
+			footer a:hover { color: var(--accent); }
+		</style>
+	</head>
+	<body>
+		<div class="topbar">
+			<a class="brand" href="index.html">f&amp; <span>Fanfare</span></a>
+			<a class="nav" href="manual.html">Manual</a>
+			<a class="nav" href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a>
+		</div>
+
+		<article>
+			<h1>Fanfare Privacy Policy</h1>
+			<p class="updated">Last updated: November 9, 2026</p>
+
+			<p>Fanfare is a free desktop application for live music performance. It has no accounts, no sign-up, and no advertising. This policy explains exactly what data the app handles, which is very little.</p>
+
+			<h2>What Fanfare collects</h2>
+			<p>Nothing. Fanfare does not collect, transmit, sell, or share any personal information. There is no telemetry, no analytics, no tracking, and no crash reporting to us. The app runs entirely on your computer.</p>
+
+			<h2>What stays on your computer</h2>
+			<p>Everything you create or load stays on your machine: songs, setlists, rig settings, audio files, break-music decks, logs, and crash dumps (stored locally in your application data folder). None of this is uploaded anywhere.</p>
+
+			<h2>The only times Fanfare connects to the internet</h2>
+			<ul>
+				<li><strong>Update check.</strong> The app contacts GitHub (api.github.com) to compare version numbers so it can tell you when a newer release exists. The request contains nothing about you beyond what any normal web request carries. Opening the update page opens GitHub in your browser.</li>
+				<li><strong>Downloading break music (optional, only when you use it).</strong> If you use the built-in YouTube download feature, the app fetches the video's title from YouTube and downloads the open-source yt-dlp tool from GitHub. These requests happen only when you ask for them, and only involve the video you chose.</li>
+				<li><strong>Help and links.</strong> Buttons that open the manual, release notes, or support pages open your web browser.</li>
+			</ul>
+			<p>That is the complete list. Fanfare never sends your music files, settings, MIDI input, or any other personal data to the internet.</p>
+
+			<h2>Local network remote (optional, only when enabled)</h2>
+			<p>Fanfare can run a small server on your computer so a tablet or phone on your own Wi-Fi network can act as a performance remote (the Stage HUD). This server listens only on your local network, only while you enable it, and only serves the control screen. Nothing is sent to the internet, and remote access stops when you close the app or turn the feature off.</p>
+
+			<h2>Children</h2>
+			<p>Fanfare is a general-purpose music tool, not directed at children. It does not knowingly collect information from anyone, including children, because it does not collect information at all.</p>
+
+			<h2>Changes to this policy</h2>
+			<p>If the app ever changes how it handles data, this page will be updated and the release notes will say so. The policy above reflects the current release.</p>
+
+			<h2>Contact</h2>
+			<p>Questions about this policy can be raised on the project's <a href="https://github.com/openrig-host/fanfare/discussions" target="_blank" rel="noopener">GitHub Discussions page</a>.</p>
+		</article>
+
+		<footer>
+			<p>&copy; Fanfare &middot; <a href="index.html">Home</a> &middot; <a href="manual.html">Manual</a></p>
+		</footer>
+	</body>
+</html>
