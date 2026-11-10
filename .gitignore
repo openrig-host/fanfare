@@ -54,3 +54,8 @@ setup_projucer.bat
 
 # Generated per-build bisect overrides (never commit)
 Source/FanfareBisectFlags.h
+
+# Local installer staging & tools (keep docs/downloads/*.msi tracked when publishing)
+installer/.tools/
+installer/output/
+installer/stage*/

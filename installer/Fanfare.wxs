@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <!--
+    Fanfare x64 Windows Installer (.msi)
+    Fixed UpgradeCode ensures clean in-place upgrades across all future versions.
+    Supports unattended silent installation for Microsoft Store / winget:
+      msiexec /i Fanfare-<version>-x64.msi /quiet /norestart
+  -->
+  <Product Id="*"
+           Name="Fanfare"
+           Language="1033"
+           Version="$(var.ProductVersion)"
+           Manufacturer="Fanfare"
+           UpgradeCode="9B4E73D1-5A82-4C6F-8E31-2D9F4A7B6C10">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Platform="x64"
+             Description="Fanfare v$(var.DisplayVersion) - Live VST3 Host for Stage Keyboardists"
+             Comments="Fanfare Live Performance VST3 Host (x64)" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+                  Schedule="afterInstallInitialize" />
+
+    <!-- Single self-contained .msi with embedded CAB (required by Microsoft Store Partner Center) -->
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Add/Remove Programs (Apps & Features) metadata -->
+    <Icon Id="FanfareIcon.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="FanfareIcon.ico" />
+    <Property Id="ARPHELPLINK" Value="https://openrig-host.github.io/fanfare/manual.html" />
+    <Property Id="ARPURLINFOABOUT" Value="https://openrig-host.github.io/fanfare/" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Fanfare" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Fanfare" />
+      </Directory>
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="CMP_FanfareExe" Guid="3F8C91E2-74D1-4A39-9E55-18B20C4F6E01" Win64="yes">
+        <File Id="FIL_FanfareExe"
+              Name="Fanfare.exe"
+              Source="$(var.ExePath)"
+              KeyPath="yes"
+              Checksum="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="CMP_Shortcuts" Guid="6A14D2C8-91E0-4F2B-B471-52C8E9D03A12" Win64="yes">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="Fanfare"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Target="[INSTALLFOLDER]Fanfare.exe"
+                  Icon="FanfareIcon.ico"
+                  Description="Fanfare Live VST3 Host for Keyboard Players" />
+        <Shortcut Id="DesktopShortcut"
+                  Directory="DesktopFolder"
+                  Name="Fanfare"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Target="[INSTALLFOLDER]Fanfare.exe"
+                  Icon="FanfareIcon.ico"
+                  Description="Fanfare Live VST3 Host for Keyboard Players" />
+        <RemoveFolder Id="RemoveApplicationProgramsFolder"
+                      Directory="ApplicationProgramsFolder"
+                      On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Fanfare"
+                       Name="ShortcutsInstalled"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="ProductFeature" Title="Fanfare" Level="1">
+      <ComponentRef Id="CMP_FanfareExe" />
+      <ComponentRef Id="CMP_Shortcuts" />
+    </Feature>
+  </Product>
+</Wix>
