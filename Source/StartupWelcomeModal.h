@@ -487,14 +487,14 @@ private:
     void paintWhatsNew(juce::Graphics& g, juce::Rectangle<int> area, const Theme& t) const {
         struct Bullet { const char* title; const char* detail; };
         static constexpr Bullet kItems[] = {
-            {"FANFARE SYN-106 native synth (Experimental)",
-             "Built-in 16-voice Juno-inspired poly synth on every strip with 59 presets (80s Icons, 90s Classics, Juno Heritage, Pads, Leads, Basses)."},
             {"Rig Doctor: diagnose & surgical repair",
              "Inspect any .json setup, diff against .bak, dry-run every VST3 in isolation, and reset or remove broken slots without losing scenes."},
             {"Two-phase VST3 loader & segmented progress",
              "Deadlock-free sequential STA -> parallel MTA song loading with a discrete [X/N] step progress bar and non-blocking Cancel."},
-            {"Stage-hardened v1.55 Experimental engine",
-             "Next-Up preload capsule, 1-9 Scene hotkeys, Lush FDN Reverb, Controller Profiles, Save Version History, and USB hotplug recovery."},
+            {"Stage ergonomics: Next-Up & 1-9 Scene hotkeys",
+             "Click the top-bar Next-Up capsule to fire preloaded songs, tap keys 1-9 to recall scenes, and inspect live device/CPU/LAT status."},
+            {"Stage-hardened v1.52 audio engine",
+             "Controller Profiles, Save Version History, hybrid P-core DSP isolation, automatic USB audio/MIDI hotplug recovery, and thermal guard."},
         };
 
         int y = area.getY();

@@ -1856,8 +1856,6 @@ void MainComponent::resized() {
     midiEffectsOverlay->centreWithSize(620, 410);
   if (samplerOverlay)
     samplerOverlay->centreWithSize(720, 600);
-  if (synthOverlay)
-    synthOverlay->updateForHostBounds(getLocalBounds());
   if (mp3Overlay)
     mp3Overlay->centreWithSize(780, 580);
   if (setupBuilderOverlay)

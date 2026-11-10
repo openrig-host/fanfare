@@ -150,10 +150,8 @@ private:
 #endif
 
   static constexpr juce::int64 kLatchDurationMs = 20000;
-  static constexpr int kHighTempTriggerC = 96;
-  static constexpr int kHighTempImmediateC = 99;
-  static constexpr int kHighTempClearC = 89;
-  static constexpr int kSustainedHighTempPolls = 2;
+  static constexpr int kHighTempTriggerC = 90;
+  static constexpr int kHighTempClearC = 85;
 
   std::atomic<uintptr_t> backgroundMask{0};
   std::atomic<float> audioCpuPct{0.0f};
@@ -215,7 +213,6 @@ private:
 
     bool wasOverTemp = false;
     bool wasLoggedThrottle = false;
-    int highTempPollStreak = 0;
     int lastObservedOsCapMhz = -1;
     int healthyOsLimitMhz = 0;
 
@@ -313,17 +310,10 @@ private:
         effectiveClockMhz.store(sampleEffectiveMhz, std::memory_order_relaxed);
 
       // 3. Evaluate true thermal / firmware throttle conditions (ignoring intentional OS turbo caps)
-      if (sampleTempC >= kHighTempTriggerC) {
-        ++highTempPollStreak;
-        if (sampleTempC >= kHighTempImmediateC ||
-            highTempPollStreak >= kSustainedHighTempPolls) {
-          wasOverTemp = true;
-        }
-      } else {
-        highTempPollStreak = 0;
-        if (sampleTempC > 0 && sampleTempC <= kHighTempClearC)
-          wasOverTemp = false;
-      }
+      if (sampleTempC >= kHighTempTriggerC)
+        wasOverTemp = true;
+      else if (sampleTempC > 0 && sampleTempC <= kHighTempClearC)
+        wasOverTemp = false;
 
       bool firmwareClamped = false;
       if (sampleNominalMhz > 0 && sampleMinLimitMhz > 0) {
