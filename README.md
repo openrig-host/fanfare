@@ -2,7 +2,7 @@
 
 # Fanfare
 
-### A live performance host for keyboard players
+### A Windows-based live performance VST host for keyboard players 
 
 [![Latest Release](https://img.shields.io/github/v/release/openrig-host/fanfare?sort=date&cacheSeconds=900&color=ed786a&label=Latest%20Release)](https://github.com/openrig-host/fanfare/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue.svg)](https://github.com/openrig-host/fanfare/releases)
