@@ -3,6 +3,7 @@
 #include "FanfareConstants.h"
 #include "JuceHeader.h"
 #include <juce_dsp/juce_dsp.h>
+#include "LushReverb.h"
 #include "MusetteDetuner.h"
 #include <atomic>
 #include <cmath>
@@ -1167,7 +1168,7 @@ public:
   SimpleComp compL, compR;
   SimpleChorus chorusL, chorusR;
   StereoDelay delay;
-  juce::Reverb reverb;
+  LushReverb reverb;
   ConvolutionReverb irReverb;
 
   // Parameters (Atomic for thread-safety)
@@ -1247,7 +1248,7 @@ public:
     chorusL.prepare(sampleRate);
     chorusR.prepare(sampleRate);
     delay.prepare(sampleRate);
-    reverb.setSampleRate(sampleRate);
+    reverb.prepare(sampleRate);
     irReverb.prepare(sampleRate, 4096);
     musette.prepare(sampleRate);
   }
@@ -1390,19 +1391,18 @@ public:
       }
     }
 
-    if (reverbEnabled.load() && reverbMix.load() > 0.001f) {
-      juce::Reverb::Parameters rp;
-      rp.roomSize = reverbSize.load();
-      rp.wetLevel = reverbMix.load() * 0.5f;
-      rp.dryLevel = 1.0f - reverbMix.load() * 0.3f;
-      rp.width = 1.0f;
-      rp.damping = 0.4f;
-      reverb.setParameters(rp);
-
-      if (R) {
-        reverb.processStereo(L, R, numSamples);
+    {
+      const bool revOn = reverbEnabled.load(std::memory_order_relaxed);
+      const float rawMix = reverbMix.load(std::memory_order_relaxed);
+      const float wet = (revOn && rawMix > 0.001f) ? (rawMix * 0.65f) : 0.0f;
+      const float dry = 1.0f - wet * 0.30f;
+      const float revSz = reverbSize.load(std::memory_order_relaxed);
+      if (R != nullptr) {
+        reverb.processStereo(L, R, numSamples, LushReverb::StripMorph, revSz,
+                             0.35f, wet, dry);
       } else {
-        reverb.processMono(L, numSamples);
+        reverb.processMono(L, numSamples, LushReverb::StripMorph, revSz, 0.35f,
+                           wet, dry);
       }
     }
 
