@@ -519,7 +519,7 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   addAndMakeVisible(synthButton);
   synthButton.setButtonText("SYN");
   Fanfare::setButtonRole(synthButton, Fanfare::ButtonRole::Standard);
-  synthButton.setTooltip("Open the native Fanfare Synth (pads / leads / basses)");
+  synthButton.setTooltip("Open the built-in BLEEP-216 synth (pads / leads / basses)");
   synthButton.onClick = [this] {
     if (onShowSynth)
       onShowSynth();
@@ -1559,7 +1559,7 @@ void RackSlotComponent::showStripActionsMenu() {
     menu.addItem(2, "Dynamics, EQ & sends (DYN)...");
     menu.addItem(3, "MIDI effects (Arp / Harmonizer)...");
     menu.addItem(4, "8-pad sampler...");
-    menu.addItem(5, "Fanfare synth...");
+    menu.addItem(5, "BLEEP-216 synth...");
     if (kMp3DecksEnabled)
       menu.addItem(6, "MP3 playlist deck...");
   }
