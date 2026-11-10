@@ -58,3 +58,4 @@ If your Partner Center listing was created as **EXE or MSI**:
 ```text
 https://openrig-host.github.io/fanfare/privacy.html
 ```
+

@@ -278,7 +278,7 @@ void MainComponent::setupSlotComponents() {
         resized();
       }));
       addAndMakeVisible(synthOverlay.get());
-      synthOverlay->centreWithSize(1020, 660);
+      synthOverlay->updateForHostBounds(getLocalBounds());
     };
 
     // Note Range Dialog (CallOutBox)

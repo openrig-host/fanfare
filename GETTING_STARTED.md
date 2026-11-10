@@ -50,10 +50,9 @@ Fanfare scans standard Windows VST3 directories (`C:\Program Files\Common Files\
 
 ## 5. Build Your First Rig
 
-### Step A: Load a VST3 Instrument into a Slot
-1. Click **`+`** on any empty channel strip slot.
-2. Pick a VST3 instrument from your list (for example, *Hammond B-3X*, *Kontakt 8*, *ZENOLOGY*, *EZkeys 2*, *Jun-6 V*).
-3. Click **`E`** next to the slot to open the plugin's floating editor window.
+### Step A: Load a VST3 Instrument or Open the Built-In BLEEP-216 Synth
+1. Click **`+`** on any empty channel strip slot to pick a VST3 instrument from your list (for example, *Hammond B-3X*, *Kontakt 8*, *ZENOLOGY*, *EZkeys 2*, *Jun-6 V*), and click **`E`** to open its floating editor window.
+2. **Or use the built-in synth with zero VSTs:** Click **`SYN`** on any channel strip (or open **`... → BLEEP-216 synth...`**) to launch the built-in **BLEEP-216** 16-voice polyphonic synthesizer with **68 stage-ready presets** (*Jump 1984 Brass*, *Take On Me Riff*, *Final Countdown*, *Enyaesque*, *1983 Poly*, *Juno Pad 1*, *Hollow Square Pad 1*, *Cathedral Pad*, *Square Lead*, *Dark Bass*, and more).
 
 ### Step B: Set Key Split / Note Range
 1. Click **`...`** at the bottom of the channel strip (or click the note range readout under the strip name) and choose **`Note range & transpose...`**.

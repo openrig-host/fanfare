@@ -8,7 +8,7 @@
 		<title>Fanfare: Live VST3 Host for Keyboard Players</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="description" content="Fanfare v1.52 is a rack-based VST3 host for keyboard players who gig. Sleek Studio workspace with Vertical Ribbon sidebar, Rig Doctor setup diagnostics &amp; surgical repair, global Controller Profiles, Save Version History, clean song changes, separate FOH and IEM mixes with per-strip IEM trim, Curve-Link EQ, built-in acoustic IRs, stereo/ping-pong/tape delay, dual-deck DJ player with broadcast auto-leveling, tablet HUD, and a panic button that works." />
+		<meta name="description" content="Fanfare v1.55 is a rack-based VST3 host for keyboard players who gig. Includes the built-in BLEEP-216 16-voice polyphonic synthesizer (68 presets), LushReverb figure-8 tank reverb, Rig Doctor setup diagnostics &amp; surgical repair, global Controller Profiles, Save Version History, clean song changes, separate FOH and IEM mixes with per-strip IEM trim, Curve-Link EQ, built-in acoustic IRs, stereo/ping-pong/tape delay, dual-deck DJ player with broadcast auto-leveling, tablet HUD, and a panic button that works." />
 		<link rel="canonical" href="https://openrig-host.github.io/fanfare/" />
 		<link rel="icon" type="image/png" href="Fanfare_Icon.png" />
 		<meta property="og:site_name" content="Fanfare" />
@@ -182,12 +182,16 @@
 								<h2 class="major">Features</h2>
 								<div class="feature-grid">
 									<div>
+										<h3>BLEEP-216 Built-In Polysynth</h3>
+										<p>A 16-voice Juno/Jupiter-inspired analog-modeled synthesizer built directly into every channel strip &mdash; dual PolyBLEP oscillators + sub + noise, HPF, 12/24 dB resonant VCF, dual ADSRs, BBD Chorus I/II/I+II, stereo delay, <strong>LushReverb</strong> tank, onscreen keyboard, and <strong>68 stage-ready presets</strong> (from <em>Jump 1984 Brass</em>, <em>Take On Me Riff</em>, <em>Final Countdown</em>, and <em>Enyaesque</em> to 90s supersaws and 303 bass) with zero external VSTs required.</p>
+									</div>
+									<div>
 										<h3>Songs, Scenes &amp; Setlists</h3>
 										<p>Every song is a plain JSON file. Jump between sections with MIDI, and the next song loads while you play.</p>
 									</div>
 									<div>
-										<h3>Strip DSP, Delay &amp; Musette</h3>
-										<p>Gate, 10-band EQ with Curve-Link mode, compressor, chorus, reverb, 6 built-in synthesized acoustic IRs (plus custom WAV cab loader), and stereo/ping-pong/tape delay with Tap Tempo on every strip. Plus an accordion detuner with 2-reed MM, 3-reed MMM, and &ldquo;TEMU Musette&rdquo;, which is exactly as out of tune as it sounds.</p>
+										<h3>Strip DSP, LushReverb &amp; Musette</h3>
+										<p>Gate, 10-band EQ with Curve-Link mode, compressor, chorus, modulated figure-8 <strong>LushReverb</strong> tank (<code>Lexicon-224</code> lineage), 6 built-in synthesized acoustic IRs (plus custom WAV cab loader), and stereo/ping-pong/tape delay with Tap Tempo on every strip. Plus an accordion detuner with 2-reed MM, 3-reed MMM, and &ldquo;TEMU Musette&rdquo;, which is exactly as out of tune as it sounds.</p>
 									</div>
 									<div>
 										<h3>FOH + Per-Strip IEM Trim</h3>
@@ -253,17 +257,19 @@
 								<h2 class="major">Screenshots</h2>
 								<div class="showcase-tabs">
 									<button type="button" class="tab-btn active" onclick="switchTab(0)">Full Live Rig</button>
-									<button type="button" class="tab-btn" onclick="switchTab(1)">Tablet Stage HUD</button>
-									<button type="button" class="tab-btn" onclick="switchTab(2)">HUD Touch Mixer</button>
-									<button type="button" class="tab-btn" onclick="switchTab(3)">Channel Strip DSP</button>
-									<button type="button" class="tab-btn" onclick="switchTab(4)">MIDI FX</button>
-									<button type="button" class="tab-btn" onclick="switchTab(5)">Sampler</button>
-									<button type="button" class="tab-btn" onclick="switchTab(6)">VST Editors</button>
-									<button type="button" class="tab-btn" onclick="switchTab(7)">CC Manager</button>
-									<button type="button" class="tab-btn" onclick="switchTab(8)">Break-Music Player</button>
+									<button type="button" class="tab-btn" onclick="switchTab(1)">BLEEP-216 Synth</button>
+									<button type="button" class="tab-btn" onclick="switchTab(2)">Tablet Stage HUD</button>
+									<button type="button" class="tab-btn" onclick="switchTab(3)">HUD Touch Mixer</button>
+									<button type="button" class="tab-btn" onclick="switchTab(4)">Channel Strip DSP</button>
+									<button type="button" class="tab-btn" onclick="switchTab(5)">MIDI FX</button>
+									<button type="button" class="tab-btn" onclick="switchTab(6)">Sampler</button>
+									<button type="button" class="tab-btn" onclick="switchTab(7)">VST Editors</button>
+									<button type="button" class="tab-btn" onclick="switchTab(8)">CC Manager</button>
+									<button type="button" class="tab-btn" onclick="switchTab(9)">Break-Music Player</button>
 								</div>
 								<div>
-									<img src="fanfare_v1_4_console.jpg" width="1024" height="581" decoding="async" class="showcase-img active" alt="Fanfare v1.52 Studio live mixer interface" />
+									<img src="fanfare_v1_4_console.jpg" width="1024" height="581" decoding="async" class="showcase-img active" alt="Fanfare v1.55 Studio live mixer interface" />
+									<img src="bleep_216_synth.jpg" width="1024" height="543" loading="lazy" decoding="async" class="showcase-img" alt="Built-in BLEEP-216 16-voice polyphonic synthesizer with 68 presets and LushReverb" />
 									<img src="tablet_stage_hud.png" width="966" height="471" loading="lazy" decoding="async" class="showcase-img" alt="Fanfare Tablet Stage HUD Songs view over Wi-Fi SoftAP" />
 									<img src="tablet_touch_mixer.png" width="471" height="966" loading="lazy" decoding="async" class="showcase-img portrait" alt="Fanfare mobile Touch Mixer with dual FOH and IEM faders" />
 									<img src="channel_strip_dsp.png" width="1024" height="524" loading="lazy" decoding="async" class="showcase-img" alt="Channel strip processing and convolution panel" />
@@ -368,9 +374,10 @@
 			<script>
 				const captions = [
 					"Full Studio live mixer interface with Vertical Ribbon sidebar, Scene snapshots, dual FOH/IEM mixes, scrollable 24-strip rack, and peak VU metering.",
+					"Built-in BLEEP-216 16-voice polyphonic synthesizer on every strip: dual DCOs + Sub + Noise, 12/24 dB VCF, dual ADSRs, BBD Chorus I/II/I+II, stereo delay, LushReverb tank, and 68 iconic presets.",
 					"Touchscreen Tablet Stage HUD running over Wi-Fi / SoftAP with color-coded song tags, favorites, Bright/Dark toggle, guarded Panic, and 3ms WebSocket sync.",
 					"Portrait mobile Touch Mixer in the Stage HUD: independent multi-touch gold FOH and cyan IEM faders per strip, Master faders, and live stereo VU meters.",
-					"Channel strip DSP: noise gate, 10-band Curve-Link EQ, compressor, stereo/ping-pong/tape delay with tap tempo, musette detuner, IR loader, and per-strip IEM trim.",
+					"Channel strip DSP: noise gate, 10-band Curve-Link EQ, compressor, stereo/ping-pong/tape delay with tap tempo, LushReverb tank, musette detuner, IR loader, and per-strip IEM trim.",
 					"MIDI FX module with per-strip transposer, tempo-locked arpeggiator patterns, octaver, and Africa harmonizer.",
 					"8 one-shot pad sampler with drag-and-drop WAV support, MIDI key learn, and sample-accurate waveform splice handles.",
 					"Active VST3 floating editor windows showing synth and sampler controls.",
