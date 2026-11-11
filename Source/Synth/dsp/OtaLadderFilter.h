@@ -16,7 +16,7 @@ struct OtaLadderFilter {
   double resK = 0.0;
 
   void reset() noexcept {
-    s1 = 0.0;
+    s1 = 1e-4;
     s2 = 0.0;
     s3 = 0.0;
     s4 = 0.0;
@@ -32,8 +32,16 @@ struct OtaLadderFilter {
 
   inline void setResonance(double resonanceNorm) noexcept {
     const double r = juce::jlimit(0.0, 1.0, resonanceNorm);
-    const double shaped = r * (0.65 + 0.35 * r);
-    resK = shaped * DspConfig::kLadderMaxResonanceK;
+    // Keep low resonance (<0.30) smooth and warm, then ramp strongly into
+    // Roland IR3109 singing resonance and pure sine self-oscillation above 0.72.
+    double shaped = 0.0;
+    if (r <= 0.30) {
+      shaped = r * 0.65;
+    } else {
+      const double t = (r - 0.30) / 0.70;
+      shaped = 0.195 + t * (0.805 + 0.16 * t * (1.0 - t));
+    }
+    resK = juce::jmin(1.0, shaped) * DspConfig::kLadderMaxResonanceK;
   }
 
   inline void setG(double newG) noexcept {
@@ -54,9 +62,13 @@ struct OtaLadderFilter {
 
     const double sigma = alpha * (G3 * s1 + G2 * s2 + G * s3 + s4);
     const double bassComp = 1.0 + resK * DspConfig::kLadderBassCompAmount;
-    const double linearU =
-        ((x + 1e-9) * bassComp - resK * sigma) / (1.0 + resK * G4);
-    const double u = fastTanh(linearU * 0.80) * 1.25;
+
+    // Separate input saturation from feedback loop saturation so loud DCO/Sub
+    // levels never compress the feedback loop gain or choke filter resonance.
+    const double xIn = fastTanh((x + 1e-7) * 0.75) * (1.0 / 0.75) * bassComp;
+    const double fb = fastTanh(sigma * 1.15) * (1.0 / 1.15);
+    const double linearU = (xIn - resK * fb) / (1.0 + resK * G4);
+    const double u = fastTanh(linearU * 0.35) * (1.0 / 0.35);
 
     const double v1 = (u - s1) * G;
     const double y1 = v1 + s1;
@@ -74,7 +86,7 @@ struct OtaLadderFilter {
     const double y4 = v4 + s4;
     s4 = y4 + v4;
 
-    return slope24dB ? y4 : y2;
+    return slope24dB ? y4 : (y2 + 0.55 * (y4 - y2));
   }
 };
 

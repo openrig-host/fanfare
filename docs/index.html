@@ -125,26 +125,43 @@
 			#footer .copyright { color: rgba(255,255,255,0.65); }
 			#footer .copyright a { color: rgba(255,255,255,0.75) !important; }
 
-			/* Equalize header nav item widths so the center line lands
-			   dead on the seam between Architecture and Download, never bisecting text. */
+			/* Header nav: size items cleanly to fit their labels without text collision */
 			#header nav {
 				max-width: 100%;
 			}
 			#header nav ul {
-				width: 100%;
 				display: flex;
+				flex-wrap: nowrap;
+				width: auto;
 			}
 			#header nav ul li {
-				flex: 1 1 0;
+				flex: 0 0 auto;
 				min-width: 0;
 			}
 			#header nav ul li a {
 				min-width: 0;
-				padding: 0 0.35rem;
-				letter-spacing: 0.12rem;
-				font-size: 0.74rem;
+				padding: 0 0.95rem 0 1.1rem;
+				letter-spacing: 0.14rem;
+				font-size: 0.76rem;
 				text-align: center;
 				white-space: nowrap;
+			}
+			#header nav.use-middle:after {
+				display: none;
+			}
+			#header nav.use-middle ul li.is-middle {
+				border-left: solid 1px #ffffff;
+			}
+			@media screen and (max-width: 980px) {
+				#header nav ul {
+					flex-wrap: wrap;
+					justify-content: center;
+				}
+				#header nav ul li a {
+					padding: 0 0.7rem 0 0.8rem;
+					letter-spacing: 0.1rem;
+					font-size: 0.72rem;
+				}
 			}
 		</style>
 	</head>

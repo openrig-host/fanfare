@@ -52,7 +52,7 @@ inline constexpr double kModWheelFilterOctaves = 0.35;
 inline constexpr double kAftertouchVibratoCents = 25.0;
 inline constexpr double kAftertouchFilterOctaves = 0.85;
 
-inline constexpr double kLadderMaxResonanceK = 4.22;
+inline constexpr double kLadderMaxResonanceK = 4.95;
 inline constexpr double kLadderBassCompAmount = 0.45;
 inline constexpr double kHpfBoostShelfEnd = 0.12;
 inline constexpr double kHpfBoostMaxDb = 4.0;

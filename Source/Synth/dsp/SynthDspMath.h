@@ -24,14 +24,11 @@ inline float fastTanhf(float x) noexcept {
   return x * (27.0f + x2) / (27.0f + 9.0f * x2);
 }
 
-// Accurate Pade approximation for tan(pi * f / sr) across [0 .. 0.45 * sr].
+// Accurate tan(pi * f / sr) across [0 .. 0.45 * sr] for pitch-true self-oscillation.
 inline double fastTanNormalized(double normalizedFreq) noexcept {
   const double w = juce::jlimit(0.00005, DspConfig::kMaxNyquistRatio, normalizedFreq) *
                    juce::MathConstants<double>::pi;
-  if (w > 1.15)
-    return std::tan(w);
-  const double w2 = w * w;
-  return w * (15.0 - w2) / (15.0 - 6.0 * w2);
+  return std::tan(w);
 }
 
 struct OnePoleSmoother {
