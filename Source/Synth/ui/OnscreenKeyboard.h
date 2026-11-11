@@ -8,6 +8,7 @@
 #include "../../ThemeManager.h"
 #include "../FanfareSynthProcessorImpl.h"
 #include "../SynthConstants.h"
+#include "SynthSkin.h"
 
 namespace FanfareSynth::Ui {
 
@@ -116,11 +117,11 @@ public:
   }
 
   void paint(juce::Graphics &g) override {
-    const auto b = getLocalBounds().toFloat();
-    g.setColour(ThemeManager::get(Theme::Role::panel));
-    g.fillRoundedRectangle(b, 3.0f);
-    g.setColour(ThemeManager::get(Theme::Role::border));
-    g.drawRoundedRectangle(b.reduced(0.5f), 3.0f, 1.0f);
+    chrome.render(getWidth(), getHeight(), Skin::themeSignature(),
+                  [](juce::Graphics &cg, juce::Rectangle<int> r) {
+                    Skin::drawPlate(cg, r.toFloat(), 3.0f);
+                  });
+    chrome.draw(g, 0, 0);
 
     drawWheelStrip(g, bendStripRect, "BEND",
                    0.5f + 0.5f * proc.getPitchBend(), true);
@@ -147,11 +148,25 @@ public:
           keys.getX() + (float)whiteIndexOf(s) * wW, keys.getY(), wW - 1.0f,
           keys.getHeight());
       const bool on = isNoteOn(baseNote + s);
-      g.setColour(on ? ThemeManager::get(Theme::Role::accent).withAlpha(0.80f)
-                     : ThemeManager::get(Theme::Role::raised));
-      g.fillRoundedRectangle(r, 2.5f);
-      g.setColour(ThemeManager::get(Theme::Role::border));
-      g.drawRoundedRectangle(r, 2.5f, 1.0f);
+      if (on) {
+        const auto acc = ThemeManager::get(Theme::Role::accent);
+        g.setColour(acc.withAlpha(0.22f));
+        g.fillRoundedRectangle(r.expanded(1.5f), 3.5f);
+        Skin::fillVertical(g, r, Skin::lift(acc, 0.18f),
+                           Skin::sink(acc, 0.28f), 2.5f);
+        g.setColour(Skin::lift(acc, 0.45f));
+        g.drawRoundedRectangle(r.reduced(0.5f), 2.5f, 1.0f);
+      } else {
+        const auto keyFace = ThemeManager::get(Theme::Role::raised);
+        Skin::fillVertical(g, r, Skin::lift(keyFace, 0.20f),
+                           Skin::sink(keyFace, 0.28f), 2.5f);
+        g.setColour(juce::Colours::white.withAlpha(
+            Skin::isDark() ? 0.10f : 0.55f));
+        g.fillRect(r.withHeight(1.0f).withY(r.getY() + 1.0f)
+                     .reduced(2.0f, 0.0f));
+        g.setColour(ThemeManager::get(Theme::Role::border));
+        g.drawRoundedRectangle(r.reduced(0.5f), 2.5f, 1.0f);
+      }
 
       const char ch = charForOffset(s);
       if (ch != 0) {
@@ -173,11 +188,28 @@ public:
       const auto r = juce::Rectangle<float>(bx, keys.getY(), wW * 0.60f,
                                             keys.getHeight() * 0.58f);
       const bool on = isNoteOn(baseNote + s);
+      if (on) {
+        const auto acc = ThemeManager::get(Theme::Role::accent);
+        g.setColour(acc.withAlpha(0.25f));
+        g.fillRoundedRectangle(r.expanded(1.5f), 3.0f);
+        Skin::fillVertical(g, r, Skin::lift(acc, 0.10f),
+                           Skin::sink(acc, 0.35f), 2.0f);
+      } else {
+        const auto bkTop =
+            Skin::isDark()
+                ? Skin::lift(ThemeManager::get(Theme::Role::sunken), 0.35f)
+                : juce::Colour(0xFF3A3D42);
+        const auto bkBot =
+            Skin::isDark() ? ThemeManager::get(Theme::Role::sunken)
+                           : juce::Colour(0xFF1E2126);
+        Skin::fillVertical(g, r, bkTop, bkBot, 2.0f);
+        g.setColour(juce::Colours::white.withAlpha(0.12f));
+        g.fillRect(r.withHeight(1.0f).withY(r.getY() + 1.0f)
+                     .reduced(1.5f, 0.0f));
+      }
       g.setColour(on ? ThemeManager::get(Theme::Role::accent)
-                     : ThemeManager::get(Theme::Role::sunken).darker(0.6f));
-      g.fillRoundedRectangle(r, 2.0f);
-      g.setColour(ThemeManager::get(Theme::Role::borderStrong));
-      g.drawRoundedRectangle(r, 2.0f, 0.8f);
+                     : ThemeManager::get(Theme::Role::borderStrong));
+      g.drawRoundedRectangle(r.reduced(0.5f), 2.0f, 0.8f);
     }
   }
 
@@ -293,33 +325,50 @@ private:
     g.drawText(label, labelBox, juce::Justification::centred, false);
 
     const auto slot = area.reduced(6, 2).toFloat();
-    g.setColour(ThemeManager::get(Theme::Role::sunken));
-    g.fillRoundedRectangle(slot, 3.0f);
-    g.setColour(ThemeManager::get(Theme::Role::border));
-    g.drawRoundedRectangle(slot, 3.0f, 1.0f);
+    Skin::drawRecess(g, slot, 3.0f);
 
     const float clamped = juce::jlimit(0.0f, 1.0f, normPos);
     const float thumbY =
         slot.getBottom() - 4.0f - clamped * (slot.getHeight() - 8.0f);
 
-    g.setColour(ThemeManager::get(Theme::Role::accentDim));
+    const auto fillCol = ThemeManager::get(Theme::Role::accentDim);
     if (bipolar) {
       const float midY = slot.getCentreY();
       const float top = juce::jmin(midY, thumbY);
-      g.fillRect(juce::Rectangle<float>(slot.getX() + 2.0f, top,
-                                        slot.getWidth() - 4.0f,
-                                        std::abs(thumbY - midY)));
+      const float h = std::abs(thumbY - midY);
+      if (h > 0.5f)
+        Skin::glowFill(
+            g,
+            juce::Rectangle<float>(slot.getX() + 2.0f, top,
+                                   slot.getWidth() - 4.0f, h),
+            1.5f, fillCol);
     } else {
-      g.fillRect(juce::Rectangle<float>(slot.getX() + 2.0f, thumbY,
-                                        slot.getWidth() - 4.0f,
-                                        slot.getBottom() - 2.0f - thumbY));
+      const float h = slot.getBottom() - 2.0f - thumbY;
+      if (h > 0.5f)
+        Skin::glowFill(
+            g,
+            juce::Rectangle<float>(slot.getX() + 2.0f, thumbY,
+                                   slot.getWidth() - 4.0f, h),
+            1.5f, fillCol);
     }
 
+    const auto thumb = juce::Rectangle<float>(slot.getX() + 1.0f,
+                                              thumbY - 3.0f,
+                                              slot.getWidth() - 2.0f, 6.0f);
+    g.setColour(juce::Colours::black.withAlpha(0.40f));
+    g.fillRoundedRectangle(thumb.translated(0.0f, 1.0f), 1.5f);
+    Skin::fillVertical(g, thumb,
+                       Skin::lift(ThemeManager::get(Theme::Role::faceTop),
+                                  0.25f),
+                       Skin::sink(ThemeManager::get(Theme::Role::faceBot),
+                                  0.15f),
+                       1.5f);
+    g.setColour(ThemeManager::get(Theme::Role::borderStrong));
+    g.drawRoundedRectangle(thumb.reduced(0.5f), 1.5f, 1.0f);
     g.setColour(ThemeManager::get(Theme::Role::knobThumb));
-    g.fillRoundedRectangle(
-        juce::Rectangle<float>(slot.getX() + 1.0f, thumbY - 2.5f,
-                               slot.getWidth() - 2.0f, 5.0f),
-        1.5f);
+    g.fillRect(juce::Rectangle<float>(thumb.getX() + 2.0f,
+                                      thumb.getCentreY() - 0.5f,
+                                      thumb.getWidth() - 4.0f, 1.0f));
   }
 
   void updateWheelFromPos(juce::Point<float> p) {
@@ -431,6 +480,7 @@ private:
   juce::TextButton octDownBtn, octUpBtn, panicBtn;
   juce::Rectangle<int> bendStripRect, modStripRect, keysHeaderRect, pianoRect;
   bool keyboardActive = false;
+  Skin::ChromeCache chrome;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OnscreenKeyboard)
 };

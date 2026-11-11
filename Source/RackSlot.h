@@ -1124,6 +1124,15 @@ public:
     return !pluginChain.empty();
   }
   bool hasActivePlugins() const {
+    for (int i = 0; i < 3; ++i) {
+      if ((chainIsSynth[i].load() && chainSynths[i].enabled.load()) ||
+          (chainIsFm[i].load() && chainFms[i].enabled.load()) ||
+          chainMidiOut[i].isMidiOut.load())
+        return true;
+    }
+    if (chainSynths[0].enabled.load() || chainFms[0].enabled.load() ||
+        sampler.enabled.load())
+      return true;
     juce::SpinLock::ScopedTryLockType pcl(pluginLock);
     if (!pcl.isLocked())
       return false;

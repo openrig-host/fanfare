@@ -8,6 +8,7 @@
 #include "../SynthConstants.h"
 #include "../SynthParams.h"
 #include "SynthControlCallbacks.h"
+#include "SynthSkin.h"
 #include "SynthValueReadout.h"
 
 namespace FanfareSynth::Ui {
@@ -60,7 +61,7 @@ public:
       readout.setBounds(
           b.removeFromBottom(UiMetrics::kValueReadoutHeight).reduced(2, 0));
       const int dialSize = juce::jlimit(
-          18, 48, juce::jmin(b.getWidth() - 4, b.getHeight() - 4));
+          18, 64, juce::jmin(b.getWidth() - 4, b.getHeight() - 4));
       dialArea = b.withSizeKeepingCentre(dialSize, dialSize);
     }
   }
@@ -78,19 +79,36 @@ public:
     if (dialArea.isEmpty())
       return;
 
+    using namespace Skin;
     const auto df = dialArea.toFloat();
     const float cx = df.getCentreX();
     const float cy = df.getCentreY();
     const float outerR = df.getWidth() * 0.5f - 1.5f;
-    const float bodyR = juce::jmax(5.0f, outerR - 3.2f);
+    const float arcR = outerR - 3.0f;
+    const float bodyR = juce::jmax(5.0f, arcR - 3.0f);
 
     constexpr float kStartAngle = -2.35619449f; // -135 deg
     constexpr float kEndAngle = 2.35619449f;    // +135 deg
     const float valueAngle =
         kStartAngle + normValue * (kEndAngle - kStartAngle);
 
+    for (int step = 0; step <= 10; ++step) {
+      const float t = (float)step / 10.0f;
+      const float a = kStartAngle + t * (kEndAngle - kStartAngle);
+      const bool major = (step == 0 || step == 5 || step == 10);
+      const float r0 = outerR - (major ? 2.6f : 1.6f);
+      const float sa = std::sin(a);
+      const float ca = -std::cos(a);
+      g.setColour(major ? ThemeManager::get(Theme::Role::textFaint)
+                             .withAlpha(0.80f)
+                         : ThemeManager::get(Theme::Role::borderStrong)
+                               .withAlpha(0.55f));
+      g.drawLine(cx + sa * r0, cy + ca * r0, cx + sa * outerR,
+                 cy + ca * outerR, 1.0f);
+    }
+
     juce::Path bgArc;
-    bgArc.addCentredArc(cx, cy, outerR, outerR, 0.0f, kStartAngle, kEndAngle,
+    bgArc.addCentredArc(cx, cy, arcR, arcR, 0.0f, kStartAngle, kEndAngle,
                         true);
     g.setColour(ThemeManager::get(Theme::Role::trackGroove));
     g.strokePath(bgArc, juce::PathStrokeType(2.2f, juce::PathStrokeType::curved,
@@ -100,30 +118,64 @@ public:
     const float originAngle = d.bipolar ? 0.0f : kStartAngle;
     if (std::abs(valueAngle - originAngle) > 0.02f) {
       juce::Path valArc;
-      valArc.addCentredArc(cx, cy, outerR, outerR, 0.0f,
+      valArc.addCentredArc(cx, cy, arcR, arcR, 0.0f,
                            juce::jmin(originAngle, valueAngle),
                            juce::jmax(originAngle, valueAngle), true);
-      g.setColour(ThemeManager::get(dragging ? Theme::Role::accent
-                                             : Theme::Role::accentDim));
-      g.strokePath(valArc,
-                   juce::PathStrokeType(2.3f, juce::PathStrokeType::curved,
-                                        juce::PathStrokeType::rounded));
+      glowStroke(g, valArc,
+                 ThemeManager::get(dragging ? Theme::Role::accent
+                                            : Theme::Role::accentDim),
+                 2.2f);
     }
 
+    g.setColour(juce::Colours::black.withAlpha(0.40f));
+    g.fillEllipse(cx - bodyR, cy - bodyR + 1.6f, bodyR * 2.0f, bodyR * 2.0f);
+
+    const auto face = ThemeManager::get(Theme::Role::knobFace);
+    juce::ColourGradient bodyGrad(Skin::lift(face, 0.35f), cx, cy - bodyR,
+                                  Skin::sink(face, 0.45f), cx, cy + bodyR,
+                                  true);
+    g.setGradientFill(bodyGrad);
     const juce::Rectangle<float> body(cx - bodyR, cy - bodyR, bodyR * 2.0f,
                                       bodyR * 2.0f);
-    g.setColour(ThemeManager::get(Theme::Role::knobFace));
     g.fillEllipse(body);
+
+    for (int k = 0; k < 24; ++k) {
+      const float a = (float)k / 24.0f * juce::MathConstants<float>::twoPi;
+      const float sa = std::sin(a);
+      const float ca = std::cos(a);
+      g.setColour(juce::Colours::black.withAlpha(0.28f));
+      g.drawLine(cx + sa * (bodyR - 0.4f), cy + ca * (bodyR - 0.4f),
+                 cx + sa * (bodyR - 2.0f), cy + ca * (bodyR - 2.0f), 1.0f);
+    }
+
+    juce::Path bevel;
+    bevel.addCentredArc(cx, cy, bodyR - 0.8f, bodyR - 0.8f, 0.0f,
+                        kStartAngle - 0.35f, -0.6f, true);
+    g.setColour(juce::Colours::white.withAlpha(isDark() ? 0.16f : 0.45f));
+    g.strokePath(bevel, juce::PathStrokeType(1.0f));
+
     g.setColour(ThemeManager::get(dragging || hovered ? Theme::Role::accent
                                                       : Theme::Role::borderStrong));
-    g.drawEllipse(body, 1.0f);
+    g.drawEllipse(body.reduced(0.5f), 1.0f);
 
     const float sinA = std::sin(valueAngle);
     const float cosA = -std::cos(valueAngle);
-    g.setColour(ThemeManager::get(fineDragActive ? Theme::Role::accent
-                                                 : Theme::Role::knobThumb));
-    g.drawLine(cx + sinA * (bodyR * 0.28f), cy + cosA * (bodyR * 0.28f),
-               cx + sinA * (bodyR - 1.2f), cy + cosA * (bodyR - 1.2f), 1.8f);
+    const juce::Colour ptrCol =
+        ThemeManager::get(fineDragActive ? Theme::Role::accent
+                                         : Theme::Role::knobThumb);
+    if (dragging || fineDragActive) {
+      juce::Path ptr;
+      ptr.startNewSubPath(cx + sinA * (bodyR * 0.26f),
+                          cy + cosA * (bodyR * 0.26f));
+      ptr.lineTo(cx + sinA * (bodyR - 1.4f), cy + cosA * (bodyR - 1.4f));
+      glowStroke(g, ptr, ThemeManager::get(Theme::Role::accent), 2.0f);
+    } else {
+      g.setColour(ptrCol);
+      g.drawLine(cx + sinA * (bodyR * 0.26f), cy + cosA * (bodyR * 0.26f),
+                 cx + sinA * (bodyR - 1.4f), cy + cosA * (bodyR - 1.4f), 2.0f);
+    }
+    g.setColour(ptrCol.withAlpha(0.9f));
+    g.fillEllipse(cx - 1.4f, cy - 1.4f, 2.8f, 2.8f);
   }
 
   void mouseEnter(const juce::MouseEvent &) override {

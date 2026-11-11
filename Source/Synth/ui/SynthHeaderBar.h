@@ -8,8 +8,54 @@
 #include "../FanfareSynthProcessorImpl.h"
 #include "../SynthConstants.h"
 #include "../SynthParams.h"
+#include "SynthSkin.h"
 
 namespace FanfareSynth::Ui {
+
+class SynthKeyButton : public juce::TextButton {
+public:
+  SynthKeyButton() : juce::TextButton("", {}) {}
+
+  juce::Colour onTint;
+  juce::Colour textTint;
+  bool showLed = false;
+
+  void paintButton(juce::Graphics &g, bool isOver, bool isDown) override {
+    const bool on = getToggleState() && getClickingTogglesState();
+    const bool enabled = isEnabled();
+    const auto r = getLocalBounds().toFloat().reduced(0.5f, 0.5f);
+    const juce::Colour tint =
+        onTint.getARGB() != 0 ? onTint : ThemeManager::get(Theme::Role::accent);
+
+    Skin::drawKeycap(g, r, isDown, on && enabled, tint, 3.0f);
+
+    if (isOver && enabled) {
+      g.setColour(juce::Colours::white.withAlpha(Skin::isDark() ? 0.06f
+                                                                : 0.30f));
+      g.fillRoundedRectangle(r.reduced(1.0f), 2.5f);
+    }
+
+    auto textArea = getLocalBounds().reduced(4, 0);
+    if (showLed) {
+      const auto led = textArea.removeFromLeft(9)
+                           .withSizeKeepingCentre(5, 5)
+                           .toFloat();
+      textArea.removeFromLeft(2);
+      Skin::drawLed(g, led, tint, on && enabled);
+    }
+
+    const juce::Colour textCol =
+        !enabled  ? ThemeManager::get(Theme::Role::textFaint)
+        : on      ? tint
+        : isOver  ? ThemeManager::get(Theme::Role::text)
+        : textTint.getARGB() != 0 ? textTint
+                                  : ThemeManager::get(Theme::Role::textDim);
+    g.setFont(BoutiqueLookAndFeel::condensedFont(
+        juce::jmin(12.0f, (float)getHeight() * 0.42f), 0.06f));
+    g.drawFittedText(getButtonText(), textArea, juce::Justification::centred,
+                     1, 0.9f);
+  }
+};
 
 class SynthPatchLcd : public juce::Component,
                       public juce::SettableTooltipClient {
@@ -46,8 +92,27 @@ public:
 
   void paint(juce::Graphics &g) override {
     const auto b = getLocalBounds().toFloat().reduced(0.5f);
-    g.setColour(ThemeManager::get(Theme::Role::sunken));
-    g.fillRoundedRectangle(b, 3.5f);
+    Skin::drawRecess(g, b, 3.5f);
+
+    const auto backlight =
+        ThemeManager::get(Theme::Role::accent).withAlpha(0.045f);
+    g.setColour(backlight);
+    g.fillRoundedRectangle(b.reduced(1.0f), 3.0f);
+
+    scanlines.render(getWidth(), getHeight(), Skin::themeSignature(),
+                     [](juce::Graphics &cg, juce::Rectangle<int> r) {
+                       cg.drawImageAt(Skin::makeScanlines(r.getWidth(),
+                                                          r.getHeight()),
+                                      0, 0);
+                     });
+    g.saveState();
+    g.reduceClipRegion(getLocalBounds());
+    scanlines.draw(g, 0, 0);
+    Skin::fillVertical(
+        g, b.withHeight(b.getHeight() * 0.45f).reduced(1.0f, 1.0f),
+        juce::Colours::white.withAlpha(Skin::isDark() ? 0.05f : 0.22f),
+        juce::Colours::white.withAlpha(0.0f), 3.0f);
+    g.restoreState();
 
     const juce::Colour borderCol =
         errorFlag ? ThemeManager::get(Theme::Role::danger)
@@ -66,12 +131,11 @@ public:
     g.drawVerticalLine(dividerX, (float)inner.getY() + 2.0f,
                        (float)inner.getBottom() - 2.0f);
 
-    // Patch number badge
     auto numArea = patchSide.removeFromLeft(30);
-    g.setColour(ThemeManager::get(Theme::Role::accent));
-    g.setFont(BoutiqueLookAndFeel::monoFont(11.5f, true));
-    g.drawText(patchNumberText, numArea, juce::Justification::centredLeft,
-               false);
+    Skin::drawGlowText(g, patchNumberText, numArea,
+                       BoutiqueLookAndFeel::monoFont(11.5f, true),
+                       ThemeManager::get(Theme::Role::accent),
+                       juce::Justification::centredLeft);
 
     if (userTag) {
       auto usrBadge = patchSide.removeFromRight(32).reduced(0, 4);
@@ -117,9 +181,9 @@ public:
         errorFlag ? ThemeManager::get(Theme::Role::danger)
                   : (warnFlag ? ThemeManager::get(Theme::Role::warn)
                               : ThemeManager::get(Theme::Role::textDim));
-    g.setColour(teleCol);
-    g.setFont(BoutiqueLookAndFeel::monoFont(11.0f, false));
-    g.drawText(telemetryText, inner, juce::Justification::centredRight, true);
+    Skin::drawGlowText(g, telemetryText, inner,
+                       BoutiqueLookAndFeel::monoFont(11.0f, false), teleCol,
+                       juce::Justification::centredRight, true);
   }
 
   void mouseEnter(const juce::MouseEvent &) override {
@@ -145,14 +209,15 @@ private:
   bool errorFlag = false;
   bool warnFlag = false;
   bool hovered = false;
+  Skin::ChromeCache scanlines;
 };
 
 class SynthHeaderBar : public juce::Component {
 public:
   SynthHeaderBar(FanfareSynthProcessor &processor) : proc(processor) {
     enableBtn.setClickingTogglesState(true);
-    enableBtn.setColour(juce::TextButton::buttonOnColourId,
-                        ThemeManager::get(Theme::Role::ok));
+    enableBtn.showLed = true;
+    enableBtn.onTint = ThemeManager::get(Theme::Role::ok);
     enableBtn.setTooltip("Enable or bypass the native synth on this rack slot");
     enableBtn.onClick = [this] {
       const bool on = enableBtn.getToggleState();
@@ -175,8 +240,7 @@ public:
 
     compareBtn.setButtonText("COMPARE");
     compareBtn.setClickingTogglesState(true);
-    compareBtn.setColour(juce::TextButton::buttonOnColourId,
-                         ThemeManager::get(Theme::Role::warn));
+    compareBtn.onTint = ThemeManager::get(Theme::Role::warn);
     compareBtn.setTooltip(
         "Temporarily audition the unedited preset before your tweaks");
     addAndMakeVisible(compareBtn);
@@ -190,15 +254,13 @@ public:
     addAndMakeVisible(saveBtn);
 
     delBtn.setButtonText("DEL");
-    delBtn.setColour(juce::TextButton::buttonColourId,
-                     ThemeManager::get(Theme::Role::danger).darker(0.35f));
+    delBtn.textTint = ThemeManager::get(Theme::Role::danger);
     delBtn.setTooltip("Delete the selected user preset");
     addAndMakeVisible(delBtn);
 
     keysBtn.setButtonText("KEYS");
     keysBtn.setClickingTogglesState(true);
-    keysBtn.setColour(juce::TextButton::buttonOnColourId,
-                      ThemeManager::get(Theme::Role::accentDim));
+    keysBtn.onTint = ThemeManager::get(Theme::Role::accent);
     keysBtn.setTooltip(
         "Toggle onscreen 2-octave keyboard + Pitch Bend / Mod strips");
     addAndMakeVisible(keysBtn);
@@ -227,8 +289,11 @@ public:
   void updateMeterTelemetry(float leftPeak, float rightPeak, int activeVoices) {
     const float nextL = juce::jlimit(0.0f, 1.0f, leftPeak);
     const float nextR = juce::jlimit(0.0f, 1.0f, rightPeak);
+    peakL = juce::jmax(nextL, peakL - 0.014f);
+    peakR = juce::jmax(nextR, peakR - 0.014f);
+    const bool peakFalling = peakL > 0.001f || peakR > 0.001f;
     if (std::abs(nextL - meterL) > 0.01f || std::abs(nextR - meterR) > 0.01f ||
-        activeVoices != voicesActive) {
+        activeVoices != voicesActive || peakFalling) {
       meterL = nextL;
       meterR = nextR;
       voicesActive = activeVoices;
@@ -241,32 +306,65 @@ public:
     if (b.isEmpty())
       return;
 
-    // Juno-106 inspired stripe + model title
-    auto stripe = b.removeFromLeft(4).reduced(0, 5);
-    g.setColour(ThemeManager::get(Theme::Role::accent));
-    g.fillRoundedRectangle(stripe.toFloat(), 1.5f);
+    auto stripeBlock = b.removeFromLeft(15).reduced(0, 4);
+    const juce::Colour bars[5] = {
+        ThemeManager::get(Theme::Role::catAccordion),
+        ThemeManager::get(Theme::Role::catMonitor),
+        ThemeManager::get(Theme::Role::ok),
+        ThemeManager::get(Theme::Role::catKeyboard),
+        ThemeManager::get(Theme::Role::accent)};
+    const float bw = (float)stripeBlock.getWidth() / 5.0f;
+    for (int i = 0; i < 5; ++i)
+      g.fillRect(juce::Rectangle<float>(
+          (float)stripeBlock.getX() + (float)i * bw,
+          (float)stripeBlock.getY(), bw - 1.0f,
+          (float)stripeBlock.getHeight()));
     b.removeFromLeft(6);
 
     auto titleBox = b.removeFromLeft(128);
-    g.setColour(ThemeManager::get(Theme::Role::text));
+    auto titleLine = titleBox.removeFromTop(19);
+    const juce::String title =
+        "BLEEP-216  [S" + juce::String(chainSlotIndex + 1) + "]";
     g.setFont(BoutiqueLookAndFeel::condensedFont(16.0f, 0.05f));
-    g.drawFittedText("BLEEP-216  [S" + juce::String(chainSlotIndex + 1) + "]",
-                     titleBox.removeFromTop(19),
+    g.setColour(ThemeManager::get(Theme::Role::text).withAlpha(0.30f));
+    g.drawFittedText(title, titleLine.expanded(1, 1),
                      juce::Justification::centredLeft, 1, 0.85f);
+    g.setColour(ThemeManager::get(Theme::Role::text));
+    g.drawFittedText(title, titleLine, juce::Justification::centredLeft, 1,
+                     0.85f);
 
+    auto countArea = titleBox.removeFromRight(28);
+    const float dotW = 4.0f;
+    const float dotGap = 1.6f;
+    for (int i = 0; i < 16; ++i) {
+      const bool lit = i < voicesActive;
+      const auto dot = juce::Rectangle<float>(
+          (float)titleBox.getX() + (float)i * (dotW + dotGap),
+          (float)titleBox.getCentreY() - 2.0f, dotW, 4.0f);
+      Skin::drawLed(g, dot, ThemeManager::get(Theme::Role::accent), lit, lit);
+    }
     g.setColour(ThemeManager::get(Theme::Role::textFaint));
-    g.setFont(BoutiqueLookAndFeel::monoFont(9.5f, false));
-    g.drawText("VOICES " + juce::String(voicesActive) + "/16", titleBox,
-               juce::Justification::centredLeft, false);
+    g.setFont(BoutiqueLookAndFeel::monoFont(9.0f, false));
+    g.drawText(juce::String(voicesActive) + "/16", countArea,
+               juce::Justification::centredRight, false);
 
-    if (b.getWidth() >= 14) {
-      auto meterRect =
-          b.removeFromLeft(14).reduced(1, 4).toFloat();
-      BoutiqueLookAndFeel::drawStereoSegmentedMeter(
-          g, meterRect, meterL, meterR, 8,
-          ThemeManager::get(Theme::Role::meterLow),
-          ThemeManager::get(Theme::Role::meterMid),
-          ThemeManager::get(Theme::Role::meterPeak));
+    if (b.getWidth() >= 16) {
+      auto meterRect = b.removeFromLeft(16).reduced(1, 4).toFloat();
+      const float barW = (meterRect.getWidth() - 2.0f) * 0.5f;
+      auto lBar = meterRect.withWidth(barW);
+      auto rBar = meterRect.withTrimmedLeft(barW + 2.0f);
+      const auto low = ThemeManager::get(Theme::Role::meterLow);
+      const auto mid = ThemeManager::get(Theme::Role::meterMid);
+      const auto pk = ThemeManager::get(Theme::Role::meterPeak);
+      BoutiqueLookAndFeel::drawSegmentedMeterBar(g, lBar, meterL, 8, low, mid,
+                                                 pk);
+      BoutiqueLookAndFeel::drawSegmentedMeterBar(g, rBar, meterR, 8, low, mid,
+                                                 pk);
+      g.setColour(pk);
+      g.fillRect(lBar.withHeight(1.5f).withY(lBar.getBottom() -
+                                             peakL * lBar.getHeight() - 1.5f));
+      g.fillRect(rBar.withHeight(1.5f).withY(rBar.getBottom() -
+                                             peakR * rBar.getHeight() - 1.5f));
     }
   }
 
@@ -294,9 +392,9 @@ public:
     lcd.setBounds(b.reduced(0, 2));
   }
 
-  juce::TextButton enableBtn;
+  SynthKeyButton enableBtn;
   SynthPatchLcd lcd;
-  juce::TextButton prevBtn, nextBtn, compareBtn, initBtn, saveBtn, delBtn,
+  SynthKeyButton prevBtn, nextBtn, compareBtn, initBtn, saveBtn, delBtn,
       keysBtn, closeBtn;
 
 private:
@@ -304,6 +402,8 @@ private:
   juce::Rectangle<int> telemetryBrandArea;
   float meterL = 0.0f;
   float meterR = 0.0f;
+  float peakL = 0.0f;
+  float peakR = 0.0f;
   int voicesActive = 0;
   int chainSlotIndex = 0;
 };

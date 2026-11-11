@@ -8,6 +8,7 @@
 #include "../SynthConstants.h"
 #include "../SynthParams.h"
 #include "SynthControlCallbacks.h"
+#include "SynthSkin.h"
 
 namespace FanfareSynth::Ui {
 
@@ -82,40 +83,52 @@ public:
     if (n <= 0 || stripArea.isEmpty())
       return;
 
+    using namespace Skin;
     const auto outer = stripArea.toFloat();
-    g.setColour(ThemeManager::get(Theme::Role::sunken));
-    g.fillRoundedRectangle(outer, 2.5f);
-    g.setColour(ThemeManager::get(Theme::Role::border));
-    g.drawRoundedRectangle(outer, 2.5f, 1.0f);
+    drawRecess(g, outer, 2.5f);
 
     const float segW = outer.getWidth() / (float)n;
     for (int i = 0; i < n; ++i) {
       const auto seg =
           juce::Rectangle<float>(outer.getX() + (float)i * segW, outer.getY(),
                                  segW, outer.getHeight())
-              .reduced(1.2f, 1.2f);
+              .reduced(1.4f, 1.4f);
       const bool on = (i == selectedIndex);
       const bool segHover = (hoveredIndex == i);
+      const bool pressed = (pressedIndex == i);
+
+      if (i > 0) {
+        g.setColour(juce::Colours::black.withAlpha(isDark() ? 0.45f : 0.18f));
+        g.drawVerticalLine((int)std::lround(outer.getX() + (float)i * segW),
+                           outer.getY() + 2.0f, outer.getBottom() - 2.0f);
+      }
 
       if (on) {
-        g.setColour(ThemeManager::get(Theme::Role::raised));
-        g.fillRoundedRectangle(seg, 2.0f);
-        g.setColour(ThemeManager::get(Theme::Role::accent).withAlpha(0.75f));
-        g.drawRoundedRectangle(seg, 2.0f, 1.0f);
+        const auto top = ThemeManager::get(Theme::Role::faceTop);
+        const auto bot = ThemeManager::get(Theme::Role::faceBot);
+        fillVertical(g, seg, Skin::lift(top, 0.28f), Skin::sink(bot, 0.05f),
+                     2.0f);
+        g.setColour(ThemeManager::get(Theme::Role::accent).withAlpha(0.14f));
+        g.fillRoundedRectangle(seg.reduced(1.0f), 1.5f);
+        g.setColour(ThemeManager::get(Theme::Role::accent).withAlpha(0.85f));
+        g.drawRoundedRectangle(seg.reduced(0.5f), 2.0f, 1.0f);
+      } else if (pressed) {
+        fillVertical(g, seg,
+                     ThemeManager::get(Theme::Role::pressTop),
+                     ThemeManager::get(Theme::Role::pressBot), 2.0f);
       } else if (segHover) {
         g.setColour(ThemeManager::get(Theme::Role::panelAlt));
         g.fillRoundedRectangle(seg, 2.0f);
+        g.setColour(juce::Colours::white.withAlpha(isDark() ? 0.05f : 0.25f));
+        g.fillRoundedRectangle(seg.withHeight(seg.getHeight() * 0.5f), 2.0f);
       }
 
-      // Hardware LED indicator bar at top of switch cap
       const float ledW = juce::jlimit(6.0f, 14.0f, seg.getWidth() * 0.48f);
       const juce::Rectangle<float> led(seg.getCentreX() - ledW * 0.5f,
-                                       seg.getY() + 2.0f, ledW, 2.2f);
-      g.setColour(ThemeManager::get(on ? Theme::Role::accent
-                                       : Theme::Role::bypassed));
-      g.fillRoundedRectangle(led, 1.0f);
+                                       seg.getY() + 2.2f, ledW, 2.4f);
+      drawLed(g, led, ThemeManager::get(Theme::Role::accent), on);
 
-      auto textRect = seg.withTrimmedTop(4.5f).toNearestInt();
+      auto textRect = seg.withTrimmedTop(5.0f).toNearestInt();
       g.setColour(ThemeManager::get(on ? Theme::Role::text
                                        : Theme::Role::textDim));
       g.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.03f));
@@ -150,7 +163,16 @@ public:
     const float relX = e.position.x - (float)stripArea.getX();
     const int clicked = juce::jlimit(
         0, n - 1, (int)(relX / ((float)stripArea.getWidth() / (float)n)));
+    pressedIndex = clicked;
+    repaint();
     selectIndexFromUi(clicked);
+  }
+
+  void mouseUp(const juce::MouseEvent &) override {
+    if (pressedIndex >= 0) {
+      pressedIndex = -1;
+      repaint();
+    }
   }
 
   void mouseDoubleClick(const juce::MouseEvent &e) override {
@@ -204,6 +226,7 @@ private:
   juce::Rectangle<int> stripArea;
   int selectedIndex = 0;
   int hoveredIndex = -1;
+  int pressedIndex = -1;
   bool isDimmed = false;
 };
 

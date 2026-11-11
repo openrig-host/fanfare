@@ -8,6 +8,7 @@
 #include "../SynthConstants.h"
 #include "../SynthParams.h"
 #include "SynthControlCallbacks.h"
+#include "SynthSkin.h"
 
 namespace FanfareSynth::Ui {
 
@@ -75,25 +76,32 @@ public:
       return;
 
     const auto b = getLocalBounds().toFloat().reduced(0.5f, 0.5f);
-    g.setColour(ThemeManager::get(Theme::Role::sunken));
-    g.fillRoundedRectangle(b, 2.5f);
+    Skin::drawRecess(g, b, 2.5f);
 
-    g.setColour(hovered ? ThemeManager::get(Theme::Role::borderStrong)
-                        : ThemeManager::get(Theme::Role::border));
-    g.drawRoundedRectangle(b, 2.5f, 1.0f);
+    if (hovered) {
+      g.setColour(ThemeManager::get(Theme::Role::accent).withAlpha(0.07f));
+      g.fillRoundedRectangle(b.reduced(1.0f), 2.0f);
+    }
 
     if (mappedCC >= 0) {
       auto ccStripe = b.withWidth(2.2f).reduced(0.0f, 2.0f);
       ccStripe.setX(b.getX() + 1.2f);
-      g.setColour(ThemeManager::get(Theme::Role::accent));
-      g.fillRoundedRectangle(ccStripe, 1.0f);
+      Skin::glowFill(g, ccStripe, 1.0f,
+                     ThemeManager::get(Theme::Role::accent));
     }
 
-    g.setColour(ThemeManager::get(hovered ? Theme::Role::text
-                                          : Theme::Role::textDim));
-    g.setFont(BoutiqueLookAndFeel::monoFont(10.0f, false));
-    g.drawFittedText(displayText, getLocalBounds().reduced(3, 0),
-                     juce::Justification::centred, 1, 0.78f);
+    const juce::Colour textCol =
+        ThemeManager::get(hovered ? Theme::Role::text : Theme::Role::textDim);
+    if (hovered)
+      Skin::drawGlowText(g, displayText, getLocalBounds().reduced(3, 0),
+                         BoutiqueLookAndFeel::monoFont(10.0f, false), textCol,
+                         juce::Justification::centred);
+    else {
+      g.setColour(textCol);
+      g.setFont(BoutiqueLookAndFeel::monoFont(10.0f, false));
+      g.drawFittedText(displayText, getLocalBounds().reduced(3, 0),
+                       juce::Justification::centred, 1, 0.78f);
+    }
   }
 
   void resized() override {

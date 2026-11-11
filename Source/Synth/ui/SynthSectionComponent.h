@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <cmath>
 #include <vector>
 #include "../../BoutiqueLookAndFeel.h"
 #include "../../ThemeManager.h"
@@ -11,16 +12,24 @@
 #include "SynthKnob.h"
 #include "SynthLayoutSpec.h"
 #include "SynthLedSwitch.h"
+#include "SynthSkin.h"
 
 namespace FanfareSynth::Ui {
 
-class SynthSectionComponent : public juce::Component {
+class SynthSectionComponent : public juce::Component, private juce::Timer {
 public:
   SynthSectionComponent(const SectionLayoutSpec &layoutSpec,
                         FanfareSynthProcessor &processor,
                         SynthTelemetrySink &telemetry)
       : spec(layoutSpec), proc(processor), sink(telemetry) {
     jassert(verifyLayoutCompleteness());
+
+    const auto &allSpecs = getJunoLayoutSpecs();
+    for (size_t i = 0; i < allSpecs.size(); ++i)
+      if (&allSpecs[i] == &layoutSpec) {
+        sectionNumber = (int)i + 1;
+        break;
+      }
 
     for (const auto &ws : spec.primaryStrip)
       primaryWidgets.push_back(createAndOwnWidget(ws));
@@ -29,6 +38,26 @@ public:
     for (size_t r = 0; r < spec.deckRows.size(); ++r) {
       for (const auto &ws : spec.deckRows[r].items)
         deckWidgets[r].push_back(createAndOwnWidget(ws));
+    }
+
+    if (spec.section == SecLfo || spec.section == SecAmpEnv ||
+        spec.section == SecFltEnv)
+      startTimerHz(24);
+  }
+
+  ~SynthSectionComponent() override { stopTimer(); }
+
+  void timerCallback() override {
+    if (!isVisible())
+      return;
+    if (spec.section == SecLfo) {
+      repaint(ledArea.toNearestInt().expanded(5, 5));
+      return;
+    }
+    const bool live = proc.getActiveVoiceCount() > 0;
+    if (live != lastVoicesLive) {
+      lastVoicesLive = live;
+      repaint();
     }
   }
 
@@ -79,44 +108,43 @@ public:
   }
 
   void paint(juce::Graphics &g) override {
-    const auto b = getLocalBounds().toFloat();
-    g.setColour(ThemeManager::get(Theme::Role::panel));
-    g.fillRoundedRectangle(b, 3.0f);
+    rebuildChrome();
+    chrome.draw(g, 0, 0);
 
-    const auto headerRect =
-        juce::Rectangle<float>(b.getX(), b.getY(), b.getWidth(),
-                               (float)UiMetrics::kSectionHeaderHeight);
-    g.setColour(ThemeManager::get(Theme::Role::panelAlt));
-    g.fillRoundedRectangle(headerRect, 3.0f);
+    auto titleBox = getLocalBounds()
+                        .removeFromTop(UiMetrics::kSectionHeaderHeight)
+                        .reduced(6, 0);
 
-    // Top silk-screened Juno accent stripe
-    g.setColour(ThemeManager::get(Theme::Role::accentDim));
-    g.fillRect(juce::Rectangle<float>(b.getX() + 1.0f, b.getY() + 0.5f,
-                                      b.getWidth() - 2.0f, 1.5f));
+    if (spec.section == SecLfo && !ledArea.isEmpty()) {
+      const float rate = juce::jmax(0.05f, proc.getParam(ParamId::lfoRate));
+      const float nowS =
+          (float)(juce::Time::getMillisecondCounterHiRes() * 0.001);
+      const float phase = std::fmod(nowS * rate, 1.0f);
+      Skin::drawLed(g, ledArea, ThemeManager::get(Theme::Role::accent),
+                    phase < 0.5f);
+      titleBox.removeFromLeft(11);
+    }
 
-    g.setColour(ThemeManager::get(Theme::Role::border));
-    g.drawRoundedRectangle(b.reduced(0.5f), 3.0f, 1.0f);
-    g.drawHorizontalLine(UiMetrics::kSectionHeaderHeight, b.getX() + 1.0f,
-                         b.getRight() - 1.0f);
+    g.setColour(ThemeManager::get(Theme::Role::textFaint).withAlpha(0.85f));
+    g.setFont(BoutiqueLookAndFeel::monoFont(9.0f, true));
+    g.drawText(juce::String(sectionNumber).paddedLeft('0', 2),
+               titleBox.removeFromRight(20),
+               juce::Justification::centredRight, false);
 
-    auto titleBox =
-        getLocalBounds().removeFromTop(UiMetrics::kSectionHeaderHeight).reduced(6, 0);
     if (statusBadge.isNotEmpty()) {
       auto badgeArea = titleBox.removeFromRight(58);
-      g.setColour(ThemeManager::get(Theme::Role::accent));
-      g.setFont(BoutiqueLookAndFeel::condensedFont(10.5f, 0.04f));
-      g.drawFittedText(statusBadge, badgeArea, juce::Justification::centredRight,
-                       1);
+      Skin::drawGlowText(g, statusBadge, badgeArea,
+                         BoutiqueLookAndFeel::condensedFont(10.5f, 0.04f),
+                         ThemeManager::get(Theme::Role::accent),
+                         juce::Justification::centredRight);
     }
 
     g.setColour(ThemeManager::get(Theme::Role::text));
     g.setFont(BoutiqueLookAndFeel::condensedFont(12.5f, 0.08f));
     g.drawFittedText(spec.title, titleBox, juce::Justification::centredLeft, 1);
 
-    if (deckDividerY > 0) {
-      g.setColour(ThemeManager::get(Theme::Role::border));
-      g.drawHorizontalLine(deckDividerY, b.getX() + 4.0f, b.getRight() - 4.0f);
-    }
+    if (spec.section == SecAmpEnv || spec.section == SecFltEnv)
+      drawEnvTrace(g, traceArea, spec.section == SecFltEnv);
   }
 
   void resized() override {
@@ -124,14 +152,28 @@ public:
     auto body = getLocalBounds()
                     .withTrimmedTop(UiMetrics::kSectionHeaderHeight)
                     .reduced(5, 4);
-    if (body.isEmpty())
-      return;
 
-    if (spec.tier == 0) {
-      layoutControlCheek(body);
-      return;
+    ledArea = juce::Rectangle<float>(7.0f,
+                                     (float)UiMetrics::kSectionHeaderHeight *
+                                         0.5f - 2.5f,
+                                     5.0f, 5.0f);
+    traceArea = getLocalBounds()
+                    .withTrimmedTop(UiMetrics::kSectionHeaderHeight + 6)
+                    .reduced(9, 8)
+                    .toFloat();
+
+    if (!body.isEmpty()) {
+      if (spec.tier == 0) {
+        layoutControlCheek(body);
+      } else {
+        layoutBody(body);
+      }
     }
+    rebuildChrome();
+  }
 
+private:
+  void layoutBody(juce::Rectangle<int> body) {
     const bool fxKnobSection =
         (spec.section == SecChorus || spec.section == SecDelay ||
          spec.section == SecReverb);
@@ -147,7 +189,7 @@ public:
         }
         deckDividerY = body.getY() - 2;
       }
-      const int maxKnobBandH = juce::jmin(body.getHeight(), 96);
+      const int maxKnobBandH = juce::jmin(body.getHeight(), 128);
       auto knobBand =
           body.withSizeKeepingCentre(body.getWidth(), maxKnobBandH);
       layoutWeightedRow(knobBand, spec.primaryStrip, primaryWidgets);
@@ -178,7 +220,86 @@ public:
     layoutWeightedRow(body, spec.primaryStrip, primaryWidgets);
   }
 
-private:
+  void rebuildChrome() {
+    chrome.render(getWidth(), getHeight(),
+                  Skin::themeSignature() + "|" + juce::String(deckDividerY),
+                  [this](juce::Graphics &g, juce::Rectangle<int> b) {
+                    const auto bf = b.toFloat();
+                    Skin::drawPlate(g, bf, 3.0f);
+
+                    const auto headerRect = juce::Rectangle<float>(
+                        bf.getX(), bf.getY(), bf.getWidth(),
+                        (float)UiMetrics::kSectionHeaderHeight);
+                    const auto band =
+                        ThemeManager::get(Theme::Role::panelAlt);
+                    Skin::fillVertical(g, headerRect,
+                                       Skin::lift(band, 0.16f),
+                                       Skin::sink(band, 0.22f), 3.0f);
+                    Skin::glowLine(g, bf.getX() + 2.0f, bf.getY() + 1.2f,
+                                   bf.getRight() - 2.0f, bf.getY() + 1.2f,
+                                   ThemeManager::get(Theme::Role::accentDim),
+                                   1.2f);
+                    g.setColour(ThemeManager::get(Theme::Role::border));
+                    g.drawHorizontalLine(UiMetrics::kSectionHeaderHeight,
+                                         bf.getX() + 1.0f, bf.getRight() - 1.0f);
+
+                    if (deckDividerY > 0) {
+                      g.setColour(juce::Colours::black.withAlpha(
+                          Skin::isDark() ? 0.35f : 0.12f));
+                      g.drawHorizontalLine(deckDividerY, bf.getX() + 4.0f,
+                                           bf.getRight() - 4.0f);
+                      g.setColour(juce::Colours::white.withAlpha(
+                          Skin::isDark() ? 0.05f : 0.35f));
+                      g.drawHorizontalLine(deckDividerY + 1, bf.getX() + 4.0f,
+                                           bf.getRight() - 4.0f);
+                    }
+                  });
+  }
+
+  void drawEnvTrace(juce::Graphics &g, juce::Rectangle<float> area,
+                    bool filt) const {
+    if (area.isEmpty())
+      return;
+    const float a = proc.getParam(filt ? ParamId::fatk : ParamId::atk);
+    const float d = proc.getParam(filt ? ParamId::fdec : ParamId::dec);
+    const float s = juce::jlimit(0.0f, 1.0f,
+                                 proc.getParam(filt ? ParamId::fsus
+                                                    : ParamId::sus));
+    const float r = proc.getParam(filt ? ParamId::frel : ParamId::rel);
+
+    auto percept = [](float t) {
+      return std::log1p(juce::jmax(0.0f, t) * 12.0f);
+    };
+    const float wa = percept(a);
+    const float wd = percept(d);
+    const float wr = percept(r);
+    const float hold = 0.85f;
+    float total = wa + wd + hold + wr;
+    if (total < 1e-3f)
+      total = 1e-3f;
+
+    const float yBot = area.getBottom();
+    const float yTop = area.getY();
+    const float susY = yBot - s * (yBot - yTop);
+    const float span = area.getWidth();
+
+    juce::Path p;
+    p.startNewSubPath(area.getX(), yBot);
+    float x = area.getX() + span * wa / total;
+    p.lineTo(x, yTop);
+    float x2 = x + span * wd / total;
+    p.lineTo(x2, susY);
+    float x3 = x2 + span * hold / total;
+    p.lineTo(x3, susY);
+    p.lineTo(area.getRight(), yBot);
+
+    const bool live = proc.getActiveVoiceCount() > 0;
+    Skin::glowStroke(g, p,
+                     ThemeManager::get(Theme::Role::accent)
+                         .withAlpha(live ? 0.50f : 0.24f),
+                     1.3f);
+  }
+
   SynthParamWidget *createAndOwnWidget(const WidgetSpec &ws) {
     const juce::String customLbl(ws.customLabel != nullptr ? ws.customLabel
                                                            : "");
@@ -273,6 +394,11 @@ private:
   SynthTelemetrySink &sink;
   juce::String statusBadge;
   int deckDividerY = -1;
+  int sectionNumber = 0;
+  bool lastVoicesLive = false;
+  juce::Rectangle<float> ledArea;
+  juce::Rectangle<float> traceArea;
+  Skin::ChromeCache chrome;
 
   juce::OwnedArray<SynthParamWidget> ownedWidgets;
   std::vector<SynthParamWidget *> primaryWidgets;

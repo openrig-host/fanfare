@@ -2169,6 +2169,13 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
       }
     }
     s->clearChainPreserve(pluginsToReuse);
+    for (int c = 0; c < 3; ++c) {
+      if (pluginsToReuse.find(c) == pluginsToReuse.end()) {
+        s->clearChainSlotMidiOut(c);
+        s->clearChainSlotSynth(c);
+        s->clearChainSlotFm(c);
+      }
+    }
     bool anyChainSynthRestored = false;
     for (int p = 0; p < (int)songSlot.chain.size(); ++p) {
       if (p < 3 && songSlot.chain[p].isSynth) {

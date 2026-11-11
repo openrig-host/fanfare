@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <functional>
 #include "FmUiMetrics.h"
+#include "FmModeIconsData.h"
 
 namespace FanfareFm::Ui {
 
@@ -68,11 +69,25 @@ public:
                                         : Theme::Role::bypassed));
       g.fillRoundedRectangle(ledStrip, 1.0f);
 
-      auto inner = cardRects[(size_t)i].reduced(7, 2);
-      inner.removeFromTop(2);
+      auto inner = cardRects[(size_t)i].reduced(6, 2);
+      inner.removeFromTop(3);
 
-      auto rightSide = inner.removeFromRight(juce::jmin(108, inner.getWidth() / 2 + 12));
-      auto badgeRect = rightSide.removeFromRight(42).reduced(0, 3);
+      // Mode Hardware Icon Eyecandy
+      const auto icon = Icons::getModeIcon(i);
+      if (icon.isValid()) {
+        auto iconBox = inner.removeFromLeft(28).toFloat().reduced(0, 1);
+        const float iconAlpha = sel ? 1.0f : (hov ? 0.85f : 0.65f);
+        g.setOpacity(iconAlpha);
+        g.drawImageWithin(icon,
+                          (int)iconBox.getX(), (int)iconBox.getY(),
+                          (int)iconBox.getWidth(), (int)iconBox.getHeight(),
+                          juce::RectanglePlacement::centred | juce::RectanglePlacement::onlyReduceInSize);
+        g.setOpacity(1.0f);
+        inner.removeFromLeft(5);
+      }
+
+      auto rightSide = inner.removeFromRight(juce::jmin(106, inner.getWidth() / 2 + 10));
+      auto badgeRect = rightSide.removeFromRight(42).reduced(0, 4);
 
       g.setColour(sel ? ThemeManager::get(Theme::Role::accent).withAlpha(0.20f)
                       : ThemeManager::get(Theme::Role::sunken));

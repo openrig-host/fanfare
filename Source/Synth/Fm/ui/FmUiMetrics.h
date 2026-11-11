@@ -20,7 +20,7 @@ inline constexpr int kOverlayMarginFromHost = 32;
 
 inline constexpr int kOuterPadding = 8;
 inline constexpr int kHeaderHeight = 40;
-inline constexpr int kModeBarHeight = 30;
+inline constexpr int kModeBarHeight = 36;
 inline constexpr int kSectionGap = 5;
 inline constexpr int kSectionHeaderHeight = 19;
 inline constexpr int kKeyboardStripHeight = 100;

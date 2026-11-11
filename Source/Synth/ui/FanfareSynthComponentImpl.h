@@ -17,6 +17,7 @@
 #include "SynthHeaderBar.h"
 #include "SynthLayoutSpec.h"
 #include "SynthSectionComponent.h"
+#include "SynthSkin.h"
 
 class FanfareSynthComponent : public juce::Component,
                               private FanfareSynth::Ui::SynthTelemetrySink,
@@ -137,6 +138,32 @@ public:
     g.setColour(ThemeManager::get(Theme::Role::background));
     g.fillRoundedRectangle(bounds, 6.0f);
 
+    backdrop.render(getWidth(), getHeight(),
+                    FanfareSynth::Ui::Skin::themeSignature(),
+                    [](juce::Graphics &cg, juce::Rectangle<int> r) {
+                      cg.drawImageAt(
+                          FanfareSynth::Ui::Skin::makeNoise(r.getWidth(),
+                                                            r.getHeight()),
+                          0, 0);
+                      FanfareSynth::Ui::Skin::drawVignette(cg, r.toFloat());
+                    });
+    g.saveState();
+    g.reduceClipRegion(bounds.toNearestInt());
+    backdrop.draw(g, 0, 0);
+    g.restoreState();
+
+    for (const auto &p : flowMarks) {
+      juce::Path ch;
+      ch.startNewSubPath(p.x - 2.5f, p.y - 4.0f);
+      ch.lineTo(p.x + 2.0f, p.y);
+      ch.lineTo(p.x - 2.5f, p.y + 4.0f);
+      g.setColour(
+          ThemeManager::get(Theme::Role::accentDim).withAlpha(0.80f));
+      g.strokePath(ch, juce::PathStrokeType(1.4f,
+                                            juce::PathStrokeType::curved,
+                                            juce::PathStrokeType::rounded));
+    }
+
     g.setColour(ThemeManager::get(Theme::Role::borderStrong));
     g.drawRoundedRectangle(bounds.reduced(0.5f), 6.0f, 1.2f);
   }
@@ -172,6 +199,10 @@ public:
     layoutSectionRow(tier1Rect, tier1Sections);
     layoutSectionRow(tier2Rect, tier2Sections);
 
+    flowMarks.clear();
+    collectFlowMarks(tier1Sections);
+    collectFlowMarks(tier2Sections);
+
     if (resizer != nullptr)
       resizer->setBounds(getWidth() - 16, getHeight() - 16, 15, 15);
   }
@@ -198,6 +229,16 @@ private:
       else
         tier2Sections.push_back(sec);
     }
+  }
+
+  void collectFlowMarks(
+      const std::vector<FanfareSynth::Ui::SynthSectionComponent *> &row) {
+    for (size_t i = 0; i + 1 < row.size(); ++i)
+      flowMarks.push_back(
+          juce::Point<float>((float)(row[i]->getRight() + row[i + 1]->getX()) *
+                                 0.5f,
+                             (float)(row[i]->getY() + row[i]->getBottom()) *
+                                 0.5f));
   }
 
   static void layoutSectionRow(
@@ -730,6 +771,8 @@ private:
   FanfareSynth::Ui::SynthSectionComponent *controlCheekSection = nullptr;
   std::vector<FanfareSynth::Ui::SynthSectionComponent *> tier1Sections;
   std::vector<FanfareSynth::Ui::SynthSectionComponent *> tier2Sections;
+  std::vector<juce::Point<float>> flowMarks;
+  FanfareSynth::Ui::Skin::ChromeCache backdrop;
 
   std::array<float, FanfareSynth::kNumParams> cachedUiParams{};
   std::vector<PresetEntry> presetList;

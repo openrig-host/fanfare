@@ -486,7 +486,8 @@ void MainComponent::setupSlotComponents() {
           for (int chainIdx = 0; chainIdx < 3; ++chainIdx) {
               if (slot->getPluginInstance(chainIdx) != nullptr ||
                   slot->isChainSlotMidiOut(chainIdx) ||
-                  slot->isChainSlotSynth(chainIdx)) {
+                  slot->isChainSlotSynth(chainIdx) ||
+                  slot->isChainSlotFm(chainIdx)) {
                   isSlotEmpty = false;
                   break;
               }
