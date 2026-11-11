@@ -301,18 +301,20 @@
 								<div class="showcase-tabs">
 									<button type="button" class="tab-btn active" onclick="switchTab(0)">Full Live Rig</button>
 									<button type="button" class="tab-btn" onclick="switchTab(1)">BLEEP-216 Synth</button>
-									<button type="button" class="tab-btn" onclick="switchTab(2)">Tablet Stage HUD</button>
-									<button type="button" class="tab-btn" onclick="switchTab(3)">HUD Touch Mixer</button>
-									<button type="button" class="tab-btn" onclick="switchTab(4)">Channel Strip DSP</button>
-									<button type="button" class="tab-btn" onclick="switchTab(5)">MIDI FX</button>
-									<button type="button" class="tab-btn" onclick="switchTab(6)">Sampler</button>
-									<button type="button" class="tab-btn" onclick="switchTab(7)">VST Editors</button>
-									<button type="button" class="tab-btn" onclick="switchTab(8)">CC Manager</button>
-									<button type="button" class="tab-btn" onclick="switchTab(9)">Break-Music Player</button>
+									<button type="button" class="tab-btn" onclick="switchTab(2)">CoplanDX FM Synth</button>
+									<button type="button" class="tab-btn" onclick="switchTab(3)">Tablet Stage HUD</button>
+									<button type="button" class="tab-btn" onclick="switchTab(4)">HUD Touch Mixer</button>
+									<button type="button" class="tab-btn" onclick="switchTab(5)">Channel Strip DSP</button>
+									<button type="button" class="tab-btn" onclick="switchTab(6)">MIDI FX</button>
+									<button type="button" class="tab-btn" onclick="switchTab(7)">Sampler</button>
+									<button type="button" class="tab-btn" onclick="switchTab(8)">VST Editors</button>
+									<button type="button" class="tab-btn" onclick="switchTab(9)">CC Manager</button>
+									<button type="button" class="tab-btn" onclick="switchTab(10)">Break-Music Player</button>
 								</div>
 								<div>
-									<img src="fanfare_v1_4_console.jpg" width="1024" height="581" decoding="async" class="showcase-img active" alt="Fanfare v1.55 Studio live mixer interface" />
-									<img src="bleep_216_synth.jpg" width="1024" height="543" loading="lazy" decoding="async" class="showcase-img" alt="Built-in BLEEP-216 16-voice polyphonic synthesizer with 68 presets and LushReverb" />
+									<img src="fanfare_v1_4_console.jpg" width="1024" height="581" decoding="async" class="showcase-img active" alt="Fanfare v1.60 Studio live mixer interface" />
+									<img src="bleep_216_synth.jpg" width="1024" height="594" loading="lazy" decoding="async" class="showcase-img" alt="Built-in BLEEP-216 16-voice polyphonic analog synthesizer with Roland Juno styling, 68 presets, and singing IR3109 VCF" />
+									<img src="coplandx_fm_synth.jpg" width="1024" height="590" loading="lazy" decoding="async" class="showcase-img" alt="Built-in CoplanDX 16-voice FM synthesizer with 5 hardware modes, 558 vintage presets, and real-time algorithm routing" />
 									<img src="tablet_stage_hud.png" width="966" height="471" loading="lazy" decoding="async" class="showcase-img" alt="Fanfare Tablet Stage HUD Songs view over Wi-Fi SoftAP" />
 									<img src="tablet_touch_mixer.png" width="471" height="966" loading="lazy" decoding="async" class="showcase-img portrait" alt="Fanfare mobile Touch Mixer with dual FOH and IEM faders" />
 									<img src="channel_strip_dsp.png" width="1024" height="524" loading="lazy" decoding="async" class="showcase-img" alt="Channel strip processing and convolution panel" />
@@ -417,7 +419,8 @@
 			<script>
 				const captions = [
 					"Full Studio live mixer interface with Vertical Ribbon sidebar, Scene snapshots, dual FOH/IEM mixes, scrollable 24-strip rack, and peak VU metering.",
-					"Built-in BLEEP-216 16-voice polyphonic synthesizer on every strip: dual DCOs + Sub + Noise, 12/24 dB VCF, dual ADSRs, BBD Chorus I/II/I+II, stereo delay, LushReverb tank, and 68 iconic presets.",
+					"Built-in BLEEP-216 16-voice polyphonic analog synthesizer on every strip: dual DCOs + Sub + Noise, 12/24 dB VCF with singing IR3109 resonance, dual ADSRs, BBD Chorus I/II/I+II, stereo delay, LushReverb tank, and 68 presets.",
+					"Built-in CoplanDX 16-voice FM synthesizer: DX7 (6-op), DX21/DX100 (4-op), TX81Z (8-waveform), and Dual Layer modes with 558 categorized vintage presets, algorithm diagram, and BBD FX.",
 					"Touchscreen Tablet Stage HUD running over Wi-Fi / SoftAP with color-coded song tags, favorites, Bright/Dark toggle, guarded Panic, and 3ms WebSocket sync.",
 					"Portrait mobile Touch Mixer in the Stage HUD: independent multi-touch gold FOH and cyan IEM faders per strip, Master faders, and live stereo VU meters.",
 					"Channel strip DSP: noise gate, 10-band Curve-Link EQ, compressor, stereo/ping-pong/tape delay with tap tempo, LushReverb tank, musette detuner, IR loader, and per-strip IEM trim.",
