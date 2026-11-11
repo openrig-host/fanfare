@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Directory Id="DIR_fm_presets" Name="fm-presets">
+        <Component Id="CMP_Preset_33_GLOKENSPL_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_33_GLOKENSPL_json" Name="GLOKENSPL.json" Source="$(var.RepoRoot)\fm-presets\GLOKENSPL.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_34_INIT_VOICE_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_34_INIT_VOICE_json" Name="INIT VOICE.json" Source="$(var.RepoRoot)\fm-presets\INIT VOICE.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_35_Xylosnare_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_35_Xylosnare_json" Name="Xylosnare.json" Source="$(var.RepoRoot)\fm-presets\Xylosnare.json" KeyPath="yes" />
+        </Component>
+      </Directory>
+      <Directory Id="DIR_fm_sysex" Name="fm-sysex">
+        <Component Id="CMP_Preset_36_README_md" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_36_README_md" Name="README.md" Source="$(var.RepoRoot)\fm-sysex\README.md" KeyPath="yes" />
+        </Component>
+        <Directory Id="DIR_fm_sysex_dx100" Name="dx100">
+          <Component Id="CMP_Preset_37_dx100_1_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_37_dx100_1_syx" Name="dx100_1.syx" Source="$(var.RepoRoot)\fm-sysex\dx100\dx100_1.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_38_dx100_2_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_38_dx100_2_syx" Name="dx100_2.syx" Source="$(var.RepoRoot)\fm-sysex\dx100\dx100_2.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_39_dx100_3_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_39_dx100_3_syx" Name="dx100_3.syx" Source="$(var.RepoRoot)\fm-sysex\dx100\dx100_3.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_40_dx100_4_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_40_dx100_4_syx" Name="dx100_4.syx" Source="$(var.RepoRoot)\fm-sysex\dx100\dx100_4.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_41_dx100_5_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_41_dx100_5_syx" Name="dx100_5.syx" Source="$(var.RepoRoot)\fm-sysex\dx100\dx100_5.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_42_dx100_6_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_42_dx100_6_syx" Name="dx100_6.syx" Source="$(var.RepoRoot)\fm-sysex\dx100\dx100_6.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_43_dx100_7_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_43_dx100_7_syx" Name="dx100_7.syx" Source="$(var.RepoRoot)\fm-sysex\dx100\dx100_7.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_44_dx100_8_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_44_dx100_8_syx" Name="dx100_8.syx" Source="$(var.RepoRoot)\fm-sysex\dx100\dx100_8.syx" KeyPath="yes" />
+          </Component>
+        </Directory>
+        <Directory Id="DIR_fm_sysex_dx7" Name="dx7">
+          <Component Id="CMP_Preset_45_ROM1A_SYX" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_45_ROM1A_SYX" Name="ROM1A.SYX" Source="$(var.RepoRoot)\fm-sysex\dx7\ROM1A.SYX" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_46_ROM1B_SYX" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_46_ROM1B_SYX" Name="ROM1B.SYX" Source="$(var.RepoRoot)\fm-sysex\dx7\ROM1B.SYX" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_47_ROM2A_SYX" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_47_ROM2A_SYX" Name="ROM2A.SYX" Source="$(var.RepoRoot)\fm-sysex\dx7\ROM2A.SYX" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_48_ROM2B_SYX" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_48_ROM2B_SYX" Name="ROM2B.SYX" Source="$(var.RepoRoot)\fm-sysex\dx7\ROM2B.SYX" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_49_ROM3A_SYX" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_49_ROM3A_SYX" Name="ROM3A.SYX" Source="$(var.RepoRoot)\fm-sysex\dx7\ROM3A.SYX" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_50_ROM3B_SYX" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_50_ROM3B_SYX" Name="ROM3B.SYX" Source="$(var.RepoRoot)\fm-sysex\dx7\ROM3B.SYX" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_51_ROM4A_SYX" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_51_ROM4A_SYX" Name="ROM4A.SYX" Source="$(var.RepoRoot)\fm-sysex\dx7\ROM4A.SYX" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_52_ROM4B_SYX" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_52_ROM4B_SYX" Name="ROM4B.SYX" Source="$(var.RepoRoot)\fm-sysex\dx7\ROM4B.SYX" KeyPath="yes" />
+          </Component>
+        </Directory>
+        <Directory Id="DIR_fm_sysex_dx7_converted" Name="dx7-converted">
+          <Directory Id="DIR_fm_sysex_dx7_converted_dx100" Name="dx100">
+            <Component Id="CMP_Preset_53_dx100_dx7_1_syx" Guid="*" Win64="yes">
+              <File Id="FIL_Preset_53_dx100_dx7_1_syx" Name="dx100_dx7_1.syx" Source="$(var.RepoRoot)\fm-sysex\dx7-converted\dx100\dx100_dx7_1.syx" KeyPath="yes" />
+            </Component>
+            <Component Id="CMP_Preset_54_dx100_dx7_2_syx" Guid="*" Win64="yes">
+              <File Id="FIL_Preset_54_dx100_dx7_2_syx" Name="dx100_dx7_2.syx" Source="$(var.RepoRoot)\fm-sysex\dx7-converted\dx100\dx100_dx7_2.syx" KeyPath="yes" />
+            </Component>
+            <Component Id="CMP_Preset_55_dx100_dx7_3_syx" Guid="*" Win64="yes">
+              <File Id="FIL_Preset_55_dx100_dx7_3_syx" Name="dx100_dx7_3.syx" Source="$(var.RepoRoot)\fm-sysex\dx7-converted\dx100\dx100_dx7_3.syx" KeyPath="yes" />
+            </Component>
+            <Component Id="CMP_Preset_56_dx100_dx7_4_syx" Guid="*" Win64="yes">
+              <File Id="FIL_Preset_56_dx100_dx7_4_syx" Name="dx100_dx7_4.syx" Source="$(var.RepoRoot)\fm-sysex\dx7-converted\dx100\dx100_dx7_4.syx" KeyPath="yes" />
+            </Component>
+            <Component Id="CMP_Preset_57_dx100_dx7_5_syx" Guid="*" Win64="yes">
+              <File Id="FIL_Preset_57_dx100_dx7_5_syx" Name="dx100_dx7_5.syx" Source="$(var.RepoRoot)\fm-sysex\dx7-converted\dx100\dx100_dx7_5.syx" KeyPath="yes" />
+            </Component>
+            <Component Id="CMP_Preset_58_dx100_dx7_6_syx" Guid="*" Win64="yes">
+              <File Id="FIL_Preset_58_dx100_dx7_6_syx" Name="dx100_dx7_6.syx" Source="$(var.RepoRoot)\fm-sysex\dx7-converted\dx100\dx100_dx7_6.syx" KeyPath="yes" />
+            </Component>
+          </Directory>
+          <Directory Id="DIR_fm_sysex_dx7_converted_tx81z" Name="tx81z">
+            <Component Id="CMP_Preset_59_tx81z_a_dx7_syx" Guid="*" Win64="yes">
+              <File Id="FIL_Preset_59_tx81z_a_dx7_syx" Name="tx81z_a_dx7.syx" Source="$(var.RepoRoot)\fm-sysex\dx7-converted\tx81z\tx81z_a_dx7.syx" KeyPath="yes" />
+            </Component>
+            <Component Id="CMP_Preset_60_tx81z_b_dx7_syx" Guid="*" Win64="yes">
+              <File Id="FIL_Preset_60_tx81z_b_dx7_syx" Name="tx81z_b_dx7.syx" Source="$(var.RepoRoot)\fm-sysex\dx7-converted\tx81z\tx81z_b_dx7.syx" KeyPath="yes" />
+            </Component>
+            <Component Id="CMP_Preset_61_tx81z_c_dx7_syx" Guid="*" Win64="yes">
+              <File Id="FIL_Preset_61_tx81z_c_dx7_syx" Name="tx81z_c_dx7.syx" Source="$(var.RepoRoot)\fm-sysex\dx7-converted\tx81z\tx81z_c_dx7.syx" KeyPath="yes" />
+            </Component>
+            <Component Id="CMP_Preset_62_tx81z_d_dx7_syx" Guid="*" Win64="yes">
+              <File Id="FIL_Preset_62_tx81z_d_dx7_syx" Name="tx81z_d_dx7.syx" Source="$(var.RepoRoot)\fm-sysex\dx7-converted\tx81z\tx81z_d_dx7.syx" KeyPath="yes" />
+            </Component>
+          </Directory>
+        </Directory>
+        <Directory Id="DIR_fm_sysex_tx81z" Name="tx81z">
+          <Component Id="CMP_Preset_63_tx81z_a_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_63_tx81z_a_syx" Name="tx81z_a.syx" Source="$(var.RepoRoot)\fm-sysex\tx81z\tx81z_a.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_64_tx81z_b_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_64_tx81z_b_syx" Name="tx81z_b.syx" Source="$(var.RepoRoot)\fm-sysex\tx81z\tx81z_b.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_65_tx81z_c_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_65_tx81z_c_syx" Name="tx81z_c.syx" Source="$(var.RepoRoot)\fm-sysex\tx81z\tx81z_c.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_66_tx81z_d_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_66_tx81z_d_syx" Name="tx81z_d.syx" Source="$(var.RepoRoot)\fm-sysex\tx81z\tx81z_d.syx" KeyPath="yes" />
+          </Component>
+          <Component Id="CMP_Preset_67_tx81z_i_factory_syx" Guid="*" Win64="yes">
+            <File Id="FIL_Preset_67_tx81z_i_factory_syx" Name="tx81z_i_factory.syx" Source="$(var.RepoRoot)\fm-sysex\tx81z\tx81z_i_factory.syx" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+      <Directory Id="DIR_strips" Name="strips">
+        <Component Id="CMP_Preset_0__01_FM_Bell___Flute_Pad_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_0__01_FM_Bell___Flute_Pad_orstrip" Name="01 FM Bell &amp; Flute Pad.orstrip" Source="$(var.RepoRoot)\strips\01 FM Bell &amp; Flute Pad.orstrip" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_1__02_FM_Marimba___Dream_Pad_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_1__02_FM_Marimba___Dream_Pad_orstrip" Name="02 FM Marimba &amp; Dream Pad.orstrip" Source="$(var.RepoRoot)\strips\02 FM Marimba &amp; Dream Pad.orstrip" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_2__03_Space_Vibe___Shimmer_Pad_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_2__03_Space_Vibe___Shimmer_Pad_orstrip" Name="03 Space Vibe &amp; Shimmer Pad.orstrip" Source="$(var.RepoRoot)\strips\03 Space Vibe &amp; Shimmer Pad.orstrip" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_3__04_Glocken___Enya_Chime_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_3__04_Glocken___Enya_Chime_orstrip" Name="04 Glocken &amp; Enya Chime.orstrip" Source="$(var.RepoRoot)\strips\04 Glocken &amp; Enya Chime.orstrip" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_4__05_Brite_Celeste___Juno_Warmth_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_4__05_Brite_Celeste___Juno_Warmth_orstrip" Name="05 Brite Celeste &amp; Juno Warmth.orstrip" Source="$(var.RepoRoot)\strips\05 Brite Celeste &amp; Juno Warmth.orstrip" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_5__06_Tubular_Bells___Cathedral_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_5__06_Tubular_Bells___Cathedral_orstrip" Name="06 Tubular Bells &amp; Cathedral.orstrip" Source="$(var.RepoRoot)\strips\06 Tubular Bells &amp; Cathedral.orstrip" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_6__07_Metalimba___PWM_Air_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_6__07_Metalimba___PWM_Air_orstrip" Name="07 Metalimba &amp; PWM Air.orstrip" Source="$(var.RepoRoot)\strips\07 Metalimba &amp; PWM Air.orstrip" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_7__08_Great_Vibes___Twin_Peaks_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_7__08_Great_Vibes___Twin_Peaks_orstrip" Name="08 Great Vibes &amp; Twin Peaks.orstrip" Source="$(var.RepoRoot)\strips\08 Great Vibes &amp; Twin Peaks.orstrip" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_8__09_Xylophone___Hollow_Pad_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_8__09_Xylophone___Hollow_Pad_orstrip" Name="09 Xylophone &amp; Hollow Pad.orstrip" Source="$(var.RepoRoot)\strips\09 Xylophone &amp; Hollow Pad.orstrip" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_9__10_Space_Chime___Nostalgia_Flute_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_9__10_Space_Chime___Nostalgia_Flute_orstrip" Name="10 Space Chime &amp; Nostalgia Flute.orstrip" Source="$(var.RepoRoot)\strips\10 Space Chime &amp; Nostalgia Flute.orstrip" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_10_flute_fmxylo_orstrip" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_10_flute_fmxylo_orstrip" Name="flute+fmxylo.orstrip" Source="$(var.RepoRoot)\strips\flute+fmxylo.orstrip" KeyPath="yes" />
+        </Component>
+      </Directory>
+      <Directory Id="DIR_synth_presets" Name="synth-presets">
+        <Component Id="CMP_Preset_11__1983_Poly_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_11__1983_Poly_json" Name="1983 Poly.json" Source="$(var.RepoRoot)\synth-presets\1983 Poly.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_12_Cathederal_Pad_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_12_Cathederal_Pad_json" Name="Cathederal Pad.json" Source="$(var.RepoRoot)\synth-presets\Cathederal Pad.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_13_Dark_Bass_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_13_Dark_Bass_json" Name="Dark Bass.json" Source="$(var.RepoRoot)\synth-presets\Dark Bass.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_14_Dreamscape_Pad_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_14_Dreamscape_Pad_json" Name="Dreamscape Pad.json" Source="$(var.RepoRoot)\synth-presets\Dreamscape Pad.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_15_Enyaesque_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_15_Enyaesque_json" Name="Enyaesque.json" Source="$(var.RepoRoot)\synth-presets\Enyaesque.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_16_Enyaesque__json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_16_Enyaesque__json" Name="Enyaesque].json" Source="$(var.RepoRoot)\synth-presets\Enyaesque].json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_17_Final_Countdown_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_17_Final_Countdown_json" Name="Final Countdown.json" Source="$(var.RepoRoot)\synth-presets\Final Countdown.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_18_Gloria_1982_Synth_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_18_Gloria_1982_Synth_json" Name="Gloria 1982 Synth.json" Source="$(var.RepoRoot)\synth-presets\Gloria 1982 Synth.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_19_Hollow_Square_Pad_1_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_19_Hollow_Square_Pad_1_json" Name="Hollow Square Pad 1.json" Source="$(var.RepoRoot)\synth-presets\Hollow Square Pad 1.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_20_JX_3P_Resonant_Organ_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_20_JX_3P_Resonant_Organ_json" Name="JX-3P Resonant Organ.json" Source="$(var.RepoRoot)\synth-presets\JX-3P Resonant Organ.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_21_Jump_1984_Brass_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_21_Jump_1984_Brass_json" Name="Jump 1984 Brass.json" Source="$(var.RepoRoot)\synth-presets\Jump 1984 Brass.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_22_Jump__json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_22_Jump__json" Name="Jump!.json" Source="$(var.RepoRoot)\synth-presets\Jump!.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_23_Juno_Pad_1_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_23_Juno_Pad_1_json" Name="Juno Pad 1.json" Source="$(var.RepoRoot)\synth-presets\Juno Pad 1.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_24_Just_What_I_Needed_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_24_Just_What_I_Needed_json" Name="Just What I Needed.json" Source="$(var.RepoRoot)\synth-presets\Just What I Needed.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_25_Polysynth_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_25_Polysynth_json" Name="Polysynth.json" Source="$(var.RepoRoot)\synth-presets\Polysynth.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_26_Safety_Dance_Brass_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_26_Safety_Dance_Brass_json" Name="Safety Dance Brass.json" Source="$(var.RepoRoot)\synth-presets\Safety Dance Brass.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_27_Save_A_Prayer_Arp_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_27_Save_A_Prayer_Arp_json" Name="Save A Prayer Arp.json" Source="$(var.RepoRoot)\synth-presets\Save A Prayer Arp.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_28_Square_lead_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_28_Square_lead_json" Name="Square lead.json" Source="$(var.RepoRoot)\synth-presets\Square lead.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_29_Take_On_Me_Riff_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_29_Take_On_Me_Riff_json" Name="Take On Me Riff.json" Source="$(var.RepoRoot)\synth-presets\Take On Me Riff.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_30_Time_After_Time_Pad_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_30_Time_After_Time_Pad_json" Name="Time After Time Pad.json" Source="$(var.RepoRoot)\synth-presets\Time After Time Pad.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_31_Wake_Me_Up_Organ_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_31_Wake_Me_Up_Organ_json" Name="Wake Me Up Organ.json" Source="$(var.RepoRoot)\synth-presets\Wake Me Up Organ.json" KeyPath="yes" />
+        </Component>
+        <Component Id="CMP_Preset_32_While_You_See_A_Chance_json" Guid="*" Win64="yes">
+          <File Id="FIL_Preset_32_While_You_See_A_Chance_json" Name="While You See A Chance.json" Source="$(var.RepoRoot)\synth-presets\While You See A Chance.json" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </DirectoryRef>
+
+    <ComponentGroup Id="BundledPresetsGroup">
+      <ComponentRef Id="CMP_Preset_33_GLOKENSPL_json" />
+      <ComponentRef Id="CMP_Preset_34_INIT_VOICE_json" />
+      <ComponentRef Id="CMP_Preset_35_Xylosnare_json" />
+      <ComponentRef Id="CMP_Preset_36_README_md" />
+      <ComponentRef Id="CMP_Preset_37_dx100_1_syx" />
+      <ComponentRef Id="CMP_Preset_38_dx100_2_syx" />
+      <ComponentRef Id="CMP_Preset_39_dx100_3_syx" />
+      <ComponentRef Id="CMP_Preset_40_dx100_4_syx" />
+      <ComponentRef Id="CMP_Preset_41_dx100_5_syx" />
+      <ComponentRef Id="CMP_Preset_42_dx100_6_syx" />
+      <ComponentRef Id="CMP_Preset_43_dx100_7_syx" />
+      <ComponentRef Id="CMP_Preset_44_dx100_8_syx" />
+      <ComponentRef Id="CMP_Preset_45_ROM1A_SYX" />
+      <ComponentRef Id="CMP_Preset_46_ROM1B_SYX" />
+      <ComponentRef Id="CMP_Preset_47_ROM2A_SYX" />
+      <ComponentRef Id="CMP_Preset_48_ROM2B_SYX" />
+      <ComponentRef Id="CMP_Preset_49_ROM3A_SYX" />
+      <ComponentRef Id="CMP_Preset_50_ROM3B_SYX" />
+      <ComponentRef Id="CMP_Preset_51_ROM4A_SYX" />
+      <ComponentRef Id="CMP_Preset_52_ROM4B_SYX" />
+      <ComponentRef Id="CMP_Preset_53_dx100_dx7_1_syx" />
+      <ComponentRef Id="CMP_Preset_54_dx100_dx7_2_syx" />
+      <ComponentRef Id="CMP_Preset_55_dx100_dx7_3_syx" />
+      <ComponentRef Id="CMP_Preset_56_dx100_dx7_4_syx" />
+      <ComponentRef Id="CMP_Preset_57_dx100_dx7_5_syx" />
+      <ComponentRef Id="CMP_Preset_58_dx100_dx7_6_syx" />
+      <ComponentRef Id="CMP_Preset_59_tx81z_a_dx7_syx" />
+      <ComponentRef Id="CMP_Preset_60_tx81z_b_dx7_syx" />
+      <ComponentRef Id="CMP_Preset_61_tx81z_c_dx7_syx" />
+      <ComponentRef Id="CMP_Preset_62_tx81z_d_dx7_syx" />
+      <ComponentRef Id="CMP_Preset_63_tx81z_a_syx" />
+      <ComponentRef Id="CMP_Preset_64_tx81z_b_syx" />
+      <ComponentRef Id="CMP_Preset_65_tx81z_c_syx" />
+      <ComponentRef Id="CMP_Preset_66_tx81z_d_syx" />
+      <ComponentRef Id="CMP_Preset_67_tx81z_i_factory_syx" />
+      <ComponentRef Id="CMP_Preset_0__01_FM_Bell___Flute_Pad_orstrip" />
+      <ComponentRef Id="CMP_Preset_1__02_FM_Marimba___Dream_Pad_orstrip" />
+      <ComponentRef Id="CMP_Preset_2__03_Space_Vibe___Shimmer_Pad_orstrip" />
+      <ComponentRef Id="CMP_Preset_3__04_Glocken___Enya_Chime_orstrip" />
+      <ComponentRef Id="CMP_Preset_4__05_Brite_Celeste___Juno_Warmth_orstrip" />
+      <ComponentRef Id="CMP_Preset_5__06_Tubular_Bells___Cathedral_orstrip" />
+      <ComponentRef Id="CMP_Preset_6__07_Metalimba___PWM_Air_orstrip" />
+      <ComponentRef Id="CMP_Preset_7__08_Great_Vibes___Twin_Peaks_orstrip" />
+      <ComponentRef Id="CMP_Preset_8__09_Xylophone___Hollow_Pad_orstrip" />
+      <ComponentRef Id="CMP_Preset_9__10_Space_Chime___Nostalgia_Flute_orstrip" />
+      <ComponentRef Id="CMP_Preset_10_flute_fmxylo_orstrip" />
+      <ComponentRef Id="CMP_Preset_11__1983_Poly_json" />
+      <ComponentRef Id="CMP_Preset_12_Cathederal_Pad_json" />
+      <ComponentRef Id="CMP_Preset_13_Dark_Bass_json" />
+      <ComponentRef Id="CMP_Preset_14_Dreamscape_Pad_json" />
+      <ComponentRef Id="CMP_Preset_15_Enyaesque_json" />
+      <ComponentRef Id="CMP_Preset_16_Enyaesque__json" />
+      <ComponentRef Id="CMP_Preset_17_Final_Countdown_json" />
+      <ComponentRef Id="CMP_Preset_18_Gloria_1982_Synth_json" />
+      <ComponentRef Id="CMP_Preset_19_Hollow_Square_Pad_1_json" />
+      <ComponentRef Id="CMP_Preset_20_JX_3P_Resonant_Organ_json" />
+      <ComponentRef Id="CMP_Preset_21_Jump_1984_Brass_json" />
+      <ComponentRef Id="CMP_Preset_22_Jump__json" />
+      <ComponentRef Id="CMP_Preset_23_Juno_Pad_1_json" />
+      <ComponentRef Id="CMP_Preset_24_Just_What_I_Needed_json" />
+      <ComponentRef Id="CMP_Preset_25_Polysynth_json" />
+      <ComponentRef Id="CMP_Preset_26_Safety_Dance_Brass_json" />
+      <ComponentRef Id="CMP_Preset_27_Save_A_Prayer_Arp_json" />
+      <ComponentRef Id="CMP_Preset_28_Square_lead_json" />
+      <ComponentRef Id="CMP_Preset_29_Take_On_Me_Riff_json" />
+      <ComponentRef Id="CMP_Preset_30_Time_After_Time_Pad_json" />
+      <ComponentRef Id="CMP_Preset_31_Wake_Me_Up_Organ_json" />
+      <ComponentRef Id="CMP_Preset_32_While_You_See_A_Chance_json" />
+    </ComponentGroup>
+  </Fragment>
+</Wix>

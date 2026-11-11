@@ -160,17 +160,44 @@ if ($Format -eq "Both" -or $Format -eq "Msi") {
     $TempMsi   = Join-Path $TempWorkRoot "Fanfare-$MsiVersion-x64.msi"
     $FinalMsi  = Join-Path $OutDir "Fanfare-$MsiVersion-x64.msi"
 
+    # Regenerate BundledPresets.wxs and embedded header if python is available
+    $genScript = Join-Path $RepoRoot "tools\generate_bundled_assets.py"
+    if (Test-Path $genScript) {
+        $py = Get-Command "python.exe" -ErrorAction SilentlyContinue
+        if ($py) {
+            Write-Host "Updating bundled preset WiX manifests & binary data..." -ForegroundColor Cyan
+            & $py.Source $genScript
+        }
+    }
+
+    $PresetsWxs = Join-Path $InstallerDir "BundledPresets.wxs"
+    $StagedPresetsWxs = Join-Path $TempWorkRoot "BundledPresets.wxs"
+    $PresetsWixObj    = Join-Path $TempWorkRoot "BundledPresets.wixobj"
+
     Copy-Item -LiteralPath $WxsSource -Destination $StagedWxs -Force
+    if (Test-Path $PresetsWxs) {
+        Copy-Item -LiteralPath $PresetsWxs -Destination $StagedPresetsWxs -Force
+    }
 
     & $CandleExe -nologo -arch x64 `
         "-dProductVersion=$MsiVersion" `
         "-dDisplayVersion=$DisplayVersion" `
         "-dExePath=$StagedExe" `
         "-dIconPath=$StagedIco" `
+        "-dRepoRoot=$RepoRoot" `
         -out $WixObj $StagedWxs
     if ($LASTEXITCODE -ne 0) { throw "WiX candle.exe failed (exit $LASTEXITCODE)" }
 
-    & $LightExe -nologo -out $TempMsi $WixObj
+    $WixObjList = @($WixObj)
+    if (Test-Path $StagedPresetsWxs) {
+        & $CandleExe -nologo -arch x64 `
+            "-dRepoRoot=$RepoRoot" `
+            -out $PresetsWixObj $StagedPresetsWxs
+        if ($LASTEXITCODE -ne 0) { throw "WiX candle.exe failed on BundledPresets.wxs (exit $LASTEXITCODE)" }
+        $WixObjList += $PresetsWixObj
+    }
+
+    & $LightExe -nologo -out $TempMsi @WixObjList
     if ($LASTEXITCODE -ne 0) { throw "WiX light.exe failed (exit $LASTEXITCODE)" }
 
     Invoke-CodeSign $TempMsi
@@ -210,6 +237,12 @@ if ($Format -eq "Both" -or $Format -eq "Msix") {
     New-Item -ItemType Directory -Force -Path $MsixStage, $AssetsDir | Out-Null
 
     Copy-Item -LiteralPath $StagedExe -Destination (Join-Path $MsixStage "Fanfare.exe") -Force
+    foreach ($f in @("strips", "synth-presets", "fm-presets", "fm-sysex")) {
+        $src = Join-Path $RepoRoot $f
+        if (Test-Path $src) {
+            Copy-Item -LiteralPath $src -Destination $MsixStage -Recurse -Force
+        }
+    }
 
     # Generate exact Store PNG visual assets from Source/Resources/Fanfare_Icon.png
     Add-Type -AssemblyName System.Drawing
@@ -279,6 +312,34 @@ if ($Format -eq "Both" -or $Format -eq "Msix") {
         Write-Host "             Product Identity (-StoreIdentityName and -StorePublisher)." -ForegroundColor Yellow
     }
 }
+
+# ==============================================================================
+# 3. BUILD PORTABLE DISTRIBUTION ZIP (.ZIP)
+# ==============================================================================
+Write-Host "`n=== [3/3] Building Portable Distribution (.zip) v$DisplayVersion ===" -ForegroundColor Cyan
+$ZipStage = Join-Path $TempWorkRoot "zip_stage"
+New-Item -ItemType Directory -Force -Path $ZipStage | Out-Null
+Copy-Item -LiteralPath $StagedExe -Destination (Join-Path $ZipStage "Fanfare.exe") -Force
+$ManualPath = Join-Path $RepoRoot "manual.html"
+if (Test-Path $ManualPath) {
+    Copy-Item -LiteralPath $ManualPath -Destination (Join-Path $ZipStage "manual.html") -Force
+}
+foreach ($f in @("strips", "synth-presets", "fm-presets", "fm-sysex")) {
+    $src = Join-Path $RepoRoot $f
+    if (Test-Path $src) {
+        Copy-Item -LiteralPath $src -Destination $ZipStage -Recurse -Force
+    }
+}
+$FinalZip = Join-Path $OutDir "Fanfare-v$DisplayVersion-win64-full.zip"
+if (Test-Path -LiteralPath $FinalZip) {
+    Remove-Item -LiteralPath $FinalZip -Force
+}
+Compress-Archive -Path "$ZipStage\*" -DestinationPath $FinalZip -Force
+$BuiltFiles += $FinalZip
+$zipHash = (Get-FileHash -LiteralPath $FinalZip -Algorithm SHA256).Hash
+$zipSize = (Get-Item -LiteralPath $FinalZip).Length
+Write-Host "Built ZIP: $FinalZip ($zipSize bytes)" -ForegroundColor Green
+Write-Host "  SHA256 : $zipHash"
 
 # Clean up temp folder
 Remove-Item -LiteralPath $TempWorkRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -5,6 +5,8 @@
 
 namespace Fanfare {
 
+void seedEmbeddedAssets(const juce::File& appRoot);
+
 /**
     RigLibrary
     ----------
@@ -57,6 +59,11 @@ public:
 
     static void seedBundledLibraryIfNeeded() {
         const auto appRoot = FanfareConstants::getAppDirectory();
+
+        // 1. Always seed factory strips, synth presets, FM presets & SysEx from binary fallback
+        seedEmbeddedAssets(appRoot);
+
+        // 2. Also copy any external bundled folders placed next to Fanfare.exe (installer / portable)
         const auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
                                 .getParentDirectory();
         static const char* const kBundledFolders[] = {
