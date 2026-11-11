@@ -239,6 +239,10 @@ void processAudio(const float *const *inputData, int numInputs,
           slot->getArpeggiator().reset();
           slot->getHarmonizer().reset();
           slot->getSampler().reset();
+          for (int c = 0; c < 3; ++c) {
+            slot->getSynth(c).reset();
+            slot->getFmSynth(c).reset();
+          }
         }
       }
       for (auto &smb : slotMidiBuffers) {

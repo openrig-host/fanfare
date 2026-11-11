@@ -1,0 +1,170 @@
+<!DOCTYPE HTML>
+<html lang="en">
+	<head>
+		<title>Fanfare Developer Blog</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="description" content="Engineering logs, design thoughts, and gig-tested notes behind the development of Fanfare, the live VST3 host for keyboard players." />
+		<link rel="canonical" href="https://openrig-host.github.io/fanfare/blog/" />
+		<link rel="icon" type="image/png" href="../Fanfare_Icon.png" />
+		<meta property="og:site_name" content="Fanfare Dev Blog" />
+		<meta property="og:type" content="website" />
+		<meta property="og:title" content="Fanfare Developer Blog" />
+		<meta property="og:description" content="Engineering logs, design thoughts, and gig-tested notes behind the development of Fanfare." />
+		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<style>
+			:root {
+				--bg: #1e1e1e;
+				--panel: #252525;
+				--raised: #2f2f2f;
+				--border: #3a3a3a;
+				--border-strong: #4b4b4b;
+				--text: #f2f2f2;
+				--body: #dedede;
+				--dim: #bfbfbf;
+				--faint: #8f8f8f;
+				--accent: #ffa02f;
+				--accent-hover: #ffb964;
+			}
+			* { box-sizing: border-box; margin: 0; padding: 0; }
+			html { scroll-behavior: smooth; }
+			body {
+				background-color: var(--bg) !important;
+				color: var(--body);
+				font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+				font-size: 16px;
+				line-height: 1.7;
+			}
+			.topbar {
+				display: flex; align-items: center; gap: 18px;
+				padding: 14px 22px;
+				background: var(--panel);
+				border-bottom: 1px solid var(--border);
+			}
+			.topbar .brand {
+				color: var(--text); font-weight: 700; font-size: 17px;
+				text-decoration: none;
+			}
+			.topbar .brand span { color: var(--accent); }
+			.topbar a.nav { color: var(--dim); text-decoration: none; font-size: 14px; }
+			.topbar a.nav:hover { color: var(--accent); }
+			.topbar a.nav.active { color: var(--accent); font-weight: 600; }
+
+			main {
+				max-width: 760px;
+				margin: 0 auto;
+				padding: 48px 24px 72px;
+			}
+			.header-intro {
+				margin-bottom: 40px;
+				padding-bottom: 24px;
+				border-bottom: 1px solid var(--border);
+			}
+			h1 {
+				color: var(--text);
+				font-size: 32px;
+				line-height: 1.25;
+				margin-bottom: 8px;
+			}
+			.subtitle {
+				color: var(--dim);
+				font-size: 16px;
+			}
+
+			.post-list {
+				display: flex;
+				flex-direction: column;
+				gap: 24px;
+			}
+			.post-card {
+				background: var(--panel);
+				border: 1px solid var(--border);
+				border-radius: 6px;
+				padding: 24px 26px;
+				transition: border-color 0.15s ease, background 0.15s ease;
+				text-decoration: none;
+				display: block;
+			}
+			.post-card:hover {
+				border-color: var(--accent);
+				background: var(--raised);
+			}
+			.post-date {
+				color: var(--faint);
+				font-size: 13px;
+				margin-bottom: 8px;
+			}
+			.post-title {
+				color: var(--text);
+				font-size: 22px;
+				font-weight: 700;
+				margin-bottom: 10px;
+				line-height: 1.3;
+			}
+			.post-card:hover .post-title {
+				color: var(--accent);
+			}
+			.post-snippet {
+				color: var(--dim);
+				font-size: 15px;
+				line-height: 1.6;
+				margin-bottom: 14px;
+			}
+			.read-more {
+				color: var(--accent);
+				font-size: 14px;
+				font-weight: 600;
+				display: inline-flex;
+				align-items: center;
+				gap: 4px;
+			}
+
+			footer {
+				text-align: center;
+				color: var(--faint);
+				font-size: 13px;
+				padding: 28px 0 36px;
+				border-top: 1px solid var(--border);
+			}
+			footer a {
+				color: var(--faint);
+				text-decoration: none;
+			}
+			footer a:hover {
+				color: var(--accent);
+			}
+		</style>
+	</head>
+	<body>
+		<div class="topbar">
+			<a class="brand" href="../index.html">f&amp; <span>Fanfare</span></a>
+			<a class="nav active" href="index.html">Blog</a>
+			<a class="nav" href="../manual.html">Manual</a>
+			<a class="nav" href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a>
+		</div>
+
+		<main>
+			<section class="header-intro">
+				<h1>Developer Blog</h1>
+				<p class="subtitle">Field notes, gig testing, and architecture deep dives from building Fanfare.</p>
+			</section>
+
+			<section class="post-list">
+				<a href="2026-11-10-what-is-this-program-anyway.html" class="post-card">
+					<div class="post-date">November 10, 2026</div>
+					<h2 class="post-title">What is this program, anyway?</h2>
+					<p class="post-snippet">
+						80s 4-board hardware rigs, why Sunday is the busiest development day after weekend gigs, and building the native BLEEP-216 polyphonic synth in under 15MB.
+					</p>
+					<span class="read-more">Read post &rarr;</span>
+				</a>
+			</section>
+		</main>
+
+		<footer>
+			<p>&copy; Fanfare &middot; <a href="../index.html">Home</a> &middot; <a href="../manual.html">Manual</a> &middot; <a href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a></p>
+		</footer>
+	</body>
+</html>
+

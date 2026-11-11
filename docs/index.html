@@ -5,17 +5,17 @@
 -->
 <html lang="en">
 	<head>
-		<title>Fanfare: Live VST3 Host for Keyboard Players</title>
+		<title>Fanfare: Live Windows VST3 Host for Keyboard Players</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="description" content="Fanfare v1.55 is a rack-based VST3 host for keyboard players who gig. Includes the built-in BLEEP-216 16-voice polyphonic synthesizer (68 presets), LushReverb figure-8 tank reverb, Rig Doctor setup diagnostics &amp; surgical repair, global Controller Profiles, Save Version History, clean song changes, separate FOH and IEM mixes with per-strip IEM trim, Curve-Link EQ, built-in acoustic IRs, stereo/ping-pong/tape delay, dual-deck DJ player with broadcast auto-leveling, tablet HUD, and a panic button that works." />
+		<meta name="description" content="Fanfare v1.60 (The 1984 Keyboard Rig Edition) is a dedicated Windows VST3 host for keyboard players who gig. Includes the built-in BLEEP-216 16-voice Juno-style polyphonic synthesizer (68 presets), CoplanDX 6-op/4-op DX7/TX81Z/DX100 FM synthesizer (558 presets), 11 dual-engine FM+Analog strip combos, LushReverb figure-8 tank reverb, Rig Doctor setup diagnostics &amp; surgical repair, global Controller Profiles, Save Version History, clean song changes, separate FOH and IEM mixes with per-strip IEM trim, Curve-Link EQ, built-in acoustic IRs, stereo/ping-pong/tape delay, dual-deck DJ player with broadcast auto-leveling, tablet HUD, and a panic button that works." />
 		<link rel="canonical" href="https://openrig-host.github.io/fanfare/" />
 		<link rel="icon" type="image/png" href="Fanfare_Icon.png" />
 		<meta property="og:site_name" content="Fanfare" />
 		<meta property="og:type" content="website" />
 		<meta property="og:url" content="https://openrig-host.github.io/fanfare/" />
-		<meta property="og:title" content="Fanfare: Live VST3 Host for Keyboard Players" />
-		<meta property="og:description" content="No stuck notes. No dropouts. No failed song changes. A rack-based VST3 host for keyboard players who gig." />
+		<meta property="og:title" content="Fanfare: Live Windows VST3 Host for Keyboard Players" />
+		<meta property="og:description" content="No stuck notes. No dropouts. No failed song changes. A dedicated Windows VST3 host for keyboard players who gig." />
 		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
 		<meta name="twitter:card" content="summary_large_image" />
 		<link rel="preload" as="image" href="hero_bg.jpg" />
@@ -124,6 +124,28 @@
 			.image.main img { height: auto; }
 			#footer .copyright { color: rgba(255,255,255,0.65); }
 			#footer .copyright a { color: rgba(255,255,255,0.75) !important; }
+
+			/* Equalize header nav item widths so the center line lands
+			   dead on the seam between Architecture and Download, never bisecting text. */
+			#header nav {
+				max-width: 100%;
+			}
+			#header nav ul {
+				width: 100%;
+				display: flex;
+			}
+			#header nav ul li {
+				flex: 1 1 0;
+				min-width: 0;
+			}
+			#header nav ul li a {
+				min-width: 0;
+				padding: 0 0.35rem;
+				letter-spacing: 0.12rem;
+				font-size: 0.74rem;
+				text-align: center;
+				white-space: nowrap;
+			}
 		</style>
 	</head>
 	<body class="is-preload">
@@ -140,7 +162,7 @@
 							<div class="inner">
 								<h1>Fanfare</h1>
 								<p>No stuck notes. No dropouts. No failed song changes.<br />
-								A rack-based VST3 host for keyboard players who gig.</p>
+								A rack-based Windows VST3 host for keyboard players who gig.</p>
 							</div>
 						</div>
 						<nav>
@@ -150,8 +172,8 @@
 								<li><a href="#screenshots">Screenshots</a></li>
 								<li><a href="#architecture">Architecture</a></li>
 								<li><a href="#download">Download</a></li>
+								<li><a href="blog/">Blog</a></li>
 								<li><a href="manual.html">Manual</a></li>
-								<li><a href="privacy.html">Privacy</a></li>
 								<li><a href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a></li>
 							</ul>
 						</nav>
@@ -164,12 +186,12 @@
 							<article id="intro">
 								<h2 class="major">Intro</h2>
 								<a href="https://github.com/openrig-host/fanfare/releases/latest" id="latest-release-badge" class="release-badge" target="_blank" rel="noopener">
-									<span id="badge-release-text">Latest Release &middot; Windows VST3 Host</span>
+									<span id="badge-release-text">Latest Release &middot; Windows 10/11 x64 VST3 Host</span>
 								</a>
-								<p><strong>Fanfare</strong> makes your rig easy to set up and then stays out of your way on stage. You play music. You don't run an IT desk.</p>
+								<p><strong>Fanfare</strong> is a dedicated Windows app that makes your live keyboard rig easy to set up and then stays out of your way on stage. You play music. You don't run an IT desk.</p>
 								<p>Splits, sample triggers, arpeggiators, octaves, harmonizers. Set them up once. While you play, the next song loads in the background, so when you call it, it's already there.</p>
 								<ul class="actions">
-									<li><a href="https://github.com/openrig-host/fanfare/releases/latest" class="button primary icon solid fa-download" target="_blank" rel="noopener">Download for Windows</a></li>
+									<li><a href="https://github.com/openrig-host/fanfare/releases/latest" class="button primary icon solid fa-download" target="_blank" rel="noopener">Download for Windows (x64)</a></li>
 									<li><a href="manual.html" class="button icon solid fa-book">User's Manual</a></li>
 									<li><a href="https://github.com/openrig-host/fanfare" class="button" target="_blank" rel="noopener">Source Code</a></li>
 								</ul>
@@ -184,6 +206,10 @@
 									<div>
 										<h3>BLEEP-216 Built-In Polysynth</h3>
 										<p>A 16-voice Juno/Jupiter-inspired analog-modeled synthesizer built directly into every channel strip &mdash; dual PolyBLEP oscillators + sub + noise, HPF, 12/24 dB resonant VCF, dual ADSRs, BBD Chorus I/II/I+II, stereo delay, <strong>LushReverb</strong> tank, onscreen keyboard, and <strong>68 stage-ready presets</strong> (from <em>Jump 1984 Brass</em>, <em>Take On Me Riff</em>, <em>Final Countdown</em>, and <em>Enyaesque</em> to 90s supersaws and 303 bass) with zero external VSTs required.</p>
+									</div>
+									<div>
+										<h3>CoplanDX FM Synth &amp; 1984 Hybrid Rig</h3>
+										<p>A native 16-voice Yamaha FM synthesizer in every strip slot &mdash; 5 hardware topologies (<strong>DX7</strong> 6-op, <strong>DX100/DX21</strong> 4-op, <strong>TX81Z</strong> 8-waveform 4-op, <strong>2x4 OP</strong>, and <strong>2x6 OP</strong>), <strong>558 categorized vintage presets</strong>, <code>.syx</code> bank import, and <strong>11 hybrid FM + Analog strip presets</strong> that layer metallic FM mallets and bells over lush BLEEP-216 flute and PWM pads on a single strip.</p>
 									</div>
 									<div>
 										<h3>Songs, Scenes &amp; Setlists</h3>
@@ -334,7 +360,7 @@
 						<!-- Download -->
 							<article id="download">
 								<h2 class="major">Download</h2>
-								<p style="text-align:center;">One .exe with ASIO and WASAPI. No installer.</p>
+								<p style="text-align:center;">Standalone Windows app with ASIO and WASAPI. Single .exe, no installer.</p>
 								<ul class="pills">
 									<li class="ok">Windows 10/11 x64</li>
 									<li class="ok">VST3 Host</li>
@@ -342,10 +368,10 @@
 									<li>GPL v3 License</li>
 								</ul>
 								<ul class="actions" style="justify-content:center;">
-									<li><a href="https://github.com/openrig-host/fanfare/releases/latest" class="button primary icon solid fa-download" target="_blank" rel="noopener">Download Latest Release</a></li>
+									<li><a href="https://github.com/openrig-host/fanfare/releases/latest" class="button primary icon solid fa-download" target="_blank" rel="noopener">Download for Windows (x64)</a></li>
 									<li><a href="https://github.com/openrig-host/fanfare/blob/trunk/BUILDING.md" class="button" target="_blank" rel="noopener">Build Instructions</a></li>
 								</ul>
-								<p style="text-align:center; font-size:0.8em; color:rgba(255,255,255,0.55);">Free, open source (GPL v3). Your plugins and patches stay on your machine.</p>
+								<p style="text-align:center; font-size:0.8em; color:rgba(255,255,255,0.55);">Free, open source (GPL v3) for Windows 10/11 64-bit. Your plugins and patches stay on your machine.</p>
 							</article>
 
 					</div>

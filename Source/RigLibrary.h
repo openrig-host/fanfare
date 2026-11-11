@@ -55,6 +55,21 @@ public:
         return FanfareConstants::getAppDirectory().getChildFile("known_plugins.json");
     }
 
+    static void seedBundledLibraryIfNeeded() {
+        const auto appRoot = FanfareConstants::getAppDirectory();
+        const auto exeDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+                                .getParentDirectory();
+        static const char* const kBundledFolders[] = {
+            "strips", "synth-presets", "fm-presets", "fm-sysex"
+        };
+        for (const char* folder : kBundledFolders) {
+            const auto srcDir = exeDir.getChildFile(folder);
+            if (srcDir.isDirectory()) {
+                tryCopyRecursive(srcDir, appRoot.getChildFile(folder));
+            }
+        }
+    }
+
     /**
         Run once. Copies legacy files into backups/legacy/ (read-only copy;
         originals are NEVER deleted) and writes a flag so it never runs again.
@@ -64,6 +79,7 @@ public:
         FanfareConstants::getAppDirectory().createDirectory();
         FanfareConstants::getSettingsDirectory().createDirectory();
         legacyBackupDir().createDirectory();
+        seedBundledLibraryIfNeeded();
 
         if (migrationFlagFile().existsAsFile())
             return;
@@ -96,6 +112,17 @@ public:
     }
 
 private:
+    static void tryCopyRecursive(const juce::File& source, const juce::File& dest) {
+        if (source.isDirectory()) {
+            dest.createDirectory();
+            for (auto& child : juce::RangedDirectoryIterator(source, false, "*", juce::File::findFilesAndDirectories))
+                tryCopyRecursive(child.getFile(), dest.getChildFile(child.getFile().getFileName()));
+        } else if (source.existsAsFile()) {
+            if (!dest.existsAsFile())
+                source.copyFileTo(dest);
+        }
+    }
+
     static void tryCopy(const juce::File& source, const juce::File& dest) {
         if (source.isDirectory()) {
             dest.createDirectory();

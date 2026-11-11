@@ -1,0 +1,30 @@
+{
+  "presetName": "GLOKENSPL",
+  "state": {
+    "version": 2,
+    "enabled": true,
+    "presetName": "GLOKENSPL",
+    "presetProvenance": "USER",
+    "presetCategory": "User Presets",
+    "presetDirty": false,
+    "mode": 1,
+    "volume": 0.800000011920929,
+    "patch": "XjgYN2BOAAAAAAAAAAEABUgAEAAHY0UAYGMAAABEYQAAAAAABUUABAAHY0cAYVIlAAAwSi4AAAAABWEACAAHXzwxJmNRAAAiAAAAAAQAB2MAAQAHYy4AAFBLAAA2AAAAAAAAAlIACAAHXy8eKmNcAAAAAAAAAAMAAWMAAQAHXkNfIjIyMjIGBwEiIQAAAAQCJEdMT0tFTlNQTCA7AAAAAAAA",
+    "fx": {
+      "choMode": 0.0,
+      "choRate": 0.649999976158142,
+      "choDepth": 0.449999988079071,
+      "choMix": 0.300000011920929,
+      "dlyTime": 0.340000003576279,
+      "dlyFb": 0.280000001192093,
+      "dlyDamp": 0.419999986886978,
+      "dlyMix": 0.0,
+      "revType": 2.0,
+      "revSize": 0.639999985694885,
+      "revDamp": 0.300000011920929,
+      "revMix": 0.239999994635582
+    },
+    "ccMap": {
+    }
+  }
+}

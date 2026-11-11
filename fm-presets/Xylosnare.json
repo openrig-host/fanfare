@@ -1,0 +1,28 @@
+{
+  "presetName": "Xylosnare",
+  "state": {
+    "version": 1,
+    "enabled": true,
+    "presetName": "Xylosnare",
+    "presetDirty": false,
+    "mode": 0,
+    "volume": 0.800000011920929,
+    "patch": "Y2MJKGNjYwAPAAAAAQEAAGIACzkHY2M+PGNjAAAPAAAAAQIAAF0AAAAHYz82KGM8AAAPABQAAQQAAFQABQAHY2MzOmNjAAAPAAAAAQEAAGMAAQAHY2NjY2NjYwAnAAAAAAAAAAAAAQAHY2NjY2NjYwAnAAAAAAAAAAAAAQAHY2JjYzIyMjIEBwAqAAAAAAAGGFh5bG9zbmFyZSA/AAAAAAAA",
+    "fx": {
+      "choMode": 4.0,
+      "choRate": 0.371835052967072,
+      "choDepth": 0.236969694495201,
+      "choMix": 0.480606079101562,
+      "dlyTime": 0.068952113389969,
+      "dlyFb": 0.270303040742874,
+      "dlyDamp": 0.0,
+      "dlyMix": 0.246060624718666,
+      "revType": 0.0,
+      "revSize": 0.299696981906891,
+      "revDamp": 0.0,
+      "revMix": 0.22272726893425
+    },
+    "ccMap": {
+    }
+  }
+}

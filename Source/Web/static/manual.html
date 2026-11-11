@@ -6,16 +6,16 @@
 -->
 <html lang="en">
 	<head>
-		<title>Fanfare v1.55: Stage Survival Manual</title>
+		<title>Fanfare v1.60: Stage Survival Manual (Windows VST3 Host)</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="description" content="Fanfare v1.55 User's Manual & Stage Survival Guide. Built-in BLEEP-216 16-Voice Polyphonic Synthesizer (68 Presets), LushReverb Figure-8 Tank Reverb, Studio Workspace, Rig Doctor Setup Diagnostics & Surgical Repair, Vertical Ribbon Sidebar, Global Controller Profiles, Version History, Strips, Songs, Scenes, Setlists, Curve-Link EQ, Built-In Synthesized IRs, Stereo/Ping-Pong/Tape Delay, Dual-Deck Break DJ with Broadcast Auto-Leveler, and bass-player-proof USB hotplugging." />
+		<meta name="description" content="Fanfare v1.60 (The 1984 Keyboard Rig Edition) User's Manual & Stage Survival Guide for Windows. Built-in BLEEP-216 16-Voice Polyphonic Synthesizer (68 Presets), CoplanDX 6-Op/4-Op FM Synthesizer (558 Presets), 11 Hybrid FM+Analog Strips, LushReverb Figure-8 Tank Reverb, Studio Workspace, Rig Doctor Setup Diagnostics & Surgical Repair, Vertical Ribbon Sidebar, Global Controller Profiles, Version History, Strips, Songs, Scenes, Setlists, Curve-Link EQ, Built-In Synthesized IRs, Stereo/Ping-Pong/Tape Delay, Dual-Deck Break DJ with Broadcast Auto-Leveler, and bass-player-proof USB hotplugging." />
 		<link rel="canonical" href="https://openrig-host.github.io/fanfare/manual.html" />
 		<link rel="icon" type="image/png" href="Fanfare_Icon.png" />
 		<meta property="og:site_name" content="Fanfare" />
 		<meta property="og:type" content="website" />
-		<meta property="og:title" content="Fanfare v1.55: Stage Survival Manual" />
-		<meta property="og:description" content="The Fanfare user's manual and stage survival guide: 25 chapters from Quick Start & BLEEP-216 Polysynth to Rig Doctor & engine tuning." />
+		<meta property="og:title" content="Fanfare v1.60: Stage Survival Manual (Windows VST3 Host)" />
+		<meta property="og:description" content="The Fanfare user's manual and stage survival guide for Windows: 26 chapters from Quick Start, BLEEP-216 Polysynth & CoplanDX FM to Rig Doctor & engine tuning." />
 		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
 		<meta name="twitter:card" content="summary_large_image" />
 		<link rel="stylesheet" href="assets-readonly/css/main.css" />
@@ -198,9 +198,9 @@
 			<section id="header">
 				<header>
 					<span class="image avatar"><img src="Fanfare_Icon.png" alt="Fanfare" /></span>
-					<h1 id="logo"><a href="#workflow">Fanfare v1.55</a></h1>
-					<p>The Stage Survival Manual</p>
-					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. BLEEP-216, Rig Doctor, EQ, IR, USB)..." />
+					<h1 id="logo"><a href="#workflow">Fanfare v1.60</a></h1>
+					<p>The Windows Stage Survival Manual</p>
+					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. BLEEP-216, CoplanDX, Rig Doctor, EQ)..." />
 				</header>
 				<nav id="nav">
 					<ul>
@@ -217,6 +217,7 @@
 						<li><a href="#midi-effects">11. Transpose, Arp &amp; Octaver</a></li>
 						<li><a href="#sampler">12. 8-Pad Sampler</a></li>
 						<li><a href="#bleep-synth">12b. BLEEP-216 Polysynth (v1.55)</a></li>
+						<li><a href="#coplan-dx">12c. CoplanDX FM &amp; 1984 Rig (v1.60)</a></li>
 						<li><a href="#break-music">13. Break DJ Strip</a></li>
 						<li><a href="#song-builder">14. The Song Builder</a></li>
 						<li><a href="#scenes">15. Scenes (Snapshots)</a></li>
@@ -254,7 +255,7 @@
 								<a class="manual-card" href="#main-mixer"><h3>The Console <span class="arrow">&rarr;</span></h3><p>Main faders, FOH &amp; IEM buses, Panic, and USB hotplug survival.</p></a>
 								<a class="manual-card" href="#strips"><h3>Strips &amp; DSP <span class="arrow">&rarr;</span></h3><p>Strip chains, Curve-Link EQ, delay, IRs, musette and note splits.</p></a>
 								<a class="manual-card" href="#cc-assignments"><h3>MIDI &amp; CCs <span class="arrow">&rarr;</span></h3><p>CC assignments, B3 drawbars, transpose, arp and octaver.</p></a>
-								<a class="manual-card" href="#sampler"><h3>Synth, Sampler &amp; Breaks <span class="arrow">&rarr;</span></h3><p>Built-in BLEEP-216 polysynth (68 presets), 8-pad sampler, and dual-deck break DJ.</p></a>
+								<a class="manual-card" href="#sampler"><h3>Synths, Sampler &amp; Breaks <span class="arrow">&rarr;</span></h3><p>BLEEP-216 analog synth (68 presets), CoplanDX FM synth (558 presets), 8-pad sampler &amp; break DJ.</p></a>
 								<a class="manual-card" href="#song-builder"><h3>Build &amp; Perform <span class="arrow">&rarr;</span></h3><p>Song Builder, Scenes (<code>1&ndash;9</code> hotkeys), Next-Up capsule, Setlists &amp; Notepad.</p></a>
 								<a class="manual-card" href="#web-remote"><h3>Remote &amp; Settings <span class="arrow">&rarr;</span></h3><p>Tablet Stage HUD, settings, routing and the Resource Inspector.</p></a>
 								<a class="manual-card" href="#rig-doctor"><h3>Rig Doctor &amp; Engine <span class="arrow">&rarr;</span></h3><p>Diagnose &amp; repair sick setups, CPU core tuning, and roll-your-own.</p></a>
@@ -721,6 +722,26 @@
 								</div>
 							</section>
 
+						<!-- 12C. COPLANDX FM SYNTH & 1984 RIG -->
+							<section id="coplan-dx">
+								<div class="container">
+									<h3>12c. CoplanDX: Built-In 6-Op / 4-Op FM Synthesizer &amp; The 1984 Keyboard Rig (v1.60)</h3>
+									<p>Alongside <strong>BLEEP-216</strong>, every channel strip slot in Fanfare v1.60 includes <strong>CoplanDX</strong> (click <strong><code>DX</code></strong> on the strip or choose <strong><code>CoplanDX (Built-in)</code></strong> from any of the three chain slots <code>1</code>, <code>2</code>, or <code>3</code>). Together, <strong>BLEEP-216</strong> and <strong>CoplanDX</strong> give you a superpowered, native, zero-VST <strong>1984 Keyboard Rig</strong> (Juno-106 + DX7/TX81Z/DX100) right inside the executable:</p>
+									<ul>
+										<li><strong>Five Selectable Yamaha FM Hardware Topologies:</strong> Switch on the fly between <strong><code>DX7 (6 OP)</code></strong> (classic 6-operator, 32-algorithm phase modulation powered by Google's <code>msfa</code> kernel), <strong><code>DX21 / DX100 (4 OP)</code></strong> (4-operator, 8 algorithms), <strong><code>TX81Z (4 OP)</code></strong> (13 algorithms + 8 multi-waveforms <code>W1</code>&ndash;<code>W8</code> per operator), <strong><code>DUAL 2x4 OP</code></strong>, and <strong><code>DUAL 2x6 OP</code></strong> layered modes.</li>
+										<li><strong>558 Categorized Vintage Factory Presets + Provenance Tags:</strong> Ships with <strong>558 authentic factory voices</strong> from the original <strong>DX7</strong> (<code>ROM1A</code>&ndash;<code>ROM4B</code>), <strong>DX100</strong>, and <strong>TX81Z</strong> ROM banks, organized into 11 musical categories (<em>Piano &amp; Keys</em>, <em>Organs</em>, <em>Bells &amp; Mallets</em>, <em>Strings &amp; Pads</em>, <em>Brass &amp; Winds</em>, <em>Synth Leads</em>, <em>Bass</em>, <em>Guitars &amp; Plucks</em>, <em>Voices &amp; Choir</em>, <em>Drums &amp; Percussion</em>, and <em>SFX &amp; Atmospheres</em>). Every preset displays its hardware provenance badge (<code>[DX7]</code>, <code>[DX100]</code>, <code>[TX81Z]</code>) and loads with category-tailored BBD Chorus, Stereo Delay, and LushReverb settings.</li>
+										<li><strong>Full Operator Cards, Algorithm Diagram, Global LFO/PEG &amp; SysEx Import:</strong> Edit <code>OP1</code>&ndash;<code>OP6</code> envelope rates (<code>R1</code>&ndash;<code>R4</code>) and levels (<code>L1</code>&ndash;<code>L4</code>), output level (<code>OL</code>), coarse/fine/detune tuning, fixed-frequency mode (<code>Fix</code>), and TX81Z waveforms (<code>W1</code>&ndash;<code>W8</code>); step through Algorithms <code>1</code>&ndash;<code>32</code> with a live visual carrier/modulator routing diagram; tweak Global Feedback (<code>FB</code>), LFO, and Pitch Envelope (<code>PR1</code>&ndash;<code>PR4</code> / <code>PL1</code>&ndash;<code>PL4</code>); click <strong><code>Syx</code></strong> to import any vintage 32-voice <code>.syx</code> cartridge dump; or click <strong><code>Save</code></strong> to store custom <code>.json</code> patches in <code>fm-presets/</code>.</li>
+										<li><strong>3-Slot Multi-Synth Chain Stacking &amp; 11 Hybrid &ldquo;1984 Rig&rdquo; Strips (<code>strips/</code>):</strong> Every channel strip has 3 instrument chain slots (<code>1</code>, <code>2</code>, <code>3</code>) with independent key ranges, levels, and mutes. You can stack <strong>CoplanDX</strong> in Slot 1 and <strong>BLEEP-216</strong> in Slot 2 on the same strip &mdash; or open the left <strong>Strips</strong> sidebar to load any of the <strong>11 included dual-engine <code>.orstrip</code> combos</strong> (<em>01 FM Bell &amp; Flute Pad</em>, <em>02 FM Marimba &amp; Dream Pad</em>, <em>03 Space Vibe &amp; Shimmer Pad</em>, <em>04 Glocken &amp; Enya Chime</em>, <em>05 Brite Celeste &amp; Juno Warmth</em>, <em>06 Tubular Bells &amp; Cathedral</em>, <em>07 Metalimba &amp; PWM Air</em>, <em>08 Great Vibes &amp; Twin Peaks</em>, <em>09 Xylophone &amp; Hollow Pad</em>, <em>10 Space Chime &amp; Nostalgia Flute</em>, and <em>flute+fmxylo</em>).</li>
+									</ul>
+
+									<blockquote>
+										<span class="use-case-label">Real-World Stage Use Case</span><br />
+										<strong>The Classic 1984 Layer (FM Mallet Attack + Warm Analog Pad Tail):</strong> In 1984, studio and touring keyboardists MIDI-chained a Yamaha DX7 to a Roland Juno-106 or Jupiter-8 because FM synthesis nails glassy, percussive bell/marimba transients while analog DCOs + BBD chorus own warm, breathing sustain.<br /><br />
+										Load <strong><code>01 FM Bell &amp; Flute Pad</code></strong> or <strong><code>04 Glocken &amp; Enya Chime</code></strong> from the <strong>Strips</strong> sidebar onto a single channel strip: every note fires a crisp DX7/TX81Z mallet chime on the attack that melts seamlessly into a lush BLEEP-216 flute or PWM pad, controlled by one fader, one mute button, and zero external VSTs.
+									</blockquote>
+								</div>
+							</section>
+
 						<!-- 11. BREAK MUSIC -->
 							<section id="break-music">
 								<div class="container">
@@ -971,7 +992,7 @@
 					<section id="footer">
 						<div class="container">
 							<ul class="copyright">
-								<li>&copy; Fanfare v1.55</li><li><a href="index.html">Fanfare Home</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
+								<li>&copy; Fanfare v1.60</li><li><a href="index.html">Fanfare Home</a></li><li><a href="blog/">Dev Blog</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
 							</ul>
 						</div>
 					</section>

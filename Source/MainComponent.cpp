@@ -1858,6 +1858,8 @@ void MainComponent::resized() {
     samplerOverlay->centreWithSize(720, 600);
   if (synthOverlay)
     synthOverlay->updateForHostBounds(getLocalBounds());
+  if (fmOverlay)
+    fmOverlay->updateForHostBounds(getLocalBounds());
   if (mp3Overlay)
     mp3Overlay->centreWithSize(780, 580);
   if (setupBuilderOverlay)
@@ -1891,7 +1893,8 @@ void MainComponent::updateStripCollapseStates() {
 
     bool hasPlugins = false;
     for (int c = 0; c < 3; ++c) {
-      if (slot->getPluginInstance(c) != nullptr || slot->isChainSlotMidiOut(c)) {
+      if (slot->getPluginInstance(c) != nullptr || slot->isChainSlotMidiOut(c) ||
+          slot->isChainSlotSynth(c) || slot->isChainSlotFm(c)) {
         hasPlugins = true;
         break;
       }

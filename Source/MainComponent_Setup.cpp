@@ -106,10 +106,17 @@ void MainComponent::setupSlotComponents() {
     comp->setSpecialModes(isMonitorIn, isAccordion, false);
 
     // Plugin selection menu callback
-    comp->onShowPluginMenu = [this, i, slot, comp](int chainIndex) {
+    comp->onShowPluginMenu = [this, i, slot, comp, isMonitorIn](int chainIndex) {
       juce::PopupMenu menu;
       menu.addSectionHeader("Select Plugin for Chain " +
                             juce::String(chainIndex + 1));
+      if (!isMonitorIn) {
+        menu.addItem(-4, "BLEEP-216 Polysynth (Built-in)", true,
+                     slot != nullptr && slot->isChainSlotSynth(chainIndex));
+        menu.addItem(-5, "CoplanDX (Built-in)", true,
+                     slot != nullptr && slot->isChainSlotFm(chainIndex));
+        menu.addSeparator();
+      }
       if (engine.getNumAvailablePlugins() == 0) {
         menu.addItem(-3, "Scan for VST3 Plugins...");
       } else {
@@ -126,6 +133,60 @@ void MainComponent::setupSlotComponents() {
                                                       chainIndex](int result) {
         if (safeThis == nullptr)
           return;
+        if (result == -4) {
+          if (slot != nullptr) {
+            if (auto *oldInstance = slot->getPluginInstance(chainIndex))
+              safeThis->closePluginWindowForInstance(oldInstance);
+            safeThis->engine.clearSlotChainMidiOut(i, chainIndex);
+            slot->setChainSlotSynth(chainIndex, true);
+            if (safeComp != nullptr) {
+              if (safeComp->getIsCollapsed()) {
+                safeComp->setCollapsed(false);
+                safeThis->resized();
+              }
+              safeComp->repaint();
+            }
+            safeThis->synthOverlay.reset(new FanfareSynthComponent(
+                *slot,
+                [safeThis] {
+                  if (safeThis != nullptr) {
+                    safeThis->synthOverlay.reset();
+                    safeThis->resized();
+                  }
+                },
+                chainIndex));
+            safeThis->addAndMakeVisible(safeThis->synthOverlay.get());
+            safeThis->synthOverlay->updateForHostBounds(safeThis->getLocalBounds());
+          }
+          return;
+        }
+        if (result == -5) {
+          if (slot != nullptr) {
+            if (auto *oldInstance = slot->getPluginInstance(chainIndex))
+              safeThis->closePluginWindowForInstance(oldInstance);
+            safeThis->engine.clearSlotChainMidiOut(i, chainIndex);
+            slot->setChainSlotFm(chainIndex, true);
+            if (safeComp != nullptr) {
+              if (safeComp->getIsCollapsed()) {
+                safeComp->setCollapsed(false);
+                safeThis->resized();
+              }
+              safeComp->repaint();
+            }
+            safeThis->fmOverlay.reset(new FmSynthComponent(
+                *slot,
+                [safeThis] {
+                  if (safeThis != nullptr) {
+                    safeThis->fmOverlay.reset();
+                    safeThis->resized();
+                  }
+                },
+                chainIndex));
+            safeThis->addAndMakeVisible(safeThis->fmOverlay.get());
+            safeThis->fmOverlay->updateForHostBounds(safeThis->getLocalBounds());
+          }
+          return;
+        }
         if (result == -3) {
           if (safeThis->scanButton.onClick)
             safeThis->scanButton.onClick();
@@ -166,6 +227,8 @@ void MainComponent::setupSlotComponents() {
               });
         } else if (result == -1 && slot != nullptr) {
           safeThis->engine.clearSlotChainMidiOut(i, chainIndex);
+          slot->clearChainSlotSynth(chainIndex);
+          slot->clearChainSlotFm(chainIndex);
           juce::ScopedLock sl(safeThis->engine.getCallbackLock());
           slot->setPluginInChain(chainIndex, nullptr);
           if (safeComp != nullptr)
@@ -181,6 +244,30 @@ void MainComponent::setupSlotComponents() {
 
     // Editor open callback
     comp->onOpenEditor = [this, slot](int chainIndex) {
+      if (slot != nullptr && slot->isChainSlotSynth(chainIndex)) {
+        synthOverlay.reset(new FanfareSynthComponent(
+            *slot,
+            [this] {
+              synthOverlay.reset();
+              resized();
+            },
+            chainIndex));
+        addAndMakeVisible(synthOverlay.get());
+        synthOverlay->updateForHostBounds(getLocalBounds());
+        return;
+      }
+      if (slot != nullptr && slot->isChainSlotFm(chainIndex)) {
+        fmOverlay.reset(new FmSynthComponent(
+            *slot,
+            [this] {
+              fmOverlay.reset();
+              resized();
+            },
+            chainIndex));
+        addAndMakeVisible(fmOverlay.get());
+        fmOverlay->updateForHostBounds(getLocalBounds());
+        return;
+      }
       auto *plugin = slot->getPluginInstance(chainIndex);
       if (!plugin || !plugin->hasEditor())
         return;
@@ -271,14 +358,86 @@ void MainComponent::setupSlotComponents() {
       mp3Overlay->centreWithSize(780, 580);
     };
 
-    // Fanfare Synth Dialog (native instrument)
-    comp->onShowSynth = [this, slot] {
-      synthOverlay.reset(new FanfareSynthComponent(*slot, [this] {
-        synthOverlay.reset();
-        resized();
-      }));
+    // Fanfare Synth Dialog (native instrument — opens active synth slot or
+    // binds the first free chain slot so SYN-106 shows up in SLOT 1..3)
+    comp->onShowSynth = [this, slot, comp] {
+      int targetChain = slot->getFirstSynthChainSlot();
+      if (targetChain < 0) {
+        for (int c = 0; c < 3; ++c) {
+          if (slot->isChainSlotFm(c) && comp->onShowFm) {
+            comp->onShowFm();
+            return;
+          }
+        }
+        targetChain = 0;
+        for (int c = 0; c < 3; ++c) {
+          if (!slot->getPluginInstance(c) && !slot->isChainSlotMidiOut(c) &&
+              !slot->isChainSlotSynth(c) && !slot->isChainSlotFm(c)) {
+            targetChain = c;
+            break;
+          }
+        }
+        if (auto *oldInstance = slot->getPluginInstance(targetChain))
+          closePluginWindowForInstance(oldInstance);
+        slot->setChainSlotSynth(targetChain, true);
+        if (comp->getIsCollapsed()) {
+          comp->setCollapsed(false);
+          resized();
+        }
+        comp->repaint();
+      } else if (!slot->isChainSlotSynth(targetChain) &&
+                 !slot->getPluginInstance(targetChain) &&
+                 !slot->isChainSlotMidiOut(targetChain)) {
+        slot->setChainSlotSynth(targetChain, true);
+        comp->repaint();
+      }
+      synthOverlay.reset(new FanfareSynthComponent(
+          *slot,
+          [this] {
+            synthOverlay.reset();
+            resized();
+          },
+          targetChain));
       addAndMakeVisible(synthOverlay.get());
       synthOverlay->updateForHostBounds(getLocalBounds());
+    };
+
+    // CoplanDX Dialog (native instrument — opens active FM slot or binds the
+    // first free chain slot so CoplanDX shows up in SLOT 1..3)
+    comp->onShowFm = [this, slot, comp] {
+      int targetChain = -1;
+      for (int c = 0; c < 3; ++c)
+        if (slot->isChainSlotFm(c)) {
+          targetChain = c;
+          break;
+        }
+      if (targetChain < 0) {
+        targetChain = 0;
+        for (int c = 0; c < 3; ++c) {
+          if (!slot->getPluginInstance(c) && !slot->isChainSlotMidiOut(c) &&
+              !slot->isChainSlotSynth(c) && !slot->isChainSlotFm(c)) {
+            targetChain = c;
+            break;
+          }
+        }
+        if (auto *oldInstance = slot->getPluginInstance(targetChain))
+          closePluginWindowForInstance(oldInstance);
+        slot->setChainSlotFm(targetChain, true);
+        if (comp->getIsCollapsed()) {
+          comp->setCollapsed(false);
+          resized();
+        }
+        comp->repaint();
+      }
+      fmOverlay.reset(new FmSynthComponent(
+          *slot,
+          [this] {
+            fmOverlay.reset();
+            resized();
+          },
+          targetChain));
+      addAndMakeVisible(fmOverlay.get());
+      fmOverlay->updateForHostBounds(getLocalBounds());
     };
 
     // Note Range Dialog (CallOutBox)
@@ -325,7 +484,9 @@ void MainComponent::setupSlotComponents() {
       if (selectedFile.existsAsFile()) {
           bool isSlotEmpty = true;
           for (int chainIdx = 0; chainIdx < 3; ++chainIdx) {
-              if (slot->getPluginInstance(chainIdx) != nullptr) {
+              if (slot->getPluginInstance(chainIdx) != nullptr ||
+                  slot->isChainSlotMidiOut(chainIdx) ||
+                  slot->isChainSlotSynth(chainIdx)) {
                   isSlotEmpty = false;
                   break;
               }

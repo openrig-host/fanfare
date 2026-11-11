@@ -22,11 +22,14 @@ struct AnalogAdsr {
 
   void updateCoefficients() noexcept {
     constexpr double kAttackLogRatio = -1.51982575354; // ln((1.28 - 1.0) / 1.28)
-    aCoef = std::exp(kAttackLogRatio / juce::jmax(1.0, aTime * sampleRate));
+    const double effAttack = juce::jmax(0.0015, aTime);
+    const double effDecay = juce::jmax(0.002, dTime);
+    const double effRelease = juce::jmax(0.002, rTime);
+    aCoef = std::exp(kAttackLogRatio / juce::jmax(1.0, effAttack * sampleRate));
     dCoef = std::exp(-DspConfig::kDecayTimeConstantTau /
-                     juce::jmax(1.0, dTime * sampleRate));
+                     juce::jmax(1.0, effDecay * sampleRate));
     rCoef = std::exp(-DspConfig::kDecayTimeConstantTau /
-                     juce::jmax(1.0, rTime * sampleRate));
+                     juce::jmax(1.0, effRelease * sampleRate));
   }
 
   void noteOn(bool resetToZero = false) noexcept {

@@ -521,7 +521,8 @@ void MainComponent::resetToNewSong() {
   for (int i = 0; i < engine.getNumSlots() && !anyLoaded; ++i)
     if (auto *s = engine.getSlot(i))
       for (int c = 0; c < 3; ++c)
-        if (s->getPluginInstance(c) != nullptr || s->isChainSlotMidiOut(c))
+        if (s->getPluginInstance(c) != nullptr || s->isChainSlotMidiOut(c) ||
+            s->isChainSlotSynth(c) || s->isChainSlotFm(c))
           anyLoaded = true;
   for (int i = 0; i < 3 && !anyLoaded; ++i)
     if (!engine.getMasterPluginName(true, i).isEmpty() ||

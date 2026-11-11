@@ -212,6 +212,11 @@ public:
 
   std::function<void(bool)> onPowerToggled;
 
+  void setChainSlotIndex(int idx) {
+    chainSlotIndex = juce::jlimit(0, 2, idx);
+    repaint();
+  }
+
   void syncEnableButton() {
     const bool on = proc.enabled.load();
     enableBtn.setToggleState(on, juce::dontSendNotification);
@@ -244,8 +249,9 @@ public:
 
     auto titleBox = b.removeFromLeft(128);
     g.setColour(ThemeManager::get(Theme::Role::text));
-    g.setFont(BoutiqueLookAndFeel::condensedFont(16.5f, 0.06f));
-    g.drawFittedText("BLEEP-216", titleBox.removeFromTop(19),
+    g.setFont(BoutiqueLookAndFeel::condensedFont(16.0f, 0.05f));
+    g.drawFittedText("BLEEP-216  [S" + juce::String(chainSlotIndex + 1) + "]",
+                     titleBox.removeFromTop(19),
                      juce::Justification::centredLeft, 1, 0.85f);
 
     g.setColour(ThemeManager::get(Theme::Role::textFaint));
@@ -299,6 +305,7 @@ private:
   float meterL = 0.0f;
   float meterR = 0.0f;
   int voicesActive = 0;
+  int chainSlotIndex = 0;
 };
 
 } // namespace FanfareSynth::Ui

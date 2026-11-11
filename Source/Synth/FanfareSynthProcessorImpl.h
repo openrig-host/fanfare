@@ -360,7 +360,6 @@ public:
     for (auto &u : units) {
       if (u.active && u.midiNote == -1 && u.isFinished(useGateVca)) {
         u.active = false;
-        u.reservedMono = false;
       }
     }
     for (auto &t : stealTails) {
@@ -592,11 +591,13 @@ private:
   FanfareSynth::SynthVoiceUnit *allocPolyUnit(int incomingNote,
                                               bool useGateVca) noexcept {
     // 1. Re-trigger existing voice playing the exact same note (move tail first)
-    for (auto &u : units) {
-      if (u.active && !u.reservedMono && u.midiNote == incomingNote) {
-        spawnStealTail(u);
-        u.hardReset();
-        return &u;
+    if (incomingNote >= 0) {
+      for (auto &u : units) {
+        if (u.active && !u.reservedMono && u.midiNote == incomingNote) {
+          spawnStealTail(u);
+          u.hardReset();
+          return &u;
+        }
       }
     }
 
@@ -663,6 +664,11 @@ private:
     }
 
     if (!monoFamily) {
+      if (!monoUnits.empty()) {
+        for (int ui : monoUnits)
+          units[(size_t)ui].reservedMono = false;
+        monoUnits.clear();
+      }
       if (auto *u = allocPolyUnit(note, useGateVca))
         triggerPolyUnit(*u, note, vel);
       return;
@@ -697,20 +703,11 @@ private:
       auto *u = allocPolyUnit(-1, useGateVca);
       if (u == nullptr)
         break;
-      u->active = true;
+      u->active = false;
       u->reservedMono = true;
       u->midiNote = note;
-      u->osc1.reset((double)monoUnits.size() * 0.17);
-      u->osc2.reset((double)monoUnits.size() * 0.31 + 0.25);
-      u->ampEnv.noteOn(true);
-      u->filtEnv.noteOn(true);
-      u->gateEnv.noteOn(true);
-      u->pwmPhase = 0.0;
-      u->ageSeconds = 0.0;
-      u->gliding = false;
       u->glideFreq = targetFreq;
       u->glideTarget = targetFreq;
-      u->startedTick = globalTick;
       monoUnits.push_back((int)(u - units.data()));
     }
 
@@ -718,26 +715,40 @@ private:
     const float uniNorm = 1.0f / std::sqrt((float)juce::jmax(1, count));
     for (int idx = 0; idx < count; ++idx) {
       auto &u = units[(size_t)monoUnits[(size_t)idx]];
+      const bool wasSounding = u.active && !u.isFinished(useGateVca);
       u.active = true;
+      u.reservedMono = true;
       u.midiNote = note;
       u.baseFreq = targetFreq;
       u.glideTarget = targetFreq;
       u.velocity = juce::jmax(vel, (float)DspConfig::kMinNoteVelocity);
       u.startedTick = globalTick;
 
-      if (doGlide) {
-        if (!u.gliding)
-          u.gliding = true;
-      } else {
+      if (!wasSounding) {
+        u.osc1.reset((double)idx * 0.17 + 0.25);
+        u.osc2.reset((double)idx * 0.31 + 0.25);
+        u.hpf.reset();
+        u.ladder.reset();
+        u.pwmPhase = 0.0;
+        u.ageSeconds = 0.0;
         u.gliding = false;
         u.glideFreq = targetFreq;
-      }
-
-      if (!legatoOverlap) {
-        u.ampEnv.noteOn(false);
-        u.filtEnv.noteOn(false);
-        u.gateEnv.noteOn(false);
-        u.ageSeconds = 0.0;
+        u.ampEnv.noteOn(true);
+        u.filtEnv.noteOn(true);
+        u.gateEnv.noteOn(true);
+      } else {
+        if (doGlide) {
+          u.gliding = true;
+        } else {
+          u.gliding = false;
+          u.glideFreq = targetFreq;
+        }
+        if (!legatoOverlap) {
+          u.ampEnv.noteOn(false);
+          u.filtEnv.noteOn(false);
+          u.gateEnv.noteOn(false);
+          u.ageSeconds = 0.0;
+        }
       }
 
       const float spreadPos =
@@ -762,6 +773,10 @@ private:
     u.detuneCents = 0.0f;
     u.panL = 0.70710678f;
     u.panR = 0.70710678f;
+    u.osc1.reset(0.25);
+    u.osc2.reset(0.50);
+    u.hpf.reset();
+    u.ladder.reset();
     u.ampEnv.noteOn(true);
     u.filtEnv.noteOn(true);
     u.gateEnv.noteOn(true);
@@ -817,9 +832,7 @@ private:
           u.filtEnv.noteOff();
           u.gateEnv.noteOff();
           u.midiNote = -1;
-          u.reservedMono = false;
         }
-        monoUnits.clear();
       }
       return;
     }
@@ -1059,22 +1072,33 @@ private:
     const double keyTrackOct =
         (double)s[ParamId::keyTrack] * noteOctavesFromC4;
 
-    const double fEnvPreview =
-        envSrcIsAmp ? u.ampEnv.level : u.filtEnv.level;
-    const double fEnvOct = envPolSign * (double)s[ParamId::filtEnvAmt] *
-                           DspConfig::kFilterEnvMaxOctaves * filtVelGain *
-                           fEnvPreview;
+    const double envOctScale = envPolSign * (double)s[ParamId::filtEnvAmt] *
+                               DspConfig::kFilterEnvMaxOctaves * filtVelGain;
     const double lfoFilterOct =
         (double)s[ParamId::lfoToFilt] * DspConfig::kLfoFilterMaxOctaves *
             delayedLfo +
         mod * DspConfig::kModWheelFilterOctaves +
         at * DspConfig::kAftertouchFilterOctaves;
     const double vintageCutOct = vintageAmt * u.cardCutoffTrimOct;
-
-    const double modulatedCutoff =
+    const double baseCutHz =
         (double)smoothedCutoff *
-        std::pow(2.0, keyTrackOct + fEnvOct + lfoFilterOct + vintageCutOct);
-    u.ladder.setCoefficients(modulatedCutoff, sr, (double)smoothedReso);
+        std::pow(2.0, keyTrackOct + lfoFilterOct + vintageCutOct);
+
+    u.ladder.setResonance((double)smoothedReso);
+
+    double ampEnvBuf[DspConfig::kControlRateStep];
+    double gateEnvBuf[DspConfig::kControlRateStep];
+    double filtEnvBuf[DspConfig::kControlRateStep];
+    const double fEnvInit = envSrcIsAmp ? u.ampEnv.level : u.filtEnv.level;
+    for (int i = 0; i < subSamples; ++i) {
+      ampEnvBuf[i] = u.ampEnv.next();
+      gateEnvBuf[i] = u.gateEnv.next();
+      filtEnvBuf[i] = envSrcIsAmp ? ampEnvBuf[i] : u.filtEnv.next();
+    }
+
+    double curG = Dsp::OtaLadderFilter::computeG(
+        baseCutHz * std::pow(2.0, envOctScale * fEnvInit), sr);
+    double gStep = 0.0;
 
     const double tremDepth = (double)s[ParamId::lfoToAmp];
     const float gainL = u.panL * DspConfig::kVoiceHeadroom;
@@ -1082,6 +1106,16 @@ private:
     const double invSr = 1.0 / sr;
 
     for (int i = 0; i < subSamples; ++i) {
+      if ((i & 3) == 0) {
+        const int span = juce::jmin(4, subSamples - i);
+        const double targetEnv = filtEnvBuf[i + span - 1];
+        const double targetG = Dsp::OtaLadderFilter::computeG(
+            baseCutHz * std::pow(2.0, envOctScale * targetEnv), sr);
+        gStep = (targetG - curG) / (double)span;
+      }
+      curG += gStep;
+      u.ladder.setG(curG);
+
       const auto dco1 =
           u.osc1.nextWithSub(dt1, w1, pulseWidth, subMode, computeSub);
       double mix = dco1.mainSample * (double)o1Gain +
@@ -1092,12 +1126,7 @@ private:
       if (computeNoise)
         mix += u.noiseGen.next() * (double)noiseGain * 0.55;
 
-      const double ampEnvVal = u.ampEnv.next();
-      const double gateVal = u.gateEnv.next();
-      if (!envSrcIsAmp)
-        (void)u.filtEnv.next();
-
-      const double vcaEnv = useGateVca ? gateVal : ampEnvVal;
+      const double vcaEnv = useGateVca ? gateEnvBuf[i] : ampEnvBuf[i];
 
       const double hpfOut = u.hpf.process(mix);
       const double vcfOut = u.ladder.process(hpfOut, slope24);
@@ -1120,6 +1149,8 @@ private:
       outL[i] += (float)(vcfOut * totalAmp) * gainL;
       outR[i] += (float)(vcfOut * totalAmp) * gainR;
       u.ageSeconds += invSr;
+      if (!u.active)
+        break;
     }
   }
 

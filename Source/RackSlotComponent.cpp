@@ -48,7 +48,10 @@ public:
   PluginStackConfigComp(RackSlot &s, int chainIdx) : slot(s), idx(chainIdx) {
     auto &cs = slot.getChainSlotSettings(idx);
 
-    enableBtn.setButtonText("ENABLED");
+    const juce::String layerTitle = slot.getPluginName(idx);
+    enableBtn.setButtonText(layerTitle.isNotEmpty()
+                                ? ("ENABLED  —  " + layerTitle)
+                                : ("ENABLED  (SLOT " + juce::String(idx + 1) + ")"));
     enableBtn.setClickingTogglesState(true);
     enableBtn.setToggleState(cs.enabled.load(), juce::dontSendNotification);
     enableBtn.onClick = [this] {
@@ -598,7 +601,8 @@ bool RackSlotComponent::isUnusedEmptyStrip() const {
   if (kMp3DecksEnabled && slot.getMp3Player().hasAnyTracks())
     return false;
   for (int i = 0; i < 3; ++i) {
-    if (slot.getPluginInstance(i) != nullptr || slot.isChainSlotMidiOut(i))
+    if (slot.getPluginInstance(i) != nullptr || slot.isChainSlotMidiOut(i) ||
+        slot.isChainSlotSynth(i) || slot.isChainSlotFm(i))
       return false;
   }
   const auto n = slot.getName().trim();
@@ -783,14 +787,26 @@ void RackSlotComponent::timerCallback() {
       slotBtns[i].setButtonText(name.isEmpty() ? ("SLOT " + juce::String(i + 1)) : name);
       stateChanged = true;
     }
-    bool hasPlugin = slot.getPluginInstance(i) != nullptr || isMidiOut;
+    bool isSynth = slot.isChainSlotSynth(i) || slot.isChainSlotFm(i);
+    bool hasPlugin = slot.getPluginInstance(i) != nullptr || isMidiOut || isSynth;
     if (hasPlugin)
       anyPlugin = true;
     editGuiBtns[i].setButtonText(isMidiOut ? "M" : "E");
     slotBtns[i].getProperties().set("isPluginSlot", true);
     slotBtns[i].getProperties().set("hasPlugin", hasPlugin);
     slotBtns[i].getProperties().set("isMidiOut", isMidiOut);
+    slotBtns[i].getProperties().set("isSynth", isSynth);
     slotBtns[i].getProperties().set("slotAccent", (int)slotAccentCol.getARGB());
+  }
+
+  const bool synthActiveNow = slot.hasAnySynthSlot();
+  if (synthActiveNow != prevSynthActive) {
+    prevSynthActive = synthActiveNow;
+    Fanfare::setButtonRole(synthButton, synthActiveNow
+                                            ? Fanfare::ButtonRole::Primary
+                                            : Fanfare::ButtonRole::Standard);
+    synthButton.setToggleState(synthActiveNow, juce::dontSendNotification);
+    stateChanged = true;
   }
 
   if (anyPlugin != cachedHasAnyPlugin) {
@@ -1570,6 +1586,8 @@ void RackSlotComponent::showStripActionsMenu() {
   menu.addSeparator();
   menu.addItem(10, "Rename strip...");
   menu.addItem(11, "Strip colour...");
+  if (!isMonitorIn)
+    menu.addItem(12, "CoplanDX synth...");
 
   juce::Component::SafePointer<RackSlotComponent> safe(this);
   menu.showMenuAsync(
@@ -1589,6 +1607,7 @@ void RackSlotComponent::showStripActionsMenu() {
           case 9: safe->showLoadStripMenu(); break;
           case 10: safe->showRenameDialog(); break;
           case 11: safe->showColorPalette(); break;
+          case 12: if (safe->onShowFm) safe->onShowFm(); break;
           default: break;
         }
       });
@@ -1651,7 +1670,10 @@ void RackSlotComponent::itemDropped(
 void RackSlotComponent::showPluginConfigMenu(int chainIndex) {
   if (chainIndex < 0 || chainIndex >= slot.getChainSize())
     return;
-  if (!slot.getPluginInstance(chainIndex) && !slot.isChainSlotMidiOut(chainIndex))
+  if (!slot.getPluginInstance(chainIndex) &&
+      !slot.isChainSlotMidiOut(chainIndex) &&
+      !slot.isChainSlotSynth(chainIndex) &&
+      !slot.isChainSlotFm(chainIndex))
     return;
 
   auto *comp = new PluginStackConfigComp(slot, chainIndex);
@@ -1764,7 +1786,8 @@ juce::String RackSlotComponent::getActiveNoteRangeString() const {
   bool hasInstruments = false;
 
   for (int i = 0; i < 3; ++i) {
-    bool isInst = slot.isChainSlotMidiOut(i);
+    bool isInst = slot.isChainSlotMidiOut(i) || slot.isChainSlotSynth(i) ||
+                  slot.isChainSlotFm(i);
     if (auto *p = slot.getPluginInstance(i))
       isInst = isInst || p->getPluginDescription().isInstrument;
     if (isInst && slot.getChainSlotSettings(i).enabled.load()) {

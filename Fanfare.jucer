@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <JUCERPROJECT id="y15uHa" name="Fanfare" projectType="guiapp" useAppConfig="1"
-              version="1.55"
+              version="1.60"
               addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" bundleIdentifier="com.fanfare.app"
               iconBig="Source/Resources/Fanfare_Icon.png" iconSmall="Source/Resources/Fanfare_Icon.png">
   <MAINGROUP id="kDqy99" name="Fanfare">
@@ -15,6 +15,24 @@
       <FILE id="rackSlotCompH" name="RackSlotComponent.h" compile="0" resource="0"
             file="Source/RackSlotComponent.h"/>
       <FILE id="uhRr7a" name="Main.cpp" compile="1" resource="0" file="Source/Main.cpp"/>
+      <FILE id="fmSup1" name="FmSupport.cpp" compile="1" resource="0"
+            file="Source/Synth/Fm/FmSupport.cpp"/>
+      <FILE id="fmSin1" name="sin.cc" compile="1" resource="0"
+            file="Source/Synth/Fm/msfa/sin.cc"/>
+      <FILE id="fmExp1" name="exp2.cc" compile="1" resource="0"
+            file="Source/Synth/Fm/msfa/exp2.cc"/>
+      <FILE id="fmFrq1" name="freqlut.cc" compile="1" resource="0"
+            file="Source/Synth/Fm/msfa/freqlut.cc"/>
+      <FILE id="fmEnv1" name="env.cc" compile="1" resource="0"
+            file="Source/Synth/Fm/msfa/env.cc"/>
+      <FILE id="fmPit1" name="pitchenv.cc" compile="1" resource="0"
+            file="Source/Synth/Fm/msfa/pitchenv.cc"/>
+      <FILE id="fmLfo1" name="lfo.cc" compile="1" resource="0"
+            file="Source/Synth/Fm/msfa/lfo.cc"/>
+      <FILE id="fmOpk1" name="fm_op_kernel.cc" compile="1" resource="0"
+            file="Source/Synth/Fm/msfa/fm_op_kernel.cc"/>
+      <FILE id="fmCor1" name="fm_core.cc" compile="1" resource="0"
+            file="Source/Synth/Fm/msfa/fm_core.cc"/>
       <FILE id="y5Bcq1" name="MainComponent.h" compile="0" resource="0" file="Source/MainComponent.h"/>
       <FILE id="Rl5RHc" name="MainComponent.cpp" compile="1" resource="0"
             file="Source/MainComponent.cpp"/>

@@ -22,18 +22,29 @@ struct OtaLadderFilter {
     s4 = 0.0;
   }
 
-  inline void setCoefficients(double cutoffHz, double sampleRate,
-                              double resonanceNorm) noexcept {
+  static inline double computeG(double cutoffHz, double sampleRate) noexcept {
     const double maxHz =
         juce::jmin(DspConfig::kMaxCutoffHz, sampleRate * DspConfig::kMaxNyquistRatio);
     const double fc = juce::jlimit(DspConfig::kMinCutoffHz, maxHz, cutoffHz);
     const double g = fastTanNormalized(fc / sampleRate);
-    alpha = 1.0 / (1.0 + g);
-    G = g * alpha;
+    return g / (1.0 + g);
+  }
 
+  inline void setResonance(double resonanceNorm) noexcept {
     const double r = juce::jlimit(0.0, 1.0, resonanceNorm);
     const double shaped = r * (0.65 + 0.35 * r);
     resK = shaped * DspConfig::kLadderMaxResonanceK;
+  }
+
+  inline void setG(double newG) noexcept {
+    G = newG;
+    alpha = 1.0 - newG;
+  }
+
+  inline void setCoefficients(double cutoffHz, double sampleRate,
+                              double resonanceNorm) noexcept {
+    setG(computeG(cutoffHz, sampleRate));
+    setResonance(resonanceNorm);
   }
 
   inline double process(double x, bool slope24dB) noexcept {

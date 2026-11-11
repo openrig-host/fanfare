@@ -51,6 +51,10 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
             ps.isMidiOut = v.getProperty("isMidiOut", false);
             ps.midiOutDevice = v.getProperty("midiOutDevice", "").toString();
             ps.midiOutChannel = (int)v.getProperty("midiOutChannel", 1);
+            ps.isSynth = (bool)v.getProperty("isSynth", false);
+            ps.synthState = v.getProperty("synthState", juce::var());
+            ps.isFm = (bool)v.getProperty("isFm", false);
+            ps.fmState = v.getProperty("fmState", juce::var());
         }
         return ps;
     };
@@ -145,6 +149,10 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
             if (auto* syv = cv.getProperty("synth", juce::var()).getDynamicObject()) {
                 slot.synth.enabled = syv->getProperty("enabled");
                 slot.synth.state = juce::var(syv);
+            }
+            if (auto* fmv = cv.getProperty("fm", juce::var()).getDynamicObject()) {
+                slot.fm.enabled = fmv->getProperty("enabled");
+                slot.fm.state = juce::var(fmv);
             }
             if (auto* mp3Obj = cv.getProperty("mp3Player", juce::var()).getDynamicObject()) {
                 slot.mp3Player.loopMode = mp3Obj->hasProperty("loopMode") ? (int)mp3Obj->getProperty("loopMode") : 0;
@@ -370,6 +378,12 @@ juce::var RigSerializer::songToVar(const Song& song) {
         o->setProperty("isMidiOut", ps.isMidiOut);
         o->setProperty("midiOutDevice", ps.midiOutDevice);
         o->setProperty("midiOutChannel", ps.midiOutChannel);
+        o->setProperty("isSynth", ps.isSynth);
+        if (ps.synthState.isObject())
+            o->setProperty("synthState", ps.synthState);
+        o->setProperty("isFm", ps.isFm);
+        if (ps.fmState.isObject())
+            o->setProperty("fmState", ps.fmState);
         return juce::var(o);
     };
 
@@ -504,6 +518,8 @@ juce::var RigSerializer::songToVar(const Song& song) {
         // Fanfare Synth (native) — state var already includes "enabled"
         if (s.synth.state.isObject())
             st->setProperty("synth", s.synth.state);
+        if (s.fm.state.isObject())
+            st->setProperty("fm", s.fm.state);
 
         auto* mp3Obj = new juce::DynamicObject();
         mp3Obj->setProperty("loopMode", s.mp3Player.loopMode);
@@ -546,7 +562,7 @@ juce::var RigSerializer::songToVar(const Song& song) {
 
         juce::Array<juce::var> chainNodes;
         for (const auto& ps : s.chain) {
-            if (ps.path.isNotEmpty() || ps.isMidiOut)
+            if (ps.path.isNotEmpty() || ps.isMidiOut || ps.isSynth || ps.isFm)
                 chainNodes.add(writePluginState(ps));
             else
                 chainNodes.add(juce::var());
@@ -666,6 +682,12 @@ juce::String RigSerializer::serializeStrip(const SongSlot& slot) {
         o->setProperty("isMidiOut", ps.isMidiOut);
         o->setProperty("midiOutDevice", ps.midiOutDevice);
         o->setProperty("midiOutChannel", ps.midiOutChannel);
+        o->setProperty("isSynth", ps.isSynth);
+        if (ps.synthState.isObject())
+            o->setProperty("synthState", ps.synthState);
+        o->setProperty("isFm", ps.isFm);
+        if (ps.fmState.isObject())
+            o->setProperty("fmState", ps.fmState);
         return juce::var(o);
     };
 
@@ -781,6 +803,8 @@ juce::String RigSerializer::serializeStrip(const SongSlot& slot) {
         // Fanfare Synth (native) — state var already includes "enabled"
         if (slot.synth.state.isObject())
             st->setProperty("synth", slot.synth.state);
+        if (slot.fm.state.isObject())
+            st->setProperty("fm", slot.fm.state);
 
         auto* mp3Obj = new juce::DynamicObject();
         mp3Obj->setProperty("loopMode", slot.mp3Player.loopMode);
@@ -823,7 +847,7 @@ juce::String RigSerializer::serializeStrip(const SongSlot& slot) {
 
     juce::Array<juce::var> chainNodes;
     for (const auto& ps : slot.chain) {
-        if (ps.path.isNotEmpty() || ps.isMidiOut)
+        if (ps.path.isNotEmpty() || ps.isMidiOut || ps.isSynth || ps.isFm)
             chainNodes.add(writePluginState(ps));
         else
             chainNodes.add(juce::var());
@@ -959,6 +983,11 @@ bool RigSerializer::readStripFromFile(const juce::File& file, SongSlot& outSlot)
         outSlot.synth.state = juce::var(syv);
     }
 
+    if (auto* fmv = cv.getProperty("fm", juce::var()).getDynamicObject()) {
+        outSlot.fm.enabled = fmv->getProperty("enabled");
+        outSlot.fm.state = juce::var(fmv);
+    }
+
     if (auto* mp3Obj = cv.getProperty("mp3Player", juce::var()).getDynamicObject()) {
         outSlot.mp3Player.loopMode = mp3Obj->hasProperty("loopMode") ? (int)mp3Obj->getProperty("loopMode") : 0;
         outSlot.mp3Player.shuffle = mp3Obj->hasProperty("shuffle") ? (bool)mp3Obj->getProperty("shuffle") : false;
@@ -1022,6 +1051,10 @@ bool RigSerializer::readStripFromFile(const juce::File& file, SongSlot& outSlot)
                 ps.isMidiOut = pv.getProperty("isMidiOut", false);
                 ps.midiOutDevice = pv.getProperty("midiOutDevice", "").toString();
                 ps.midiOutChannel = (int)pv.getProperty("midiOutChannel", 1);
+                ps.isSynth = (bool)pv.getProperty("isSynth", false);
+                ps.synthState = pv.getProperty("synthState", juce::var());
+                ps.isFm = (bool)pv.getProperty("isFm", false);
+                ps.fmState = pv.getProperty("fmState", juce::var());
             }
             outSlot.chain.push_back(ps);
         }

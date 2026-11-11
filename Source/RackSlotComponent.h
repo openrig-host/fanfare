@@ -40,6 +40,7 @@ public:
   std::function<void()> onShowSampler;
   std::function<void()> onShowMp3Player;
   std::function<void()> onShowSynth;
+  std::function<void()> onShowFm;
   std::function<void()> onSaveStrip;
   std::function<void()> onLoadStrip;
   std::function<void(const juce::File&)> onLoadStripFile;
@@ -199,6 +200,7 @@ private:
   int prevHighNote = -1;
   bool cachedHasAnyPlugin = false;
   bool prevUnusedEmpty = false;
+  bool prevSynthActive = false;
   bool prevMp3Loaded = false;
   bool prevMp3Playing = false;
   int prevMp3Count = -1;

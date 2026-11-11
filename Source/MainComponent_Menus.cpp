@@ -80,13 +80,15 @@ void MainComponent::showAboutDialog() {
       linkButton.setFont(juce::FontOptions(13.5f, juce::Font::underlined), false, juce::Justification::topLeft);
       addAndMakeVisible(linkButton);
 
-      footerLabel.setText("No virtual patch cords. No node graphs. Just pure stage-tested horsepower.", juce::dontSendNotification);
+      footerLabel.setText("No virtual patch cords. No node graphs. Just pure stage-tested horsepower.\n"
+                          "CoplanDX engine: msfa (Apache 2.0, (c) 2012 Google Inc.) as used in Dexed (GPL v3). See NOTICE.md.",
+                          juce::dontSendNotification);
       footerLabel.setFont(juce::FontOptions(12.0f, juce::Font::italic));
       footerLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
       footerLabel.setJustificationType(juce::Justification::topLeft);
       addAndMakeVisible(footerLabel);
 
-      setSize(470, 150);
+      setSize(470, 166);
     }
 
     void resized() override {
@@ -108,7 +110,7 @@ void MainComponent::showAboutDialog() {
       linkButton.setBounds(lineBounds.getX() + prefixW, lineBounds.getY() - 1, linkW, lineBounds.getHeight());
 
       bounds.removeFromTop(10);
-      footerLabel.setBounds(bounds.removeFromTop(20));
+      footerLabel.setBounds(bounds.removeFromTop(34));
     }
 
   private:

@@ -9,6 +9,7 @@
 #include "SamplerComponent.h"
 #include "Mp3PlayerComponent.h"
 #include "FanfareSynthComponent.h"
+#include "Synth/Fm/ui/FmSynthComponent.h"
 #include "ResourceInspectorModal.h"
 #include "RigDoctorModal.h"
 #include "GigNotepadWindow.h"
@@ -166,6 +167,7 @@ private:
   std::unique_ptr<SamplerComponent> samplerOverlay;
   std::unique_ptr<Mp3PlayerComponent> mp3Overlay;
   std::unique_ptr<FanfareSynthComponent> synthOverlay;
+  std::unique_ptr<FmSynthComponent> fmOverlay;
   std::unique_ptr<LoadingOverlay> loadingOverlay;
   std::unique_ptr<MissingPluginsToast> missingPluginsToast;
   std::unique_ptr<ConfigModalOverlay> configOverlay;

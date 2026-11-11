@@ -16,6 +16,7 @@
 #include "SamplerProcessor.h"
 #include "Mp3PlayerProcessor.h"
 #include "FanfareSynthProcessor.h"
+#include "Synth/Fm/FmSynthProcessor.h"
 #include <atomic>
 #include <map>
 #include <memory>
@@ -40,7 +41,10 @@ public:
     arpeggiator.prepare(sampleRate);
     harmonizer.prepare(sampleRate);
     sampler.prepare(sampleRate);
-    synth.prepare(sampleRate, maxBlockSize);
+    for (int i = 0; i < 3; ++i) {
+      chainSynths[i].prepare(sampleRate, maxBlockSize);
+      chainFms[i].prepare(sampleRate, maxBlockSize);
+    }
     mp3Player.prepare(sampleRate, maxBlockSize);
 
     // Pre-allocate scratch buffer for summed instrument rendering (audio-thread safe)
@@ -61,7 +65,18 @@ public:
   OctaveHarmonizer& getHarmonizer() { return harmonizer; }
   SamplerProcessor& getSampler() { return sampler; }
   Mp3PlayerProcessor& getMp3Player() { return mp3Player; }
-  FanfareSynthProcessor& getSynth() { return synth; }
+  FanfareSynthProcessor& getSynth(int chainIdx = 0) {
+    return chainSynths[juce::jlimit(0, 2, chainIdx)];
+  }
+  const FanfareSynthProcessor& getSynth(int chainIdx = 0) const {
+    return chainSynths[juce::jlimit(0, 2, chainIdx)];
+  }
+  FmSynthProcessor& getFmSynth(int chainIdx = 0) {
+    return chainFms[juce::jlimit(0, 2, chainIdx)];
+  }
+  const FmSynthProcessor& getFmSynth(int chainIdx = 0) const {
+    return chainFms[juce::jlimit(0, 2, chainIdx)];
+  }
 
   // Per-plugin-chain-slot settings for instrument stacking (note range, level, enable)
   struct ChainSlotSettings {
@@ -113,6 +128,8 @@ public:
                            const juce::String &deviceName) {
     if (i < 0 || i >= 3)
       return;
+    clearChainSlotSynth(i);
+    clearChainSlotFm(i);
     invalidateCachedCCParams(i);
     chainIsInstrument[i].store(false);
     // Ensure no plugin occupies this slot (mutually exclusive), swapping out under pluginLock.
@@ -144,6 +161,105 @@ public:
     chainMidiOutIdentifier[i].clear();
     chainMidiOutName[i].clear();
   }
+
+  // --- Chain-slot Built-in Synth (SYN-106) configuration ---
+  bool isChainSlotSynth(int i) const {
+    return (i >= 0 && i < 3) ? chainIsSynth[i].load() : false;
+  }
+
+  bool hasAnySynthSlot() const {
+    for (int i = 0; i < 3; ++i)
+      if (chainIsSynth[i].load() || chainSynths[i].enabled.load() ||
+          chainIsFm[i].load() || chainFms[i].enabled.load())
+        return true;
+    return false;
+  }
+
+  // --- Chain-slot Built-in FM synth (CoplanDX) configuration ---
+  bool isChainSlotFm(int i) const {
+    return (i >= 0 && i < 3) ? chainIsFm[i].load() : false;
+  }
+
+  void setChainSlotFm(int i, bool active, const juce::var &state = juce::var()) {
+    if (i < 0 || i >= 3)
+      return;
+    invalidateCachedCCParams(i);
+    if (active) {
+      clearChainSlotMidiOut(i);
+      clearChainSlotSynth(i);
+      std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
+      {
+        juce::SpinLock::ScopedLockType sl(pluginLock);
+        if (i < (int)pluginChain.size())
+          oldPlugin = std::move(pluginChain[i]);
+      }
+      if (oldPlugin) {
+        FanfareLog::safeExecutePluginCall([&]() {
+          oldPlugin->releaseResources();
+          oldPlugin.reset();
+        }, "setChainSlotFm releaseResources/reset");
+      }
+      if (state.isObject())
+        chainFms[i].applyState(state);
+      chainFms[i].enabled.store(true);
+      chainIsFm[i].store(true);
+      chainIsInstrument[i].store(true);
+    } else {
+      chainIsFm[i].store(false);
+      chainFms[i].enabled.store(false);
+      chainFms[i].reset();
+      if (getPluginInstance(i) == nullptr && !chainIsSynth[i].load())
+        chainIsInstrument[i].store(false);
+    }
+  }
+
+  void clearChainSlotFm(int i) { setChainSlotFm(i, false); }
+
+  int getFirstSynthChainSlot() const {
+    for (int i = 0; i < 3; ++i)
+      if (chainIsSynth[i].load())
+        return i;
+    for (int i = 0; i < 3; ++i)
+      if (chainSynths[i].enabled.load())
+        return i;
+    return -1;
+  }
+
+  void setChainSlotSynth(int i, bool active,
+                         const juce::var &state = juce::var()) {
+    if (i < 0 || i >= 3)
+      return;
+    invalidateCachedCCParams(i);
+    if (active) {
+      clearChainSlotMidiOut(i);
+      clearChainSlotFm(i);
+      std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
+      {
+        juce::SpinLock::ScopedLockType sl(pluginLock);
+        if (i < (int)pluginChain.size())
+          oldPlugin = std::move(pluginChain[i]);
+      }
+      if (oldPlugin) {
+        FanfareLog::safeExecutePluginCall([&]() {
+          oldPlugin->releaseResources();
+          oldPlugin.reset();
+        }, "setChainSlotSynth releaseResources/reset");
+      }
+      if (state.isObject())
+        chainSynths[i].applyState(state);
+      chainSynths[i].enabled.store(true);
+      chainIsSynth[i].store(true);
+      chainIsInstrument[i].store(true);
+    } else {
+      chainIsSynth[i].store(false);
+      chainSynths[i].enabled.store(false);
+      chainSynths[i].reset();
+      if (getPluginInstance(i) == nullptr && !chainIsFm[i].load())
+        chainIsInstrument[i].store(false);
+    }
+  }
+
+  void clearChainSlotSynth(int i) { setChainSlotSynth(i, false); }
 
   // Per-chain-slot outgoing MIDI buffers (filled in processBlock, drained by engine).
   const juce::MidiBuffer& getMidiOutChainBuffer(int i) const { return midiOutChain[i]; }
@@ -222,11 +338,10 @@ public:
     // MP3 Player audio streaming
     mp3Player.processBlock(slotBuffer);
 
-    // Fanfare Synth (native instrument, alongside the sampler — before the
-    // plugin chain). Notes are filtered by the slot's note range like the
-    // chain instruments; CCs reach it unfiltered so its built-in mappings
-    // (cutoff/reso/atk/rel/volume) work without touching the CC allow list.
-    if (synth.enabled.load()) {
+    // Legacy standalone synth fallback (when enabled directly on slot 0 without
+    // being bound as a chain-slot instrument). Chain-slot synths (0..2) are
+    // processed inside the chain loop below with per-slot note range & level.
+    if (!chainIsSynth[0].load() && chainSynths[0].enabled.load()) {
       synthMidiScratch.clear();
       int lo = lowNote.load();
       int hi = highNote.load();
@@ -240,7 +355,23 @@ public:
           synthMidiScratch.addEvent(msg, meta.samplePosition);
         }
       }
-      synth.processBlock(slotBuffer, synthMidiScratch);
+      chainSynths[0].processBlock(slotBuffer, synthMidiScratch);
+    }
+    if (!chainIsFm[0].load() && chainFms[0].enabled.load()) {
+      synthMidiScratch.clear();
+      int lo = lowNote.load();
+      int hi = highNote.load();
+      for (const auto meta : midiMessages) {
+        auto msg = meta.getMessage();
+        if (msg.isNoteOnOrOff()) {
+          int n = msg.getNoteNumber();
+          if (n >= lo && n <= hi)
+            synthMidiScratch.addEvent(msg, meta.samplePosition);
+        } else {
+          synthMidiScratch.addEvent(msg, meta.samplePosition);
+        }
+      }
+      chainFms[0].processBlock(slotBuffer, synthMidiScratch);
     }
 
     // Harmonizer with redirection support: generated harmony notes go to harmonyScratch
@@ -309,6 +440,152 @@ public:
             }
           }
           continue; // not a plugin slot
+        }
+
+        if (i < 3 && chainIsSynth[i].load()) {
+          if (i == drainSlot.load() && !chainSynths[i].enabled.load())
+            drainSlot.store(-1);
+          if (chainSynths[i].enabled.load() &&
+              (chainSettings[i].enabled.load() || i == drainSlot.load())) {
+            auto plugStartTime = juce::Time::getHighResolutionTicks();
+            int numCh = juce::jmax(2, slotBuffer.getNumChannels());
+            int numSamp = slotBuffer.getNumSamples();
+            if (scratchBuffer.getNumChannels() != numCh ||
+                scratchBuffer.getNumSamples() != numSamp)
+              scratchBuffer.setSize(numCh, numSamp, false, false, true);
+            scratchBuffer.clear(0, numSamp);
+
+            filteredMidiScratch.clear();
+            int low = chainSettings[i].lowNote.load();
+            int high = chainSettings[i].highNote.load();
+            float instGain = chainSettings[i].level.load();
+
+            for (const auto metadata : midiMessages) {
+              auto msg = metadata.getMessage();
+              if (msg.isNoteOnOrOff()) {
+                int note = msg.getNoteNumber();
+                if (note >= low && note <= high)
+                  filteredMidiScratch.addEvent(msg, metadata.samplePosition);
+              } else {
+                filteredMidiScratch.addEvent(msg, metadata.samplePosition);
+              }
+            }
+
+            if (i == enablePanicSlot.load()) {
+              enablePanicSlot.store(-1);
+              appendPanic(filteredMidiScratch, 0);
+            }
+            if (i == drainSlot.load() && !drainPanicSent.exchange(true))
+              appendPanic(filteredMidiScratch, 0);
+
+            chainSynths[i].processBlock(scratchBuffer, filteredMidiScratch);
+            scratchBuffer.applyGain(instGain);
+
+            if (i == drainSlot.load()) {
+              scratchBuffer.applyGain(drainGain.load());
+              float step = (float)numSamp /
+                           (float)(0.08 * juce::jmax(8000.0, lastSampleRate));
+              float g = drainGain.load() - step;
+              if (g <= 0.0f) {
+                drainGain.store(0.0f);
+                drainSlot.store(-1);
+              } else {
+                drainGain.store(g);
+              }
+            }
+
+            for (int ch = 0; ch < slotBuffer.getNumChannels(); ++ch) {
+              if (ch < scratchBuffer.getNumChannels())
+                slotBuffer.addFrom(ch, 0, scratchBuffer, ch, 0, numSamp);
+            }
+
+            auto plugElapsed =
+                juce::Time::getHighResolutionTicks() - plugStartTime;
+            double plugElapsedSecs =
+                (double)plugElapsed /
+                juce::Time::getHighResolutionTicksPerSecond();
+            float plugLoad = (totalBlockSecs > 0.0)
+                                 ? (float)(plugElapsedSecs / totalBlockSecs)
+                                 : 0.0f;
+            chainCpuUsage[i].store(0.92f * chainCpuUsage[i].load() +
+                                   0.08f * plugLoad);
+          } else {
+            chainCpuUsage[i].store(0.92f * chainCpuUsage[i].load());
+          }
+          continue;
+        }
+
+        if (i < 3 && chainIsFm[i].load()) {
+          if (i == drainSlot.load() && !chainFms[i].enabled.load())
+            drainSlot.store(-1);
+          if (chainFms[i].enabled.load() &&
+              (chainSettings[i].enabled.load() || i == drainSlot.load())) {
+            auto plugStartTime = juce::Time::getHighResolutionTicks();
+            int numCh = juce::jmax(2, slotBuffer.getNumChannels());
+            int numSamp = slotBuffer.getNumSamples();
+            if (scratchBuffer.getNumChannels() != numCh ||
+                scratchBuffer.getNumSamples() != numSamp)
+              scratchBuffer.setSize(numCh, numSamp, false, false, true);
+            scratchBuffer.clear(0, numSamp);
+
+            filteredMidiScratch.clear();
+            int low = chainSettings[i].lowNote.load();
+            int high = chainSettings[i].highNote.load();
+            float instGain = chainSettings[i].level.load();
+
+            for (const auto metadata : midiMessages) {
+              auto msg = metadata.getMessage();
+              if (msg.isNoteOnOrOff()) {
+                int note = msg.getNoteNumber();
+                if (note >= low && note <= high)
+                  filteredMidiScratch.addEvent(msg, metadata.samplePosition);
+              } else {
+                filteredMidiScratch.addEvent(msg, metadata.samplePosition);
+              }
+            }
+
+            if (i == enablePanicSlot.load()) {
+              enablePanicSlot.store(-1);
+              appendPanic(filteredMidiScratch, 0);
+            }
+            if (i == drainSlot.load() && !drainPanicSent.exchange(true))
+              appendPanic(filteredMidiScratch, 0);
+
+            chainFms[i].processBlock(scratchBuffer, filteredMidiScratch);
+            scratchBuffer.applyGain(instGain);
+
+            if (i == drainSlot.load()) {
+              scratchBuffer.applyGain(drainGain.load());
+              float step = (float)numSamp /
+                           (float)(0.08 * juce::jmax(8000.0, lastSampleRate));
+              float g = drainGain.load() - step;
+              if (g <= 0.0f) {
+                drainGain.store(0.0f);
+                drainSlot.store(-1);
+              } else {
+                drainGain.store(g);
+              }
+            }
+
+            for (int ch = 0; ch < slotBuffer.getNumChannels(); ++ch) {
+              if (ch < scratchBuffer.getNumChannels())
+                slotBuffer.addFrom(ch, 0, scratchBuffer, ch, 0, numSamp);
+            }
+
+            auto plugElapsed =
+                juce::Time::getHighResolutionTicks() - plugStartTime;
+            double plugElapsedSecs =
+                (double)plugElapsed /
+                juce::Time::getHighResolutionTicksPerSecond();
+            float plugLoad = (totalBlockSecs > 0.0)
+                                 ? (float)(plugElapsedSecs / totalBlockSecs)
+                                 : 0.0f;
+            chainCpuUsage[i].store(0.92f * chainCpuUsage[i].load() +
+                                   0.08f * plugLoad);
+          } else {
+            chainCpuUsage[i].store(0.92f * chainCpuUsage[i].load());
+          }
+          continue;
         }
 
         if (i >= (int)pluginChain.size())
@@ -669,6 +946,10 @@ public:
       arpeggiator.reset();
       harmonizer.reset();
       sampler.reset();
+      for (int i = 0; i < 3; ++i) {
+        chainSynths[i].reset();
+        chainFms[i].reset();
+      }
       unbypassPanicPending.store(true);
     }
   }
@@ -763,6 +1044,8 @@ public:
     if (chainIndex < 0 || chainIndex >= 3)
       return;
 
+    clearChainSlotSynth(chainIndex);
+    clearChainSlotFm(chainIndex);
     midiTraceLogged.store(false); // re-arm the one-shot MIDI trace
     invalidateCachedCCParams(chainIndex);
 
@@ -805,8 +1088,11 @@ public:
         }, "pluginChain releaseResources/reset");
       }
     }
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 3; ++i) {
       clearChainSlotMidiOut(i);
+      clearChainSlotSynth(i);
+      clearChainSlotFm(i);
+    }
   }
 
   void clearChainPreserve(const std::set<int> &chainIndicesToPreserve) {
@@ -849,6 +1135,18 @@ public:
   }
 
   juce::String getPluginName(int chainIndex) const {
+    if (chainIndex >= 0 && chainIndex < 3 && chainIsSynth[chainIndex].load()) {
+      const auto &sy = chainSynths[chainIndex];
+      const juce::String pName = sy.getCurrentPresetName();
+      return (sy.enabled.load() ? "SYN: " : "SYN (OFF): ") +
+             (pName.isNotEmpty() ? pName : "Init Patch");
+    }
+    if (chainIndex >= 0 && chainIndex < 3 && chainIsFm[chainIndex].load()) {
+      const auto &fm = chainFms[chainIndex];
+      const juce::String pName = fm.getCurrentPresetName();
+      return (fm.enabled.load() ? "DX: " : "DX (OFF): ") +
+             (pName.isNotEmpty() ? pName : "INIT VOICE");
+    }
     juce::SpinLock::ScopedLockType pcl(pluginLock);
     if (chainIndex >= 0 && chainIndex < (int)pluginChain.size()) {
       if (const auto *p = pluginChain[chainIndex].get())
@@ -884,7 +1182,8 @@ public:
       sz = (int)pluginChain.size();
     }
     for (int i = 0; i < 3; ++i) {
-      if (chainMidiOut[i].isMidiOut.load() && i >= sz)
+      if ((chainMidiOut[i].isMidiOut.load() || chainIsSynth[i].load() ||
+           chainIsFm[i].load()) && i >= sz)
         sz = i + 1;
     }
     return sz;
@@ -1384,7 +1683,10 @@ private:
   OctaveHarmonizer harmonizer;
   SamplerProcessor sampler;
   Mp3PlayerProcessor mp3Player;
-  FanfareSynthProcessor synth;
+  FanfareSynthProcessor chainSynths[3];
+  std::atomic<bool> chainIsSynth[3]{false, false, false};
+  FmSynthProcessor chainFms[3];
+  std::atomic<bool> chainIsFm[3]{false, false, false};
   juce::MidiBuffer synthMidiScratch; // note-range-filtered MIDI for the synth
 
   FanfareDSP::ChannelStripProcessor strip;

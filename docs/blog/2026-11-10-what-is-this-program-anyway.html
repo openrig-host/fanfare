@@ -1,0 +1,269 @@
+<!DOCTYPE HTML>
+<html lang="en">
+	<head>
+		<title>What is this program, anyway? - Fanfare Dev Blog</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="description" content="The story behind Fanfare, gigging since the 80s with multi-keyboard hardware rigs, Sunday dev sprints after weekend gigs, and building the native BLEEP-216 synth." />
+		<link rel="canonical" href="https://openrig-host.github.io/fanfare/blog/2026-11-10-what-is-this-program-anyway.html" />
+		<link rel="icon" type="image/png" href="../Fanfare_Icon.png" />
+		<meta property="og:site_name" content="Fanfare Dev Blog" />
+		<meta property="og:type" content="article" />
+		<meta property="og:title" content="What is this program, anyway?" />
+		<meta property="og:description" content="The story behind Fanfare: 4-board rigs in the 80s, Sunday bug fixes after Friday and Saturday gigs, and building the native BLEEP-216 synth in under 15MB." />
+		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<style>
+			:root {
+				--bg: #1e1e1e;
+				--panel: #252525;
+				--border: #3a3a3a;
+				--border-strong: #4b4b4b;
+				--text: #f2f2f2;
+				--body: #dedede;
+				--dim: #bfbfbf;
+				--faint: #8f8f8f;
+				--accent: #ffa02f;
+				--accent-hover: #ffb964;
+			}
+			* { box-sizing: border-box; margin: 0; padding: 0; }
+			html { scroll-behavior: smooth; }
+			body {
+				background-color: var(--bg) !important;
+				color: var(--body);
+				font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+				font-size: 16px;
+				line-height: 1.75;
+			}
+			.topbar {
+				display: flex; align-items: center; gap: 18px;
+				padding: 14px 22px;
+				background: var(--panel);
+				border-bottom: 1px solid var(--border);
+			}
+			.topbar .brand {
+				color: var(--text); font-weight: 700; font-size: 17px;
+				text-decoration: none;
+			}
+			.topbar .brand span { color: var(--accent); }
+			.topbar a.nav { color: var(--dim); text-decoration: none; font-size: 14px; }
+			.topbar a.nav:hover { color: var(--accent); }
+
+			article {
+				max-width: 760px;
+				margin: 0 auto;
+				padding: 48px 24px 72px;
+			}
+			.breadcrumb {
+				font-size: 13px;
+				color: var(--faint);
+				margin-bottom: 16px;
+			}
+			.breadcrumb a {
+				color: var(--faint);
+				text-decoration: none;
+			}
+			.breadcrumb a:hover {
+				color: var(--accent);
+			}
+			h1 {
+				color: var(--text);
+				font-size: 32px;
+				line-height: 1.25;
+				margin-bottom: 8px;
+			}
+			.post-meta {
+				color: var(--faint);
+				font-size: 14px;
+				margin-bottom: 36px;
+				border-bottom: 1px solid var(--border);
+				padding-bottom: 18px;
+			}
+			.post-meta .author {
+				color: var(--dim);
+			}
+			h2 {
+				color: var(--text);
+				font-size: 21px;
+				margin: 38px 0 14px;
+				padding-bottom: 6px;
+				border-bottom: 2px solid var(--accent);
+				display: inline-block;
+			}
+			p {
+				margin: 0 0 18px;
+				color: var(--body);
+			}
+			a {
+				color: var(--accent);
+				text-decoration: underline;
+				text-underline-offset: 3px;
+			}
+			a:hover {
+				color: var(--accent-hover);
+			}
+			blockquote {
+				border-left: 3px solid var(--accent);
+				padding: 8px 18px;
+				margin: 22px 0;
+				background: var(--panel);
+				color: var(--dim);
+				font-style: italic;
+			}
+			.callout-box {
+				background: var(--panel);
+				border: 1px solid var(--border);
+				border-radius: 4px;
+				padding: 16px 20px;
+				margin: 28px 0;
+			}
+			.callout-box p:last-child {
+				margin-bottom: 0;
+			}
+
+			figure {
+				margin: 32px 0;
+				text-align: center;
+			}
+			figure img {
+				max-width: 100%;
+				height: auto;
+				border-radius: 6px;
+				border: 1px solid var(--border);
+				display: block;
+				margin: 0 auto;
+			}
+			figcaption {
+				color: var(--faint);
+				font-size: 13.5px;
+				margin-top: 10px;
+				font-style: italic;
+				line-height: 1.5;
+			}
+
+			/* Comments styling */
+			.comments-section {
+				margin-top: 56px;
+				padding-top: 36px;
+				border-top: 1px solid var(--border);
+			}
+			.comments-title {
+				font-size: 20px;
+				color: var(--text);
+				margin-bottom: 18px;
+			}
+
+			footer {
+				text-align: center;
+				color: var(--faint);
+				font-size: 13px;
+				padding: 28px 0 36px;
+				border-top: 1px solid var(--border);
+			}
+			footer a {
+				color: var(--faint);
+				text-decoration: none;
+			}
+			footer a:hover {
+				color: var(--accent);
+			}
+		</style>
+	</head>
+	<body>
+		<div class="topbar">
+			<a class="brand" href="../index.html">f&amp; <span>Fanfare</span></a>
+			<a class="nav" href="index.html">Blog</a>
+			<a class="nav" href="../manual.html">Manual</a>
+			<a class="nav" href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a>
+		</div>
+
+		<article>
+			<div class="breadcrumb">
+				<a href="index.html">&larr; Back to Dev Blog</a>
+			</div>
+
+			<h1>What is this program, anyway?</h1>
+			<div class="post-meta">
+				<span>November 10, 2026</span> &middot; <span class="author">Dave</span>
+			</div>
+
+			<p>I've been playing keyboards in cover bands (and <a href="https://www.youtube.com/watch?v=k7n7dESM4Hg" target="_blank" rel="noopener">non-cover!</a>) since the 80s. My first rig back then was a Roland RD-200 piano, Juno 106, Yamaha DX-21, and an S-330 sampler. I could have four things running at the same time, and I'd turn things up and down instead of on-off as I played: fading in strings here, layering piano with pad there, playing to the strengths of the various boxes.</p>
+
+			<figure>
+				<img src="juno_106_in_box.png" alt="Roland Juno-106 in original box" />
+				<figcaption>I certainly wouldn't turn down a Juno 106 in a box in 2026, but not at 2026 prices.</figcaption>
+			</figure>
+
+			<h2>Gig-Tested: Sunday Sprints &amp; Live Notes</h2>
+			<p>Fanfare builds on that way of playing, but on steroids: a dedicated Windows app with 24 strips, each with 3 VST slots, all controlled via MIDI CC messages. The setups are intended to be run from a master controller, like an Arturia KeyLab or a Yamaha CK-88, but any MIDI keyboard works. It also can process audio (I use that for my accordion: compression, EQ, and a splash of reverb straight through the rack without needing outboard pedals).</p>
+
+			<figure>
+				<img src="accordion_wireless_mic.jpg" alt="Accordion with mounted mic and wireless transmitter dongle" />
+				<figcaption>The gigging accordion: dual-capsule microphone system with a wireless transmitter dongle, sending audio straight into Fanfare for live processing.</figcaption>
+			</figure>
+
+			<p>Development on the app tends to peak on Sundays, specifically because I come back from Friday and Saturday gigs with &ldquo;notes&rdquo; (underrun glitches, or user-comfort stuff I think of while playing). When a plugin misbehaves in a studio, you restart; when you're live in front of a room of people, you need absolute rock-solid reliability. I'm my own one-person test group. :)</p>
+
+			<h2>Enter BLEEP-216: A Native Polyphonic Synth</h2>
+			<p>This week's big innovation is the <strong>BLEEP-216</strong> synth, a sorta-homage to my much missed Juno 106. I have the Roland Juno 106 VST and like it, but it's pretty heavy on resources. I wanted something native in the app, with two oscillators instead of one, and 16-voice polyphony instead of 6.</p>
+
+			<figure>
+				<img src="../bleep_216_synth.jpg" alt="Fanfare BLEEP-216 polyphonic synthesizer interface" />
+				<figcaption>The built-in BLEEP-216 synthesizer: 16 voices, dual oscillators, and zero external VST CPU overhead.</figcaption>
+			</figure>
+
+			<p>I'm having a blast messing around with the presets. Tonight's work is to get the program to treat the synth like it treats VSTs, so I can get 3 synth instances playing on a strip. And if we do that, we should have independent keyranges for each, since right now there's just one keyrange for a strip. It would be super cool to have a complex setup all on one strip.</p>
+
+			<div class="callout-box">
+				<p>Maybe this is how bloat happens, but what the hell. Not many programs around with this much going on, for under 15MB!</p>
+			</div>
+
+			<h2>The &ldquo;Last Waltz&rdquo; &amp; Channeling Garth Hudson</h2>
+			<p>If you've noticed the &ldquo;Last Waltz&rdquo; references in some of the screenshots and manual examples, there's a real story behind that. Every year I play in the backing band for a full reenactment of The Band's legendary farewell concert, <em>The Last Waltz</em>. We bring in locally celebrated guest musicians to come up and play Bob Dylan, Joni Mitchell, Neil Young, Van Morrison, and Muddy Waters, complete with a roaring live horn section. It is an absolute blast.</p>
+
+			<figure>
+				<img src="halifax_jazz_fest_live.jpg" alt="Live performance on the festival mainstage with full band and horns" />
+				<figcaption>Big stages, fun gigs! Most of us in the backing band have been friends for 20-30 years.</figcaption>
+			</figure>
+
+			<p>My job on stage is the Garth Hudson impersonation, juggling Hammond B3 organ, quirky vintage 70s synths, and live accordion across dozens of songs.</p>
+
+			<p>Fanfare will be running the entire rig for me during those shows next week. It supplies Front of House (FOH) while simultaneously running a dedicated In-Ear Monitor (IEM) mix straight into my ears, with significantly more accordion dialed into my personal trim than the house gets. And when Sunday rolls around after those gigs, I'll definitely be back at the keyboard with a fresh batch of notes to make Fanfare even tighter.</p>
+
+			<figure>
+				<img src="stage_view_auditorium.jpg" alt="View from behind the keyboard looking out at empty theater seats before soundcheck" />
+				<figcaption>Soundcheck perspective: keyboard, accordion, and a hall waiting to be filled.</figcaption>
+			</figure>
+
+			<p style="margin-top: 36px; color: var(--text); font-weight: 500;">
+				What did your first gigging rig look like back in the day? Or if you're taking software on stage now, what's your biggest headache? Leave a comment below!
+			</p>
+
+			<!-- Comments Section -->
+			<section class="comments-section" id="comments">
+				<h3 class="comments-title">Discussion &amp; Comments</h3>
+				<script src="https://giscus.app/client.js"
+				        data-repo="openrig-host/fanfare"
+				        data-repo-id="R_kgDONn5e2A"
+				        data-category="Announcements"
+				        data-category-id="DIC_kwDONn5e2M4ClqW7"
+				        data-mapping="pathname"
+				        data-strict="0"
+				        data-reactions-enabled="1"
+				        data-emit-metadata="0"
+				        data-input-position="bottom"
+				        data-theme="dark_dimmed"
+				        data-lang="en"
+				        crossorigin="anonymous"
+				        async>
+				</script>
+				<noscript>Please enable JavaScript to view comments powered by Giscus / GitHub Discussions.</noscript>
+			</section>
+		</article>
+
+		<footer>
+			<p>&copy; Fanfare &middot; <a href="../index.html">Home</a> &middot; <a href="index.html">Dev Blog</a> &middot; <a href="../manual.html">Manual</a> &middot; <a href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a></p>
+		</footer>
+	</body>
+</html>
+

@@ -7,18 +7,18 @@
 namespace FanfareSynth::Dsp {
 
 inline double fastTanh(double x) noexcept {
-  if (x > 4.5)
+  if (x > 3.0)
     return 1.0;
-  if (x < -4.5)
+  if (x < -3.0)
     return -1.0;
   const double x2 = x * x;
   return x * (27.0 + x2) / (27.0 + 9.0 * x2);
 }
 
 inline float fastTanhf(float x) noexcept {
-  if (x > 4.5f)
+  if (x > 3.0f)
     return 1.0f;
-  if (x < -4.5f)
+  if (x < -3.0f)
     return -1.0f;
   const float x2 = x * x;
   return x * (27.0f + x2) / (27.0f + 9.0f * x2);

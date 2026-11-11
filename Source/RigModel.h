@@ -25,6 +25,14 @@ struct PluginState {
     bool isMidiOut = false;
     juce::String midiOutDevice;  // device identifier (MidiOutput::getAvailableDevices)
     int midiOutChannel = 1;      // 1..16
+
+    // Built-in SYN-106 Polysynth instance in this chain slot (0..2).
+    bool isSynth = false;
+    juce::var synthState;
+
+    // Built-in CoplanDX (FM) instance in this chain slot (0..2).
+    bool isFm = false;
+    juce::var fmState;
 };
 
 struct CCMapping {
@@ -117,6 +125,12 @@ struct SynthSettings {
     juce::var state;
 };
 
+// Native FM synth (FmSynthProcessor). Same pattern: one JSON var.
+struct FmSettings {
+    bool enabled = false;
+    juce::var state;
+};
+
 struct SongSlot {
     juce::String name;
     int iconIndex = 0;
@@ -170,6 +184,7 @@ struct HarmParams {
     SamplerSettings sampler;
     Mp3PlayerSettings mp3Player;
     SynthSettings synth;
+    FmSettings fm;
 
     std::vector<PluginState> chain;
 };

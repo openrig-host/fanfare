@@ -892,6 +892,7 @@ void FanfareEngine::loadPluginList()
 
       // Fanfare Synth (native) — whole patch as one JSON object
       st->setProperty("synth", s->getSynth().getState());
+      st->setProperty("fm", s->getFmSynth().getState());
 
       // Save MP3 Player / Backing Track Settings
       auto *mp3Obj = new juce::DynamicObject();
@@ -971,6 +972,37 @@ void FanfareEngine::loadPluginList()
             pObj->setProperty("enabled", cs.enabled.load());
           }
           chainNodes.add(pluginVar);
+        } else if (pIdx < 3 && s->isChainSlotSynth(pIdx)) {
+          auto* pObj = new juce::DynamicObject();
+          auto& cs = s->getChainSlotSettings(pIdx);
+          pObj->setProperty("isSynth", true);
+          pObj->setProperty("synthState", s->getSynth(pIdx).getState());
+          pObj->setProperty("lowNote", cs.lowNote.load());
+          pObj->setProperty("highNote", cs.highNote.load());
+          pObj->setProperty("level", (double)cs.level.load());
+          pObj->setProperty("enabled", cs.enabled.load());
+          chainNodes.add(juce::var(pObj));
+        } else if (pIdx < 3 && s->isChainSlotFm(pIdx)) {
+          auto* pObj = new juce::DynamicObject();
+          auto& cs = s->getChainSlotSettings(pIdx);
+          pObj->setProperty("isFm", true);
+          pObj->setProperty("fmState", s->getFmSynth(pIdx).getState());
+          pObj->setProperty("lowNote", cs.lowNote.load());
+          pObj->setProperty("highNote", cs.highNote.load());
+          pObj->setProperty("level", (double)cs.level.load());
+          pObj->setProperty("enabled", cs.enabled.load());
+          chainNodes.add(juce::var(pObj));
+        } else if (pIdx < 3 && s->isChainSlotMidiOut(pIdx)) {
+          auto* pObj = new juce::DynamicObject();
+          auto& cs = s->getChainSlotSettings(pIdx);
+          pObj->setProperty("isMidiOut", true);
+          pObj->setProperty("midiOutDevice", s->getChainSlotMidiOutIdentifier(pIdx));
+          pObj->setProperty("midiOutChannel", s->getChainSlotMidiOutChannel(pIdx));
+          pObj->setProperty("lowNote", cs.lowNote.load());
+          pObj->setProperty("highNote", cs.highNote.load());
+          pObj->setProperty("level", (double)cs.level.load());
+          pObj->setProperty("enabled", cs.enabled.load());
+          chainNodes.add(juce::var(pObj));
         } else {
           chainNodes.add(juce::var());
         }
@@ -1366,6 +1398,10 @@ void FanfareEngine::applyRig(const juce::var &rig)
           auto &synthLive = s->getSynth();
           synthLive.applyState(juce::var(synthObj));
         }
+        if (auto *fmObj = v.getProperty("fm", juce::var()).getDynamicObject()) {
+          auto &fmLive = s->getFmSynth();
+          fmLive.applyState(juce::var(fmObj));
+        }
 
         // Restore MP3 Player / Backing Track Settings
         {
@@ -1443,13 +1479,21 @@ void FanfareEngine::applyRig(const juce::var &rig)
 
         // Pass 2: Clear only non-matching plugins, then load
         s->clearChainPreserve(pluginsToReuse);
+        bool anyChainSynthRestored = false;
         if (auto *chainArr = v.getProperty("chain", juce::var()).getArray()) {
           for (int p = 0; p < chainArr->size(); ++p) {
             auto pv = chainArr->getReference(p);
             if (pv.isObject()) {
               bool isMo = pv.getProperty("isMidiOut", false);
               juce::String moDev = pv.getProperty("midiOutDevice", "").toString();
-              if (isMo && moDev.isNotEmpty()) {
+              bool isSy = pv.getProperty("isSynth", false);
+              bool isFm = pv.getProperty("isFm", false);
+              if (isSy && p < 3) {
+                s->setChainSlotSynth(p, true, pv.getProperty("synthState", juce::var()));
+                anyChainSynthRestored = true;
+              } else if (isFm && p < 3) {
+                s->setChainSlotFm(p, true, pv.getProperty("fmState", juce::var()));
+              } else if (isMo && moDev.isNotEmpty()) {
                 // MIDI OUT destination: open the device and bind this chain slot.
                 int devIdx = getOrCreateMidiOutput(moDev);
                 s->setChainSlotMidiOut(p, devIdx,
@@ -1458,6 +1502,7 @@ void FanfareEngine::applyRig(const juce::var &rig)
               } else {
                 loadPluginFromVarSmart(i, p, pv, true);
                 s->clearChainSlotMidiOut(p); // plugin replaces any midi-out config
+                s->clearChainSlotSynth(p);
               }
               // Per-instrument stacking settings
               if (p < 3) {
@@ -1467,6 +1512,24 @@ void FanfareEngine::applyRig(const juce::var &rig)
                 cs.level.store((float)pv.getProperty("level", 1.0));
                 cs.enabled.store((bool)pv.getProperty("enabled", true));
               }
+            } else if (p < 3) {
+              s->clearChainSlotMidiOut(p);
+              s->clearChainSlotSynth(p);
+            }
+          }
+        }
+        // Legacy migration: if the channel had a top-level enabled synth and no
+        // chain slot was explicitly flagged isSynth, bind it into the first free
+        // chain slot so it appears in SLOT 1..3.
+        if (!anyChainSynthRestored && s->getSynth(0).enabled.load()) {
+          for (int c = 0; c < 3; ++c) {
+            if (!s->getPluginInstance(c) && !s->isChainSlotMidiOut(c) &&
+                !s->isChainSlotSynth(c)) {
+              if (c != 0)
+                s->setChainSlotSynth(c, true, s->getSynth(0).getState());
+              else
+                s->setChainSlotSynth(0, true);
+              break;
             }
           }
         }
@@ -1890,6 +1953,10 @@ Fanfare::SongSlot FanfareEngine::exportSlot(int slotIdx)
     songSlot.synth.enabled = synthExport.enabled.load();
     songSlot.synth.state = synthExport.getState();
 
+    auto& fmExport = s->getFmSynth();
+    songSlot.fm.enabled = fmExport.enabled.load();
+    songSlot.fm.state = fmExport.getState();
+
     auto& mp3Live = s->getMp3Player();
     songSlot.mp3Player.loopMode = (int)mp3Live.getLoopMode();
     songSlot.mp3Player.shuffle = mp3Live.isShuffleEnabled();
@@ -1946,6 +2013,12 @@ Fanfare::SongSlot FanfareEngine::exportSlot(int slotIdx)
       ps.isMidiOut = s->isChainSlotMidiOut(pIdx);
       ps.midiOutDevice = s->getChainSlotMidiOutIdentifier(pIdx);
       ps.midiOutChannel = s->getChainSlotMidiOutChannel(pIdx);
+      ps.isSynth = s->isChainSlotSynth(pIdx);
+      if (ps.isSynth)
+        ps.synthState = s->getSynth(pIdx).getState();
+      ps.isFm = s->isChainSlotFm(pIdx);
+      if (ps.isFm)
+        ps.fmState = s->getFmSynth(pIdx).getState();
       songSlot.chain.push_back(ps);
     }
 
@@ -2062,6 +2135,11 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
     if (songSlot.synth.state.isObject())
       synthLive.applyState(songSlot.synth.state);
 
+    auto& fmLive = s->getFmSynth();
+    fmLive.enabled.store(songSlot.fm.enabled);
+    if (songSlot.fm.state.isObject())
+      fmLive.applyState(songSlot.fm.state);
+
     auto& mp3Live = s->getMp3Player();
     mp3Live.clearPlaylist();
     mp3Live.setLoopMode((Mp3PlayerProcessor::LoopMode)songSlot.mp3Player.loopMode);
@@ -2091,8 +2169,14 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
       }
     }
     s->clearChainPreserve(pluginsToReuse);
+    bool anyChainSynthRestored = false;
     for (int p = 0; p < (int)songSlot.chain.size(); ++p) {
-      if (songSlot.chain[p].isMidiOut && songSlot.chain[p].midiOutDevice.isNotEmpty()) {
+      if (p < 3 && songSlot.chain[p].isSynth) {
+        s->setChainSlotSynth(p, true, songSlot.chain[p].synthState);
+        anyChainSynthRestored = true;
+      } else if (p < 3 && songSlot.chain[p].isFm) {
+        s->setChainSlotFm(p, true, songSlot.chain[p].fmState);
+      } else if (songSlot.chain[p].isMidiOut && songSlot.chain[p].midiOutDevice.isNotEmpty()) {
         // MIDI OUT destination takes over this chain slot.
         const auto& ps = songSlot.chain[p];
         int devIdx = getOrCreateMidiOutput(ps.midiOutDevice);
@@ -2102,8 +2186,36 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
         juce::var pv = songSlotToPluginVar(songSlot.chain[p]);
         loadPluginFromVarSmart(slotIdx, p, pv, true);
         s->clearChainSlotMidiOut(p); // plugin replaces any midi-out config
+        s->clearChainSlotSynth(p);
+        s->clearChainSlotFm(p);
       } else {
         s->clearChainSlotMidiOut(p);
+        s->clearChainSlotSynth(p);
+        s->clearChainSlotFm(p);
+      }
+    }
+    if (!anyChainSynthRestored && songSlot.synth.enabled) {
+      for (int c = 0; c < 3; ++c) {
+        if (!s->getPluginInstance(c) && !s->isChainSlotMidiOut(c) &&
+            !s->isChainSlotSynth(c) && !s->isChainSlotFm(c)) {
+          s->setChainSlotSynth(c, true, songSlot.synth.state);
+          break;
+        }
+      }
+    }
+    if (songSlot.fm.enabled) {
+      bool anyFmRestored = false;
+      for (int c = 0; c < 3; ++c)
+        if (s->isChainSlotFm(c))
+          anyFmRestored = true;
+      if (!anyFmRestored) {
+        for (int c = 0; c < 3; ++c) {
+          if (!s->getPluginInstance(c) && !s->isChainSlotMidiOut(c) &&
+              !s->isChainSlotSynth(c) && !s->isChainSlotFm(c)) {
+            s->setChainSlotFm(c, true, songSlot.fm.state);
+            break;
+          }
+        }
       }
     }
 

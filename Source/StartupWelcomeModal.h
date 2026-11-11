@@ -487,13 +487,13 @@ private:
     void paintWhatsNew(juce::Graphics& g, juce::Rectangle<int> area, const Theme& t) const {
         struct Bullet { const char* title; const char* detail; };
         static constexpr Bullet kItems[] = {
-            {"BLEEP-216 native synth (Experimental)",
-             "Built-in 16-voice poly synth on every strip with 59 presets (80s Icons, 90s Classics, Juno Heritage, Pads, Leads, Basses)."},
-            {"Rig Doctor: diagnose & surgical repair",
-             "Inspect any .json setup, diff against .bak, dry-run every VST3 in isolation, and reset or remove broken slots without losing scenes."},
-            {"Two-phase VST3 loader & segmented progress",
-             "Deadlock-free sequential STA -> parallel MTA song loading with a discrete [X/N] step progress bar and non-blocking Cancel."},
-            {"Stage-hardened v1.55 Experimental engine",
+            {"The 1984 Keyboard Rig: BLEEP-216 + CoplanDX FM",
+             "Native 16-voice Juno-style polysynth (69 presets) + 6-op/4-op DX7/TX81Z/DX100 FM synth (558 presets) onboard."},
+            {"Multi-synth chain stacking & 11 hybrid strips",
+             "Layer BLEEP-216, CoplanDX, and VST3s across 3 slots per strip with per-slot key ranges, plus 11 FM+Analog strips."},
+            {"Rig Doctor & two-phase VST3 loader",
+             "Deadlock-free STA -> MTA song loading with [X/N] progress bar, plus surgical JSON setup diagnostics and repair."},
+            {"Stage-hardened v1.60 performance engine",
              "Next-Up preload capsule, 1-9 Scene hotkeys, Lush FDN Reverb, Controller Profiles, Save Version History, and USB hotplug recovery."},
         };
 

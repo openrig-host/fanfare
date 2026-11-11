@@ -53,11 +53,14 @@ public:
     applyingHostBounds = false;
   }
 
-  FanfareSynthComponent(RackSlot &slot, std::function<void()> onClose)
-      : slotRef(slot), synth(slot.getSynth()), closeCallback(std::move(onClose)),
+  FanfareSynthComponent(RackSlot &slot, std::function<void()> onClose,
+                        int chainIdx = 0)
+      : slotRef(slot), chainIndex(juce::jlimit(0, 2, chainIdx)),
+        synth(slot.getSynth(chainIndex)), closeCallback(std::move(onClose)),
         header(synth), keyboard(synth) {
     using namespace FanfareSynth;
 
+    header.setChainSlotIndex(chainIndex);
     setWantsKeyboardFocus(true);
     addAndMakeVisible(header);
 
@@ -714,6 +717,7 @@ private:
   }
 
   RackSlot &slotRef;
+  int chainIndex = 0;
   FanfareSynthProcessor &synth;
   std::function<void()> closeCallback;
 

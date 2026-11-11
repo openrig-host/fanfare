@@ -1,6 +1,6 @@
-# Getting Started with Fanfare
+# Getting Started with Fanfare (Windows VST3 Host)
 
-Welcome to **Fanfare**! This guide walks you through your first 5 minutes with Fanfare, from downloading the executable to running your first live rig, hosting VST3 instruments, and tuning your laptop for dropout-free stage performance.
+Welcome to **Fanfare**! Fanfare is a standalone live performance VST3 host built specifically for Windows 10/11 x64. This guide walks you through your first 5 minutes with Fanfare, from downloading the standalone `.exe` to running your first live rig, hosting VST3 instruments, and tuning your Windows laptop for dropout-free stage performance.
 
 ---
 
@@ -50,9 +50,12 @@ Fanfare scans standard Windows VST3 directories (`C:\Program Files\Common Files\
 
 ## 5. Build Your First Rig
 
-### Step A: Load a VST3 Instrument or Open the Built-In BLEEP-216 Synth
-1. Click **`+`** on any empty channel strip slot to pick a VST3 instrument from your list (for example, *Hammond B-3X*, *Kontakt 8*, *ZENOLOGY*, *EZkeys 2*, *Jun-6 V*), and click **`E`** to open its floating editor window.
-2. **Or use the built-in synth with zero VSTs:** Click **`SYN`** on any channel strip (or open **`... → BLEEP-216 synth...`**) to launch the built-in **BLEEP-216** 16-voice polyphonic synthesizer with **68 stage-ready presets** (*Jump 1984 Brass*, *Take On Me Riff*, *Final Countdown*, *Enyaesque*, *1983 Poly*, *Juno Pad 1*, *Hollow Square Pad 1*, *Cathedral Pad*, *Square Lead*, *Dark Bass*, and more).
+### Step A: Load a VST3 Instrument or Open the Built-In 1984 Keyboard Rig (`BLEEP-216` + `CoplanDX`)
+1. Click **`+`** on any empty channel strip slot (`1`, `2`, or `3`) to pick a VST3 instrument from your list (for example, *Hammond B-3X*, *Kontakt 8*, *ZENOLOGY*, *EZkeys 2*, *Jun-6 V*), and click **`E`** to open its floating editor window.
+2. **Or use the built-in 1984 Keyboard Rig with zero VSTs:** Every channel strip has 3 chain slots (`1`, `2`, `3`) that can host:
+   - **BLEEP-216 Polysynth (`SYN`)**: 16-voice Juno/Jupiter-inspired analog polysynth with **68 stage-ready presets** (*Jump 1984 Brass*, *Take On Me Riff*, *Final Countdown*, *Enyaesque*, *1983 Poly*, *Dreamscape Pad*, *Juno Pad 1*, *Hollow Square Pad 1*, *Cathedral Pad*, *Square Lead*, *Dark Bass*, and more).
+   - **CoplanDX FM Synth (`DX`)**: 16-voice 6-op / 4-op FM synthesizer (`DX7`, `DX100`, `TX81Z`, `2x4 OP`, `2x6 OP`) with **558 categorized vintage presets** (*E.PIANO 1*, *BASS 1*, *MARIMBA*, *TUB BELLS*, *BELL-FLUTE*, *LatelyBass*, *GreatVibes*, *SpaceChime*, *GLOKENSPL*, *Xylosnare*) plus `.syx` import.
+   - **Hybrid FM + Analog Strips (`Strips` sidebar):** Open the left **Strips** sidebar to load any of the **11 included dual-engine `.orstrip` combos** (*01 FM Bell & Flute Pad* through *10 Space Chime & Nostalgia Flute*, plus *flute+fmxylo*) that stack a percussive FM mallet in Slot 1 with a lush analog synth pad in Slot 2.
 
 ### Step B: Set Key Split / Note Range
 1. Click **`...`** at the bottom of the channel strip (or click the note range readout under the strip name) and choose **`Note range & transpose...`**.

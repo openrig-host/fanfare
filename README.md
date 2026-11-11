@@ -2,13 +2,13 @@
 
 # Fanfare
 
-### A live performance host for keyboard players
+### A live performance Windows VST3 host for keyboard players
 
 [![Latest Release](https://img.shields.io/github/v/release/openrig-host/fanfare?sort=date&cacheSeconds=900&color=ed786a&label=Latest%20Release)](https://github.com/openrig-host/fanfare/releases/latest)
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-blue.svg)](https://github.com/openrig-host/fanfare/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-blue.svg)](https://github.com/openrig-host/fanfare/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
 
-A rack-based VST3 host and MIDI router for playing live. No dropouts, no stuck notes, no failed song changes.
+A rack-based Windows VST3 host and MIDI router for playing live. No dropouts, no stuck notes, no failed song changes.
 
 [Download](#download) · [Getting Started](GETTING_STARTED.md) · [Features](#features) · [How It Works](#how-it-works) · [VST3 Plugins](#vst3-plugins) · [Make It Yours](#make-it-yours)
 
@@ -53,20 +53,25 @@ It's not a DAW. It's an instrument.
 3. **Load a song or fill a slot.** Pick a recent song on the Welcome screen, double-click a song in the left **Songs** sidebar, or click **`+`** on any channel strip slot to load a VST3.
 4. **Set key ranges and MIDI mappings.** Open the strip **`...`** menu for **Note range & transpose**, or click **`CC`** to open the CC Assignment Manager and apply your global **Controller Profile**.
 
-> The full walkthrough is in **[GETTING_STARTED.md](GETTING_STARTED.md)** and the 25-chapter **[Stage Survival Manual](https://openrig-host.github.io/fanfare/manual.html)**.
+> The full walkthrough is in **[GETTING_STARTED.md](GETTING_STARTED.md)** and the 26-chapter **[Stage Survival Manual](https://openrig-host.github.io/fanfare/manual.html)**.
 
 ---
 
-## What's New in v1.55 (Experimental): Native BLEEP-216 Synth, 68 Factory Presets & LushReverb
+## What's New in v1.60: The 1984 Keyboard Rig Edition
+
+**(A superpowered Juno-106 + DX7, but better, native and onboard)**
 
 ![BLEEP-216 Native 16-Voice Polyphonic Synthesizer](docs/bleep_216_synth.jpg)
 
-- **BLEEP-216 Built-In 16-Voice Polyphonic Synthesizer (`v1.55`).** Every channel strip now includes **BLEEP-216** — a native, zero-dependency Juno/Jupiter-inspired polyphonic synthesizer accessible via the strip **`SYN`** button or **`... → BLEEP-216 synth...`**. Features dual band-limited PolyBLEP DCOs (`32'`–`2'`, Saw/Pulse/Tri/Saw+Pulse, Osc 2 semitone + fine detune, Manual/LFO/Rate PWM), dedicated Sub-Oscillator (`-1SQ`, `-2SQ`, `-2PL`) and Noise generator, pre-filter HPF, 12/24 dB Cytomic SVF resonant low-pass filter with normal/inverted envelope polarity, dual ADSR envelopes (`AMP ENV` + `FILTER ENV`), `POLY`/`MONO`/`LEG` voice modes, Portamento (`I`/`II`), up to **6-voice Stereo Unison Stack**, per-voice analog `DRIFT`, bucket-brigade **Chorus** (`I`, `II`, `I+II`, `CUST`), stereo **Delay**, 3-mode **LushReverb** (`ROOM`, `HALL`, `PLATE`), `Compare` A/B auditioning, user `.json` preset saving (`synth-presets/`), a 2-octave onscreen keyboard (`Keys`), `Shift`-drag `FINE 10x` precision, and right-click MIDI CC learn.
-- **68 Stage-Ready Factory Presets (`Source/Synth/SynthPresets.h`).** Ships with **68 built-in presets** across 7 categories — including dialed-in **80s Icons** (*Jump 1984 Brass*, *Take On Me Riff*, *Final Countdown*, *Enyaesque*, *1983 Poly*, *Jump!*, *Stranger Things Arp*, *Blade Runner CS-80*, *Sweet Dreams Riff*, *Axel F Lead*, *Separate Ways Synth*, *Save A Prayer Arp*, *Blue Monday Bass*, *Thriller Funk Bass*, *Twin Peaks Pad*), **90s Classics**, **Juno Heritage** (*Juno Pad 1*, *Polysynth*, *Juno-106 Strings A11*), **Pads & Strings** (*Hollow Square Pad 1*, *Cathedral Pad*), **Leads & Solos** (*Square Lead*, *Prog Rock Moog Lead*), **Basses** (*Dark Bass*, *Sub-Zero 808 Bass*, *Acid 303 Squelch*), and **Arp, Keys & Plucks**.
-- **LushReverb Stereo Figure-8 Tank Reverberator (`Source/LushReverb.h`).** Replaces the stock channel-strip reverb (`StripMorph`) and powers BLEEP-216's `ROOM`/`HALL`/`PLATE` reverb using a modulated Dattorro / Griesinger (`Lexicon-224` lineage) figure-8 stereo tank with input HPF/LPF conditioning, 4-stage series Schroeder allpass diffusion, 4 quadrature-LFO-modulated tank allpass diffusers, prime-ratio delay lines with 1-pole HF damping, 35 Hz sub-rumble/DC blockers, and 14 decorrelated stereo output taps.
-- **Stage Thermal Detection Hysteresis Tuning (`Source/ThermalMonitor.h`).** Tuned for modern turbo-boosting Intel/AMD laptops: raised the thermal warning threshold to **`96°C`** requiring **2 consecutive polls** (`kSustainedHighTempPolls = 2`) — or an immediate spike **≥ `99°C`** — to latch, clearing at **≤ `89°C`** so brief 1-poll turbo spikes never false-trip on stage.
+- **CoplanDX Built-In Multi-Engine FM Synthesizer (`v1.60`).** Every channel strip slot can now host **CoplanDX** (`DX`) — a native 16-voice Yamaha FM synthesizer running five selectable hardware topologies: **DX7** (6-operator, 32 algorithms), **DX21 / DX100** (4-operator, 8 algorithms), **TX81Z** (4-operator, 13 algorithms, 8 multi-waveforms `W1`–`W8`), **DUAL 2x4 OP** (layered 4-op voices), and **DUAL 2x6 OP** (layered 6-op voices). Powered by Google's `msfa` phase-modulation kernel and paired with an onboard BBD Chorus, Stereo Delay, and 3-mode **LushReverb** (`ROOM`, `HALL`, `PLATE`) tank.
+- **558 Categorized Vintage FM Presets + `.syx` Archive (`Source/Synth/Fm/FmPresetLibrary.inc` & `fm-sysex/`).** Ships with **558 authentic factory voices** extracted and converted from classic **DX7** (`ROM1A`–`ROM4B`), **DX100**, and **TX81Z** ROMs, sorted into 11 musical categories (*Piano & Keys*, *Organs*, *Bells & Mallets*, *Strings & Pads*, *Brass & Winds*, *Synth Leads*, *Bass*, *Guitars & Plucks*, *Voices & Choir*, *Drums & Percussion*, *SFX & Atmospheres*) with `[DX7]`, `[DX100]`, and `[TX81Z]` provenance badges, category-tailored Chorus/Delay/Reverb FX, user `.json` preset saving (`fm-presets/`), and direct `.syx` 32-voice bulk dump import.
+- **BLEEP-216 Built-In 16-Voice Analog Polysynth (`68 Presets`).** A native, zero-dependency Juno/Jupiter-inspired polyphonic synthesizer (`SYN`) with dual band-limited PolyBLEP DCOs (`32'`–`2'`, Saw/Pulse/Tri/Saw+Pulse, Osc 2 semitone + fine detune, Manual/LFO/Rate PWM), dedicated Sub-Oscillator and Noise generator, pre-filter HPF, 12/24 dB Cytomic SVF resonant low-pass filter, dual ADSR envelopes, `POLY`/`MONO`/`LEG` voice modes, Portamento (`I`/`II`), up to **6-voice Stereo Unison Stack**, per-voice analog `DRIFT`, bucket-brigade **Chorus** (`I`, `II`, `I+II`, `CUST`), stereo **Delay**, and **LushReverb**.
+- **3-Slot Multi-Synth Chain Stacking & 11 Hybrid "1984 Rig" Strips (`strips/`).** Each channel strip's 3 instrument slots (`1`, `2`, `3`) can independently host **BLEEP-216** (`SYN`), **CoplanDX** (`DX`), VST3 plugins, or external MIDI-OUT destinations — each with its own **Note Range** split (`Low`–`High`), **Level**, and **Bypass**. Includes **11 ready-to-play dual-engine `.orstrip` presets** (*01 FM Bell & Flute Pad* through *10 Space Chime & Nostalgia Flute*, plus *flute+fmxylo*) that pair crystalline FM mallets, vibes, chimes, and tubular bells with warm analog Juno flute and PWM pads on a single strip.
+- **Fanfare Developer Blog (`docs/blog/`).** New gig-tested engineering blog covering 1980s multi-keyboard hardware rigs, Sunday post-gig dev sprints, accordion wireless routing, and building native synthesizers in under 15 MB.
 
-## What's New in v1.52: Rig Doctor & Two-Phase Loader
+---
+
+## Previous Highlights (v1.52 – v1.55)
 
 - **Rig Doctor: Setup Diagnostics & Surgical Repair (`v1.52`).** Open **`Tools → Rig doctor...`** (or right-click any song in the **Songs** sidebar → **`Diagnose & repair (Rig Doctor)...`**, or run **`tools/rig_doctor.ps1`** from PowerShell) to rehabilitate any setup `.json` that stops loading. Rig Doctor runs static schema/Base64/media validation, diffs every slot against its `.bak` backup to spotlight recent plugin or patch edits, scans `OpenRig_log.txt` for historical stalls, dry-runs every VST3 in isolation (`TEST ALL PLUGINS`) with millisecond timing and `PATCH FAULT` vs `STALLED` classification, and lets you surgically **`KEEP`**, **`OFF`** (disable), **`RESET`** (clear corrupt patch state), or **`REMOVE`** individual plugins while preserving 100% of your mixer faders, splits, CC maps, and scenes.
 - **Deadlock-Free Two-Phase VST3 Loader & Segmented `[X/N]` Progress (`v1.52`).** Song transitions now run a non-overlapping two-phase build — sequential STA message-thread initialization for QML/UI-bound instruments (Native Instruments Komplete/Kontakt/Raum/Massive family, Spectrasonics, Toontrack, HALion) followed by parallel MTA worker builds — eliminating Win32/COM loader lock contention on complex multi-synth songs, paired with a discrete **`N`-segment LED progress bar** (`[X/N]`) and non-blocking **`Cancel`**.

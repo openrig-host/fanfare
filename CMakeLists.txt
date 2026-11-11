@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(Fanfare VERSION 1.5.5 LANGUAGES C CXX)
+project(Fanfare VERSION 1.6.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,6 +43,15 @@ target_sources(Fanfare PRIVATE
     Source/Web/OpenRigWebServer.cpp
     Source/Web/StageHotspotController.cpp
     Source/Web/StageRemoteModalOverlay.cpp
+    Source/Synth/Fm/FmSupport.cpp
+    Source/Synth/Fm/msfa/sin.cc
+    Source/Synth/Fm/msfa/exp2.cc
+    Source/Synth/Fm/msfa/freqlut.cc
+    Source/Synth/Fm/msfa/env.cc
+    Source/Synth/Fm/msfa/pitchenv.cc
+    Source/Synth/Fm/msfa/lfo.cc
+    Source/Synth/Fm/msfa/fm_op_kernel.cc
+    Source/Synth/Fm/msfa/fm_core.cc
 )
 
 target_include_directories(Fanfare PRIVATE
