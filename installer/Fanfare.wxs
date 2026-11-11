@@ -83,6 +83,7 @@
     <Feature Id="ProductFeature" Title="Fanfare" Level="1">
       <ComponentRef Id="CMP_FanfareExe" />
       <ComponentRef Id="CMP_Shortcuts" />
+      <ComponentGroupRef Id="BundledPresetsGroup" />
     </Feature>
   </Product>
 </Wix>

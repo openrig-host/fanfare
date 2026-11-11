@@ -1,4 +1,5 @@
 #include "RigSerializer.h"
+#include "BundledAssetsData.h"
 
 namespace Fanfare {
 
