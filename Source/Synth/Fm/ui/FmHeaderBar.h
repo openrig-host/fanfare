@@ -200,6 +200,16 @@ public:
     keysBtn.setTooltip("Toggle 2-octave playable keyboard + Pitch Bend / Mod strips");
     addAndMakeVisible(keysBtn);
 
+    midiBtn.setButtonText("MIDI");
+    midiBtn.setColour(juce::TextButton::textColourOffId,
+                      ThemeManager::get(Theme::Role::accent));
+    midiBtn.setTooltip("MIDI Routing & Splits: Note Range, CC Assignments, and MIDI Transformer");
+    midiBtn.onClick = [this] {
+      if (onOpenMidiDialog)
+        onOpenMidiDialog();
+    };
+    addAndMakeVisible(midiBtn);
+
     closeBtn.setButtonText("X");
     closeBtn.setTooltip("Close CoplanDX editor");
     addAndMakeVisible(closeBtn);
@@ -208,6 +218,7 @@ public:
   }
 
   std::function<void(bool)> onPowerToggled;
+  std::function<void()> onOpenMidiDialog;
 
   void setChainSlotIndex(int idx) {
     chainSlotIndex = juce::jlimit(0, 2, idx);
@@ -280,6 +291,8 @@ public:
     b.removeFromRight(3);
     keysBtn.setBounds(b.removeFromRight(46).reduced(1, 3));
     b.removeFromRight(3);
+    midiBtn.setBounds(b.removeFromRight(46).reduced(1, 3));
+    b.removeFromRight(3);
     delBtn.setBounds(b.removeFromRight(36).reduced(1, 3));
     saveBtn.setBounds(b.removeFromRight(44).reduced(1, 3));
     initBtn.setBounds(b.removeFromRight(40).reduced(1, 3));
@@ -297,7 +310,7 @@ public:
   juce::TextButton enableBtn;
   FmPatchLcd lcd;
   juce::TextButton prevBtn, nextBtn, syxBtn, compareBtn, initBtn, saveBtn,
-      delBtn, keysBtn, closeBtn;
+      delBtn, midiBtn, keysBtn, closeBtn;
 
 private:
   FmSynthProcessor &proc;

@@ -398,6 +398,30 @@ void MainComponent::setupSlotComponents() {
             resized();
           },
           targetChain));
+
+      synthOverlay->onOpenNoteRange = [this, slot, comp] {
+        auto *nrComp = new NoteRangeComponent(*slot);
+        nrComp->setSize(860, 310);
+        setActiveMidiNoteLearner(nrComp);
+        auto targetArea = synthOverlay != nullptr ? synthOverlay->getMidiButtonScreenBounds()
+                                                  : comp->getScreenBounds();
+        auto &box = juce::CallOutBox::launchAsynchronously(
+            std::unique_ptr<juce::Component>(nrComp), targetArea, this);
+        box.setDismissalMouseClicksAreAlwaysConsumed(true);
+      };
+
+      synthOverlay->onOpenCCDialog = [this, slot, comp] {
+        auto *ccComp = new CCMappingComponent(*slot, 0);
+        ccComp->setSize(660, 510);
+        auto targetArea = synthOverlay != nullptr ? synthOverlay->getMidiButtonScreenBounds()
+                                                  : comp->getScreenBounds();
+        auto &box = juce::CallOutBox::launchAsynchronously(
+            std::unique_ptr<juce::Component>(ccComp), targetArea, this);
+        box.setDismissalMouseClicksAreAlwaysConsumed(true);
+      };
+
+      synthOverlay->onOpenMidiEffects = comp->onShowArpeggiator;
+
       addAndMakeVisible(synthOverlay.get());
       synthOverlay->updateForHostBounds(getLocalBounds());
     };
@@ -436,6 +460,30 @@ void MainComponent::setupSlotComponents() {
             resized();
           },
           targetChain));
+
+      fmOverlay->onOpenNoteRange = [this, slot, comp] {
+        auto *nrComp = new NoteRangeComponent(*slot);
+        nrComp->setSize(860, 310);
+        setActiveMidiNoteLearner(nrComp);
+        auto targetArea = fmOverlay != nullptr ? fmOverlay->getMidiButtonScreenBounds()
+                                               : comp->getScreenBounds();
+        auto &box = juce::CallOutBox::launchAsynchronously(
+            std::unique_ptr<juce::Component>(nrComp), targetArea, this);
+        box.setDismissalMouseClicksAreAlwaysConsumed(true);
+      };
+
+      fmOverlay->onOpenCCDialog = [this, slot, comp] {
+        auto *ccComp = new CCMappingComponent(*slot, 0);
+        ccComp->setSize(660, 510);
+        auto targetArea = fmOverlay != nullptr ? fmOverlay->getMidiButtonScreenBounds()
+                                               : comp->getScreenBounds();
+        auto &box = juce::CallOutBox::launchAsynchronously(
+            std::unique_ptr<juce::Component>(ccComp), targetArea, this);
+        box.setDismissalMouseClicksAreAlwaysConsumed(true);
+      };
+
+      fmOverlay->onOpenMidiEffects = comp->onShowArpeggiator;
+
       addAndMakeVisible(fmOverlay.get());
       fmOverlay->updateForHostBounds(getLocalBounds());
     };
@@ -443,11 +491,12 @@ void MainComponent::setupSlotComponents() {
     // Note Range Dialog (CallOutBox)
     comp->onShowNoteRangeDialog = [this, slot, comp] {
       auto *nrComp = new NoteRangeComponent(*slot);
-      nrComp->setSize(800, 180);
+      nrComp->setSize(860, 310);
       setActiveMidiNoteLearner(nrComp);
-      juce::CallOutBox::launchAsynchronously(
+      auto &box = juce::CallOutBox::launchAsynchronously(
           std::unique_ptr<juce::Component>(nrComp),
           getLocalArea(comp, comp->getNoteRangeButtonBounds()), this);
+      box.setDismissalMouseClicksAreAlwaysConsumed(true);
     };
 
     // MIDI CC Dialog Callback (Advanced UI with Learn). autoArmLearn:
@@ -705,11 +754,12 @@ void MainComponent::setupSlotComponents() {
     // Note Range Dialog (CallOutBox)
     comp->onShowNoteRangeDialog = [this, slot, comp] {
       auto *nrComp = new NoteRangeComponent(*slot);
-      nrComp->setSize(800, 180);
+      nrComp->setSize(860, 310);
       setActiveMidiNoteLearner(nrComp);
-      juce::CallOutBox::launchAsynchronously(
+      auto &box = juce::CallOutBox::launchAsynchronously(
           std::unique_ptr<juce::Component>(nrComp),
           getLocalArea(comp, comp->getNoteRangeButtonBounds()), this);
+      box.setDismissalMouseClicksAreAlwaysConsumed(true);
     };
 
     comp->onCollapseChanged = [this](bool) {

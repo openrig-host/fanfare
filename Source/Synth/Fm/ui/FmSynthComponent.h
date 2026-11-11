@@ -17,6 +17,7 @@
 #include "FmOperatorCard.h"
 #include "FmRightDeck.h"
 #include "FmUiMetrics.h"
+#include "../../../SynthMidiSetupDialog.h"
 
 class FmSynthComponent : public juce::Component,
                          public FanfareFm::Ui::FmTelemetrySink,
@@ -82,6 +83,9 @@ public:
       resized();
       repaint();
     };
+    header.onOpenMidiDialog = [this] {
+      showMidiRoutingDialog();
+    };
     header.closeBtn.onClick = [this] {
       if (closeCallback)
         closeCallback();
@@ -124,6 +128,28 @@ public:
     refreshLcdDisplay();
 
     startTimerHz(Metrics::kTelemetryTimerHz);
+  }
+
+  std::function<void()> onOpenNoteRange;
+  std::function<void()> onOpenCCDialog;
+  std::function<void()> onOpenMidiEffects;
+
+  juce::Rectangle<int> getMidiButtonScreenBounds() const {
+    return header.midiBtn.getScreenBounds();
+  }
+
+  void showMidiRoutingDialog() {
+    auto *dlg = new SynthMidiSetupDialog(
+        slotRef, chainIndex, true /*isFm*/,
+        [this] { if (onOpenNoteRange) onOpenNoteRange(); },
+        [this] { if (onOpenCCDialog) onOpenCCDialog(); },
+        [this] { if (onOpenMidiEffects) onOpenMidiEffects(); });
+    dlg->setSize(520, 440);
+    auto &box = juce::CallOutBox::launchAsynchronously(
+        std::unique_ptr<juce::Component>(dlg),
+        header.midiBtn.getScreenBounds(),
+        this);
+    box.setDismissalMouseClicksAreAlwaysConsumed(true);
   }
 
   ~FmSynthComponent() override {

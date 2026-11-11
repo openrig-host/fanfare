@@ -18,6 +18,7 @@
 #include "SynthLayoutSpec.h"
 #include "SynthSectionComponent.h"
 #include "SynthSkin.h"
+#include "../../SynthMidiSetupDialog.h"
 
 class FanfareSynthComponent : public juce::Component,
                               private FanfareSynth::Ui::SynthTelemetrySink,
@@ -83,6 +84,9 @@ public:
       resized();
       repaint();
     };
+    header.onOpenMidiDialog = [this] {
+      showMidiRoutingDialog();
+    };
     header.closeBtn.onClick = [this] {
       if (closeCallback)
         closeCallback();
@@ -106,6 +110,28 @@ public:
     refreshLcdDisplay();
 
     startTimerHz(UiMetrics::kTelemetryTimerHz);
+  }
+
+  std::function<void()> onOpenNoteRange;
+  std::function<void()> onOpenCCDialog;
+  std::function<void()> onOpenMidiEffects;
+
+  juce::Rectangle<int> getMidiButtonScreenBounds() const {
+    return header.midiBtn.getScreenBounds();
+  }
+
+  void showMidiRoutingDialog() {
+    auto *dlg = new SynthMidiSetupDialog(
+        slotRef, chainIndex, false /*isFm*/,
+        [this] { if (onOpenNoteRange) onOpenNoteRange(); },
+        [this] { if (onOpenCCDialog) onOpenCCDialog(); },
+        [this] { if (onOpenMidiEffects) onOpenMidiEffects(); });
+    dlg->setSize(520, 440);
+    auto &box = juce::CallOutBox::launchAsynchronously(
+        std::unique_ptr<juce::Component>(dlg),
+        header.midiBtn.getScreenBounds(),
+        this);
+    box.setDismissalMouseClicksAreAlwaysConsumed(true);
   }
 
   ~FanfareSynthComponent() override {
