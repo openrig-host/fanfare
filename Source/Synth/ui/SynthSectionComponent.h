@@ -94,10 +94,11 @@ public:
         nextBadge = "I+II";
     }
 
-    if (nextBadge != statusBadge) {
-      statusBadge = nextBadge;
+    const bool badgeChanged = (nextBadge != statusBadge);
+    statusBadge = nextBadge;
+
+    if (badgeChanged || spec.section == SecAmpEnv || spec.section == SecFltEnv)
       repaint();
-    }
   }
 
   SynthParamWidget *findWidgetForParam(int paramIdx) const noexcept {
@@ -144,7 +145,7 @@ public:
     g.drawFittedText(spec.title, titleBox, juce::Justification::centredLeft, 1);
 
     if (spec.section == SecAmpEnv || spec.section == SecFltEnv)
-      drawEnvTrace(g, traceArea, spec.section == SecFltEnv);
+      drawEnvTrace(g, spec.section == SecFltEnv);
   }
 
   void resized() override {
@@ -256,47 +257,101 @@ private:
                   });
   }
 
-  void drawEnvTrace(juce::Graphics &g, juce::Rectangle<float> area,
-                    bool filt) const {
-    if (area.isEmpty())
+  void drawEnvTrace(juce::Graphics &g, bool filt) const {
+    if (primaryWidgets.size() < 4)
       return;
+
+    auto *wA = primaryWidgets[0];
+    auto *wD = primaryWidgets[1];
+    auto *wS = primaryWidgets[2];
+    auto *wR = primaryWidgets[3];
+    if (wA == nullptr || wD == nullptr || wS == nullptr || wR == nullptr)
+      return;
+
+    const auto rA = wA->getBounds().toFloat();
+    const auto rD = wD->getBounds().toFloat();
+    const auto rS = wS->getBounds().toFloat();
+    const auto rR = wR->getBounds().toFloat();
+    if (rA.isEmpty() || rR.isEmpty())
+      return;
+
+    const float xA = rA.getCentreX();
+    const float xD = rD.getCentreX();
+    const float xS = rS.getCentreX();
+    const float xR = rR.getCentreX();
+    const float startX = rA.getX() + 6.0f;
+    const float endX = rR.getRight() - 6.0f;
+
+    // Match exact travel of SynthFader thumb
+    const float trackTop = rA.getY() + (float)UiMetrics::kControlLabelHeight + 5.0f;
+    const float trackBot = rA.getBottom() - (float)UiMetrics::kValueReadoutHeight - 5.0f;
+    const float topY = trackTop + 6.5f;
+    const float botY = trackBot - 6.5f;
+    const float travel = juce::jmax(8.0f, botY - topY);
+
+    const auto &dAtk = paramDefs()[(size_t)(filt ? ParamId::fatk : ParamId::atk)];
+    const auto &dDec = paramDefs()[(size_t)(filt ? ParamId::fdec : ParamId::dec)];
+    const auto &dRel = paramDefs()[(size_t)(filt ? ParamId::frel : ParamId::rel)];
+
     const float a = proc.getParam(filt ? ParamId::fatk : ParamId::atk);
     const float d = proc.getParam(filt ? ParamId::fdec : ParamId::dec);
     const float s = juce::jlimit(0.0f, 1.0f,
-                                 proc.getParam(filt ? ParamId::fsus
-                                                    : ParamId::sus));
+                                 proc.getParam(filt ? ParamId::fsus : ParamId::sus));
     const float r = proc.getParam(filt ? ParamId::frel : ParamId::rel);
 
-    auto percept = [](float t) {
-      return std::log1p(juce::jmax(0.0f, t) * 12.0f);
-    };
-    const float wa = percept(a);
-    const float wd = percept(d);
-    const float wr = percept(r);
-    const float hold = 0.85f;
-    float total = wa + wd + hold + wr;
-    if (total < 1e-3f)
-      total = 1e-3f;
+    const float normA = valueToNormalized(dAtk, a);
+    const float normD = valueToNormalized(dDec, d);
+    const float normR = valueToNormalized(dRel, r);
 
-    const float yBot = area.getBottom();
-    const float yTop = area.getY();
-    const float susY = yBot - s * (yBot - yTop);
-    const float span = area.getWidth();
+    const float susY = botY - s * travel;
+
+    const bool isGate = (!filt &&
+                         (int)std::lround(proc.getParam(ParamId::vcaMode)) == 1 &&
+                         (int)std::lround(proc.getParam(ParamId::filtEnvSrc)) == 0);
 
     juce::Path p;
-    p.startNewSubPath(area.getX(), yBot);
-    float x = area.getX() + span * wa / total;
-    p.lineTo(x, yTop);
-    float x2 = x + span * wd / total;
-    p.lineTo(x2, susY);
-    float x3 = x2 + span * hold / total;
-    p.lineTo(x3, susY);
-    p.lineTo(area.getRight(), yBot);
+    if (isGate) {
+      p.startNewSubPath(startX, botY);
+      p.lineTo(startX, topY);
+      p.lineTo(endX, topY);
+      p.lineTo(endX, botY);
+    } else {
+      p.startNewSubPath(startX, botY);
+
+      // Attack: rises to (xA, topY)
+      const float xAtk = startX + juce::jmax(2.0f, (xA - startX) * (0.08f + 0.92f * normA));
+      if (xAtk < xA - 1.0f) {
+        p.lineTo(xAtk, topY);
+        p.lineTo(xA, topY);
+      } else {
+        p.quadraticTo(startX + (xA - startX) * 0.25f * (1.0f - normA), topY, xA, topY);
+      }
+
+      // Decay: falls from (xA, topY) to (xDecEnd, susY)
+      const float decSpan = (xS - 4.0f) - xA;
+      const float xDecEnd = xA + decSpan * (0.15f + 0.85f * normD);
+      const float ctrlX = xA + (xDecEnd - xA) * 0.35f;
+      const float ctrlY = susY + (topY - susY) * 0.20f;
+      p.quadraticTo(ctrlX, ctrlY, xDecEnd, susY);
+
+      // Sustain: flat plateau from xDecEnd across S fader
+      const float xRelStart = juce::jmax(xDecEnd, xS + (xR - xS) * 0.30f);
+      p.lineTo(xRelStart, susY);
+
+      // Release: falls from (xRelStart, susY) down to botY
+      const float relSpan = endX - xRelStart;
+      const float xRelEnd = xRelStart + juce::jmax(4.0f, relSpan * (0.12f + 0.88f * normR));
+      const float rCtrlX = xRelStart + (xRelEnd - xRelStart) * 0.35f;
+      const float rCtrlY = botY + (susY - botY) * 0.20f;
+      p.quadraticTo(rCtrlX, rCtrlY, xRelEnd, botY);
+      if (xRelEnd < endX)
+        p.lineTo(endX, botY);
+    }
 
     const bool live = proc.getActiveVoiceCount() > 0;
+    const float alpha = isGate ? 0.18f : (live ? 0.55f : 0.28f);
     Skin::glowStroke(g, p,
-                     ThemeManager::get(Theme::Role::accent)
-                         .withAlpha(live ? 0.50f : 0.24f),
+                     ThemeManager::get(Theme::Role::accent).withAlpha(alpha),
                      1.3f);
   }
 

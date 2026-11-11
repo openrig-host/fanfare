@@ -248,6 +248,8 @@ public:
     proc.setParam(paramIdx, d.def, true);
     syncFromProcessor();
     sink.handleParamEdited(paramIdx);
+    if (auto *p = getParentComponent())
+      p->repaint();
   }
 
   void mouseWheelMove(const juce::MouseEvent &e,
@@ -272,6 +274,8 @@ private:
     readout.refreshText();
     sink.handleParamEdited(paramIdx);
     repaint();
+    if (auto *p = getParentComponent())
+      p->repaint();
   }
 
   void applyWheelDelta(float wheelDeltaY, bool fine) {
