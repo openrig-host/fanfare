@@ -89,15 +89,11 @@ public:
       auto rightSide = inner.removeFromRight(juce::jmin(106, inner.getWidth() / 2 + 10));
       auto badgeRect = rightSide.removeFromRight(42).reduced(0, 4);
 
-      g.setColour(sel ? ThemeManager::get(Theme::Role::accent).withAlpha(0.20f)
-                      : ThemeManager::get(Theme::Role::sunken));
-      g.fillRoundedRectangle(badgeRect.toFloat(), 2.0f);
-      g.setColour(sel ? ThemeManager::get(Theme::Role::accent)
-                      : ThemeManager::get(Theme::Role::border));
-      g.drawRoundedRectangle(badgeRect.toFloat(), 2.0f, 0.8f);
-
-      g.setColour(sel ? ThemeManager::get(Theme::Role::accent)
-                      : ThemeManager::get(Theme::Role::textDim));
+      // Passive architecture tag (6-OP / LAYER / 8-WAVE): deliberately drawn
+      // as plain text, not a chip. It was previously styled with a fill and
+      // border identical to real toggles, which read as a control.
+      g.setColour(sel ? ThemeManager::get(Theme::Role::accent).withAlpha(0.55f)
+                      : ThemeManager::get(Theme::Role::textFaint));
       g.setFont(BoutiqueLookAndFeel::condensedFont(9.5f, 0.04f));
       g.drawFittedText(sp.archBadge, badgeRect, juce::Justification::centred, 1);
 

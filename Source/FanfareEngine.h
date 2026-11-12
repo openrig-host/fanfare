@@ -146,7 +146,8 @@ void deleteScene(int index);
 // Lock-free, zero-allocation slot DSP execution used by both Sequential and
   // Parallel Work-Sharing paths (eliminates juce::ThreadPool job->pool reuse races).
   void executeSlotDsp(int slotIdx, const float *const *rawInput,
-                      int numInputChannels, bool seedOnly) noexcept;
+                      int numInputChannels, bool seedOnly,
+                      int activeSamples = -1) noexcept;
 void prepareToPlay(int samplesPerBlockExpected, double sampleRate);
 struct ScanResults {
     std::vector<PluginInfo> newPlugins;
@@ -166,7 +167,9 @@ void processAudio(const float *const *inputData, int numInputs,
                     juce::MidiBuffer &midi) {
     juce::ScopedNoDenormals noDenormals;
     FanfareLog::t_isRealtimeAudioThread = true;
+#ifdef _WIN32
     FanfareLog::g_audioThreadId.store((uint32_t)::GetCurrentThreadId(), std::memory_order_relaxed);
+#endif
 
     // CRITICAL: Clear hardware output buffers unconditionally first to prevent feedback
     for (int i = 0; i < numOutputs; ++i)
@@ -188,7 +191,8 @@ void processAudio(const float *const *inputData, int numInputs,
     if (isApplyingRig.load(std::memory_order_seq_cst))
       return;
 
-    // Inject stress test MIDI if active
+#if FANFARE_ENABLE_STRESS_TEST
+    // Inject stress test MIDI if active (dev/test builds only)
     if (stressTestActive.load()) {
         double sr = currentSampleRate;
         if (sr > 0.0) {
@@ -214,13 +218,14 @@ void processAudio(const float *const *inputData, int numInputs,
             }
         }
     }
+#endif
 
     const bool isSwitching = false;
 
-    fohBus.clear();
-    iemBus.clear();
-    aux1Bus.clear();
-    aux2Bus.clear();
+    fohBus.clear(0, numSamples);
+    iemBus.clear(0, numSamples);
+    aux1Bus.clear(0, numSamples);
+    aux2Bus.clear(0, numSamples);
 
     if (slotMidiBuffers.size() != slots.size()) {
       // Pre-allocated in prepareToPlay(). A mismatch means prepareToPlay()
@@ -236,21 +241,33 @@ void processAudio(const float *const *inputData, int numInputs,
     if (panicTriggered.exchange(false)) {
       for (auto &slot : slots) {
         if (slot) {
-          slot->getArpeggiator().reset();
-          slot->getHarmonizer().reset();
-          slot->getSampler().reset();
+          if (slot->getArpeggiator().enabled.load(std::memory_order_relaxed))
+            slot->getArpeggiator().reset();
+          if (slot->getHarmonizer().enabled.load(std::memory_order_relaxed))
+            slot->getHarmonizer().reset();
+          if (slot->getSampler().enabled.load(std::memory_order_relaxed))
+            slot->getSampler().reset();
           for (int c = 0; c < 3; ++c) {
-            slot->getSynth(c).reset();
-            slot->getFmSynth(c).reset();
+            if (slot->isChainSlotSynth(c) ||
+                (c == 0 && slot->getSynth(0).enabled.load(std::memory_order_relaxed))) {
+              slot->getSynth(c).allNotesOff();
+            }
+            if (slot->isChainSlotFm(c) ||
+                (c == 0 && slot->getFmSynth(0).enabled.load(std::memory_order_relaxed))) {
+              slot->getFmSynth(c).panicNow();
+            }
           }
         }
       }
-      for (auto &smb : slotMidiBuffers) {
-        for (int ch = 1; ch <= 16; ++ch) {
-          smb.addEvent(juce::MidiMessage::allNotesOff(ch), 0);
-          smb.addEvent(juce::MidiMessage::allSoundOff(ch), 0);
-          smb.addEvent(juce::MidiMessage::controllerEvent(ch, 64, 0), 0); // Sustain Off
-          smb.addEvent(juce::MidiMessage::allControllersOff(ch), 0);
+      for (size_t i = 0; i < slots.size() && i < slotMidiBuffers.size(); ++i) {
+        if (slots[i] && slots[i]->hasActivePlugins()) {
+          auto &smb = slotMidiBuffers[i];
+          for (int ch = 1; ch <= 16; ++ch) {
+            smb.addEvent(juce::MidiMessage::allNotesOff(ch), 0);
+            smb.addEvent(juce::MidiMessage::allSoundOff(ch), 0);
+            smb.addEvent(juce::MidiMessage::controllerEvent(ch, 64, 0), 0); // Sustain Off
+            smb.addEvent(juce::MidiMessage::allControllersOff(ch), 0);
+          }
         }
       }
     }
@@ -333,12 +350,14 @@ void processAudio(const float *const *inputData, int numInputs,
     }
 
     for (size_t i = 0; i < totalBuffers; ++i) {
-      if (scratchBuffers[i].getNumChannels() < 32 ||
+      if (scratchBuffers[i].getNumChannels() < 2 ||
           scratchBuffers[i].getNumSamples() < numSamples) {
         audioUnderrunFlag.store(true);
         return; // block-size mismatch; never reallocate on the audio thread
       }
-      scratchBuffers[i].clear();
+      const int chToClear = juce::jmin(2, scratchBuffers[i].getNumChannels());
+      for (int ch = 0; ch < chToClear; ++ch)
+        scratchBuffers[i].clear(ch, 0, numSamples);
     }
 
     // Precompute subgroup target flags in O(N) on stack
@@ -369,8 +388,8 @@ void processAudio(const float *const *inputData, int numInputs,
     if (engineWedged.load(std::memory_order_acquire)) {
       if (dspInFlightWorkers.load(std::memory_order_acquire) != 0) {
         audioUnderrunFlag.store(true, std::memory_order_relaxed);
-        aux1Bus.clear();
-        aux2Bus.clear();
+        aux1Bus.clear(0, numSamples);
+        aux2Bus.clear(0, numSamples);
         return;
       }
       engineWedged.store(false, std::memory_order_release);
@@ -380,19 +399,19 @@ void processAudio(const float *const *inputData, int numInputs,
     // no helper cores are assigned, or <= 1 non-target slot has active plugins.
     if (!parallelProcessingEnabled.load(std::memory_order_relaxed) ||
         maxHelpers <= 0 || numDspCandidates <= 1) {
-      aux1Bus.clear();
-      aux2Bus.clear();
+      aux1Bus.clear(0, numSamples);
+      aux2Bus.clear(0, numSamples);
       for (int i = 0; i < numActiveSlots; ++i) {
-        executeSlotDsp(i, inputData, numInputs, false);
+        executeSlotDsp(i, inputData, numInputs, false, numSamples);
 
         int target = slots[i]->getOutputTarget();
         if (slots[i]->isSubgroupTarget() && target < numActiveSlots && target > i) {
-          slots[i]->sumToSubgroup(scratchBuffers[i], scratchBuffers[target], aux1Bus, aux2Bus);
-          slots[i]->sumToIemBus(scratchBuffers[i], iemBus);
+          slots[i]->sumToSubgroup(scratchBuffers[i], scratchBuffers[target], aux1Bus, aux2Bus, numSamples);
+          slots[i]->sumToIemBus(scratchBuffers[i], iemBus, numSamples);
         } else if (isSubgroupTgt[i]) {
-          slots[i]->sumToFohBusOnly(scratchBuffers[i], fohBus, aux1Bus, aux2Bus);
+          slots[i]->sumToFohBusOnly(scratchBuffers[i], fohBus, aux1Bus, aux2Bus, numSamples);
         } else {
-          slots[i]->sumToBuses(scratchBuffers[i], fohBus, iemBus, aux1Bus, aux2Bus);
+          slots[i]->sumToBuses(scratchBuffers[i], fohBus, iemBus, aux1Bus, aux2Bus, numSamples);
         }
       }
     } else {
@@ -410,13 +429,14 @@ void processAudio(const float *const *inputData, int numInputs,
           dspSlotQueue[numDspJobs++] = i;
         } else {
           // Seed subgroup targets (hardware input only) and process idle/input-only slots inline
-          executeSlotDsp(i, inputData, numInputs, isTgt);
+          executeSlotDsp(i, inputData, numInputs, isTgt, numSamples);
         }
       }
 
       // Publish work queue (`dspJobCount` transitions 0 -> numDspJobs as the seq_cst gate)
       dspRawInput = inputData;
       dspNumInputs = numInputs;
+      dspActiveSamples.store(numSamples, std::memory_order_relaxed);
       dspNextJobIdx.store(0, std::memory_order_release);
       dspJobCount.store(numDspJobs, std::memory_order_seq_cst);
 
@@ -433,7 +453,7 @@ void processAudio(const float *const *inputData, int numInputs,
         const int qIdx = dspNextJobIdx.fetch_add(1, std::memory_order_acq_rel);
         if (qIdx >= numDspJobs)
           break;
-        executeSlotDsp(dspSlotQueue[qIdx], inputData, numInputs, false);
+        executeSlotDsp(dspSlotQueue[qIdx], inputData, numInputs, false, numSamples);
       }
 
       // Close queue gate before checking in-flight helper count (Dekker seq_cst pair)
@@ -473,27 +493,38 @@ void processAudio(const float *const *inputData, int numInputs,
       if (timedOut) {
         engineWedged.store(true, std::memory_order_release);
         audioUnderrunFlag.store(true, std::memory_order_relaxed);
-        fohBus.clear();
-        iemBus.clear();
-        aux1Bus.clear();
-        aux2Bus.clear();
+        int timeouts = consecutiveParallelTimeouts.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (timeouts >= 3) {
+          parallelProcessingEnabled.store(false, std::memory_order_release);
+          recordFlightEvent(-1, "WARN: 3 consecutive parallel DSP timeouts -> fallback to sequential mode");
+        } else {
+          recordFlightEvent(-1, "WARN: Parallel DSP worker timeout");
+        }
+        fohBus.clear(0, numSamples);
+        iemBus.clear(0, numSamples);
+        aux1Bus.clear(0, numSamples);
+        aux2Bus.clear(0, numSamples);
         return;
       } else {
+        consecutiveParallelTimeouts.store(0, std::memory_order_relaxed);
         // Step 1: Accumulate subgroup sends and IEM mixes
-        aux1Bus.clear();
-        aux2Bus.clear();
+        aux1Bus.clear(0, numSamples);
+        aux2Bus.clear(0, numSamples);
         for (int i = 0; i < numActiveSlots; ++i) {
           int target = slots[i]->getOutputTarget();
           if (slots[i]->isSubgroupTarget() && target < numActiveSlots && target > i) {
-            slots[i]->sumToSubgroup(scratchBuffers[i], scratchBuffers[target], aux1Bus, aux2Bus);
-            slots[i]->sumToIemBus(scratchBuffers[i], iemBus);
+            slots[i]->sumToSubgroup(scratchBuffers[i], scratchBuffers[target], aux1Bus, aux2Bus, numSamples);
+            slots[i]->sumToIemBus(scratchBuffers[i], iemBus, numSamples);
           }
         }
 
         // Step 2: Process DSP chain for subgroup target slots on accumulated subgroup audio
         for (int i = 0; i < numActiveSlots; ++i) {
           if (isSubgroupTgt[i]) {
-            slots[i]->processBlock(scratchBuffers[i], slotMidiBuffers[i]);
+            juce::AudioBuffer<float> subView(
+                scratchBuffers[i].getArrayOfWritePointers(),
+                scratchBuffers[i].getNumChannels(), numSamples);
+            slots[i]->processBlock(subView, slotMidiBuffers[i]);
           }
         }
 
@@ -503,9 +534,9 @@ void processAudio(const float *const *inputData, int numInputs,
           if (slots[i]->isSubgroupTarget() && target < numActiveSlots && target > i)
             continue;
           if (isSubgroupTgt[i]) {
-            slots[i]->sumToFohBusOnly(scratchBuffers[i], fohBus, aux1Bus, aux2Bus);
+            slots[i]->sumToFohBusOnly(scratchBuffers[i], fohBus, aux1Bus, aux2Bus, numSamples);
           } else {
-            slots[i]->sumToBuses(scratchBuffers[i], fohBus, iemBus, aux1Bus, aux2Bus);
+            slots[i]->sumToBuses(scratchBuffers[i], fohBus, iemBus, aux1Bus, aux2Bus, numSamples);
           }
         }
       }
@@ -514,22 +545,26 @@ void processAudio(const float *const *inputData, int numInputs,
     // --- Process Aux Returns ---
     // Aux returns should NOT feed back into the aux buses (feedback loop)
     // Use pre-allocated dummy buffers (cleared, not re-constructed)
-    dummyAux1.clear();
-    dummyAux2.clear();
+    dummyAux1.clear(0, numSamples);
+    dummyAux2.clear(0, numSamples);
 
     for (int i = 0; i < (int)auxReturns.size(); ++i) {
       auto &scratch = scratchBuffers[slots.size() + i];
-      scratch.clear();
+      const int chToClear = juce::jmin(2, scratch.getNumChannels());
+      for (int ch = 0; ch < chToClear; ++ch)
+        scratch.clear(ch, 0, numSamples);
       auto &bus = (i == 0) ? aux1Bus : aux2Bus;
 
       // Copy aux bus to return slot input
       for (int ch = 0; ch < 2; ++ch)
         scratch.copyFrom(ch, 0, bus, ch, 0, numSamples);
 
-      auxReturns[i]->processBlock(scratch, emptyMidiBuf);
+      juce::AudioBuffer<float> auxView(scratch.getArrayOfWritePointers(),
+                                       scratch.getNumChannels(), numSamples);
+      auxReturns[i]->processBlock(auxView, emptyMidiBuf);
 
       // Sum to main output buses only - NOT back to aux buses
-      auxReturns[i]->sumToBuses(scratch, fohBus, iemBus, dummyAux1, dummyAux2);
+      auxReturns[i]->sumToBuses(scratch, fohBus, iemBus, dummyAux1, dummyAux2, numSamples);
     }
 
     // --- Forward per-slot MIDI OUT to hardware devices ---
@@ -559,24 +594,54 @@ void processAudio(const float *const *inputData, int numInputs,
     // --- Master FX Processing ---
     // Apply Master Fader Levels BEFORE FX (or typically after sums, but before
     // output)
-    fohBus.applyGain(fohMasterLevel);
-    iemBus.applyGain(iemMasterLevel);
+    fohBus.applyGain(0, numSamples, fohMasterLevel);
+    iemBus.applyGain(0, numSamples, iemMasterLevel);
 
     {
       juce::SpinLock::ScopedTryLockType mfl(masterFxLock);
       if (mfl.isLocked()) {
-        for (auto &plugin : fohPluginChain) {
-          if (plugin) {
-            FanfareLog::safeExecutePluginCall([&]() {
-              plugin->processBlock(fohBus, emptyMidiBuf);
-            }, "fohBus processBlock");
+        juce::AudioBuffer<float> fohView(fohBus.getArrayOfWritePointers(),
+                                         fohBus.getNumChannels(), numSamples);
+        for (size_t idx = 0; idx < fohPluginChain.size(); ++idx) {
+          auto &plugin = fohPluginChain[idx];
+          if (plugin && (idx >= 3 || !fohFxBypassed[idx].load(std::memory_order_relaxed))) {
+            bool ok = FanfareLog::safeExecutePluginCall([&]() {
+              plugin->processBlock(fohView, emptyMidiBuf);
+            }, "fohBus processBlock", -1);
+            if (!ok) {
+              fohView.clear();
+              if (idx < 3) {
+                int errs = fohFxFaultCount[idx].fetch_add(1, std::memory_order_relaxed) + 1;
+                if (errs >= FanfareConstants::kMaxPluginExceptionsBeforeBypass) {
+                  fohFxBypassed[idx].store(true, std::memory_order_relaxed);
+                  recordFlightEvent(-1, "ERROR: FOH Master FX faulted max consecutive times -> AUTO-BYPASSED");
+                }
+              }
+            } else if (idx < 3) {
+              fohFxFaultCount[idx].store(0, std::memory_order_relaxed);
+            }
           }
         }
-        for (auto &plugin : iemPluginChain) {
-          if (plugin) {
-            FanfareLog::safeExecutePluginCall([&]() {
-              plugin->processBlock(iemBus, emptyMidiBuf);
-            }, "iemBus processBlock");
+        juce::AudioBuffer<float> iemView(iemBus.getArrayOfWritePointers(),
+                                         iemBus.getNumChannels(), numSamples);
+        for (size_t idx = 0; idx < iemPluginChain.size(); ++idx) {
+          auto &plugin = iemPluginChain[idx];
+          if (plugin && (idx >= 3 || !iemFxBypassed[idx].load(std::memory_order_relaxed))) {
+            bool ok = FanfareLog::safeExecutePluginCall([&]() {
+              plugin->processBlock(iemView, emptyMidiBuf);
+            }, "iemBus processBlock", -1);
+            if (!ok) {
+              iemView.clear();
+              if (idx < 3) {
+                int errs = iemFxFaultCount[idx].fetch_add(1, std::memory_order_relaxed) + 1;
+                if (errs >= FanfareConstants::kMaxPluginExceptionsBeforeBypass) {
+                  iemFxBypassed[idx].store(true, std::memory_order_relaxed);
+                  recordFlightEvent(-1, "ERROR: IEM Master FX faulted max consecutive times -> AUTO-BYPASSED");
+                }
+              }
+            } else if (idx < 3) {
+              iemFxFaultCount[idx].store(0, std::memory_order_relaxed);
+            }
           }
         }
       }
@@ -625,23 +690,33 @@ void processAudio(const float *const *inputData, int numInputs,
       }
     }
 
-    // --- Pre-DAC Hearing & Hardware Protection (per-sample NaN / Inf scrub + peak) ---
-    auto sanitizeAndPeak = [](float *data, int n) noexcept -> float {
+    // --- Pre-DAC Hearing & Hardware Protection (per-sample NaN / Inf hold + 0 dBFS soft-knee brickwall limiter) ---
+    auto sanitizeAndPeak = [](float *data, int n, int &nanHold, bool softKneeIem = false) noexcept -> float {
       if (data == nullptr || n <= 0)
         return 0.0f;
       float peak = 0.0f;
       for (int s = 0; s < n; ++s) {
         float v = data[s];
         if (!std::isfinite(v)) {
+          nanHold = 64;
           v = 0.0f;
-          data[s] = 0.0f;
-        } else if (v > 8.0f) {
-          v = 8.0f;
-          data[s] = 8.0f;
-        } else if (v < -8.0f) {
-          v = -8.0f;
-          data[s] = -8.0f;
+        } else if (nanHold > 0) {
+          --nanHold;
+          v = 0.0f;
+        } else if (softKneeIem) {
+          // Soft-knee saturation above 0.85 (-1.4 dBFS) converging cleanly to +/-1.0f (0 dBFS) for IEM hearing safety
+          const float avRaw = std::abs(v);
+          if (avRaw > 0.85f) {
+            const float excess = avRaw - 0.85f;
+            const float compressed = 0.85f + 0.15f * (excess / (0.15f + excess));
+            v = (v >= 0.0f) ? compressed : -compressed;
+          }
+          v = juce::jlimit(-1.0f, 1.0f, v);
+        } else {
+          // FOH / direct hardware out brickwall ceiling at +/-1.0f (0 dBFS)
+          v = juce::jlimit(-1.0f, 1.0f, v);
         }
+        data[s] = v;
         const float av = std::abs(v);
         if (av > peak)
           peak = av;
@@ -649,13 +724,13 @@ void processAudio(const float *const *inputData, int numInputs,
       return peak;
     };
 
-    float fL = sanitizeAndPeak(fohBus.getWritePointer(0), numSamples);
+    float fL = sanitizeAndPeak(fohBus.getWritePointer(0), numSamples, fohNanHold[0], false);
     float fR = (fohBus.getNumChannels() > 1)
-                   ? sanitizeAndPeak(fohBus.getWritePointer(1), numSamples)
+                   ? sanitizeAndPeak(fohBus.getWritePointer(1), numSamples, fohNanHold[1], false)
                    : fL;
-    float iL = sanitizeAndPeak(iemBus.getWritePointer(0), numSamples);
+    float iL = sanitizeAndPeak(iemBus.getWritePointer(0), numSamples, iemNanHold[0], true);
     float iR = (iemBus.getNumChannels() > 1)
-                   ? sanitizeAndPeak(iemBus.getWritePointer(1), numSamples)
+                   ? sanitizeAndPeak(iemBus.getWritePointer(1), numSamples, iemNanHold[1], true)
                    : iL;
 
     // --- Copy Buses to Hardware Outputs ---
@@ -700,7 +775,7 @@ void processAudio(const float *const *inputData, int numInputs,
                 juce::FloatVectorOperations::addWithMultiply(
                     outputData[dirCh + 1], scratchBuffers[i].getReadPointer(1),
                     fohBase, numSamples);
-                (void)sanitizeAndPeak(outputData[dirCh + 1], numSamples);
+                (void)sanitizeAndPeak(outputData[dirCh + 1], numSamples, directOutNanHold, false);
               }
             } else {
               // Mono direct out: sum L + R * 0.5f if 2 channels, or L if 1 channel
@@ -718,7 +793,7 @@ void processAudio(const float *const *inputData, int numInputs,
                     fohBase, numSamples);
               }
             }
-            (void)sanitizeAndPeak(outputData[dirCh], numSamples);
+            (void)sanitizeAndPeak(outputData[dirCh], numSamples, directOutNanHold, false);
           }
         }
       }
@@ -753,9 +828,11 @@ void importRigFromJson(const juce::String &json) {
   struct ScopedAudioQuietWindow {
     FanfareEngine &eng;
     bool owned = false;
+    juce::int64 startTicks = 0;
     explicit ScopedAudioQuietWindow(FanfareEngine &e) : eng(e) {
       if (!eng.isApplyingRig.exchange(true, std::memory_order_seq_cst)) {
         owned = true;
+        startTicks = juce::Time::getHighResolutionTicks();
         while (eng.isInProcessAudio.load(std::memory_order_seq_cst) ||
                eng.dspInFlightWorkers.load(std::memory_order_seq_cst) != 0) {
           juce::Thread::sleep(1);
@@ -764,12 +841,42 @@ void importRigFromJson(const juce::String &json) {
     }
     ~ScopedAudioQuietWindow() {
       if (owned) {
-        eng.lastRigApplyEndTicks.store(juce::Time::getHighResolutionTicks(),
-                                       std::memory_order_release);
+        const juce::int64 endTicks = juce::Time::getHighResolutionTicks();
+        eng.lastRigApplyEndTicks.store(endTicks, std::memory_order_release);
         eng.isApplyingRig.store(false, std::memory_order_seq_cst);
+        const double elapsedMs =
+            juce::Time::highResolutionTicksToSeconds(endTicks - startTicks) * 1000.0;
+        eng.lastQuietWindowMs.store((float)elapsedMs, std::memory_order_relaxed);
+        recordFlightEvent(-1, "TRACE: ScopedAudioQuietWindow exited");
       }
     }
   };
+  float getLastQuietWindowMs() const noexcept {
+    return lastQuietWindowMs.load(std::memory_order_relaxed);
+  }
+  std::function<void(juce::AudioPluginInstance *)> onBeforePluginDestroyed;
+
+  void enqueueReapPlugin(std::unique_ptr<juce::AudioPluginInstance> p) {
+    if (p) {
+      if (onBeforePluginDestroyed)
+        onBeforePluginDestroyed(p.get());
+      pendingReapPlugins.push_back(std::move(p));
+    }
+  }
+  void flushReapQueue() {
+    std::vector<std::unique_ptr<juce::AudioPluginInstance>> toReap;
+    toReap.swap(pendingReapPlugins);
+    for (auto &p : toReap) {
+      if (p) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(p.get());
+        FanfareLog::safeExecutePluginCall([&]() {
+          p->releaseResources();
+          p.reset();
+        }, "flushReapQueue releaseResources/reset");
+      }
+    }
+  }
 void applyRig(const juce::var &rig);
 void performLegacyMigration();
 Fanfare::Song getSongRepresentation(const juce::String& songName = "Current Rig");
@@ -992,6 +1099,8 @@ std::atomic<uint32_t> dspTuningGen{1};
 int dspSlotQueue[FanfareConstants::kNumSlots] = {};
 const float *const *dspRawInput = nullptr;
 int dspNumInputs = 0;
+std::atomic<int> dspActiveSamples{512};
+std::atomic<int> consecutiveParallelTimeouts{0};
 std::atomic<int> dspNextJobIdx{FanfareConstants::kNumSlots};
 std::atomic<int> dspJobCount{0};
 std::atomic<int> dspInFlightWorkers{0};
@@ -1007,13 +1116,22 @@ void runDspWorkerLoop(int workerIdx);
 // Post-load fade-in to prevent transient bursts when a rig is applied
   std::atomic<int> postLoadFadeRemaining{0};
 std::atomic<int> postLoadFadeTotal{0};
-// Rig transition atomic guard + completion timestamp
+// Rig transition atomic guard + completion timestamp + telemetry
   std::atomic<bool> isApplyingRig{false};
 std::atomic<juce::int64> lastRigApplyEndTicks{0};
+std::atomic<float> lastQuietWindowMs{0.0f};
+std::vector<std::unique_ptr<juce::AudioPluginInstance>> pendingReapPlugins;
 // Master FX chains
   juce::SpinLock masterFxLock;
 std::vector<std::unique_ptr<juce::AudioPluginInstance>> fohPluginChain;
 std::vector<std::unique_ptr<juce::AudioPluginInstance>> iemPluginChain;
+std::atomic<int> fohFxFaultCount[3]{};
+std::atomic<int> iemFxFaultCount[3]{};
+std::atomic<bool> fohFxBypassed[3]{};
+std::atomic<bool> iemFxBypassed[3]{};
+int fohNanHold[2] = {0, 0};
+int iemNanHold[2] = {0, 0};
+int directOutNanHold = 0;
 std::atomic<float> fohPeakL{0.0f}
 , fohPeakR{0.0f};
 std::atomic<float> iemPeakL{0.0f}

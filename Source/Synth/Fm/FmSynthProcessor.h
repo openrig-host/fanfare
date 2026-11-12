@@ -8,10 +8,10 @@
 #include <JuceHeader.h>
 #include <array>
 #include <atomic>
+#include <bitset>
 #include <cmath>
 #include <cstring>
 #include <map>
-#include <set>
 #include <vector>
 #include "../../FanfareConstants.h"
 #include "../../LushReverb.h"
@@ -53,9 +53,39 @@ public:
 
   std::atomic<bool> enabled{false};
 
+  enum FmCcParam : int {
+    ccParamVolume = 0,
+    ccParamFeedback,
+    ccParamAlgorithm,
+    ccParamLfoRate,
+    ccParamLfoPmd,
+    ccParamLfoAmd,
+    ccParamTranspose,
+    ccParamBendRange,
+    kNumFmCcParams
+  };
+
+  static int ccParamIndexForId(const juce::String &id) {
+    if (id == "volume") return ccParamVolume;
+    if (id == "feedback") return ccParamFeedback;
+    if (id == "algorithm") return ccParamAlgorithm;
+    if (id == "lfoRate") return ccParamLfoRate;
+    if (id == "lfoPmd") return ccParamLfoPmd;
+    if (id == "lfoAmd") return ccParamLfoAmd;
+    if (id == "transpose") return ccParamTranspose;
+    if (id == "bendRange") return ccParamBendRange;
+    return -1;
+  }
+
   FmSynthProcessor() {
+    scratchInt.assign((size_t)maxBlock, 0);
+    fxBuf.assign((size_t)2 * maxBlock, 0.0f);
+    uiMidiQueue.ensureSize(2048);
+    mergedMidiScratch.ensureSize(4096);
     for (int i = 0; i < (int)kNumFmFx; ++i)
       fx[(size_t)i].store(fxDefault(i), std::memory_order_relaxed);
+    for (int i = 0; i < (int)kNumFmCcParams; ++i)
+      ccParamAtomics[(size_t)i].store(-1, std::memory_order_relaxed);
     loadDefaultFactoryVoice();
   }
 
@@ -65,6 +95,8 @@ public:
     engine_.prepare(sampleRate);
     scratchInt.assign((size_t)maxBlock, 0);
     fxBuf.assign((size_t)2 * maxBlock, 0.0f);
+    uiMidiQueue.ensureSize(2048);
+    mergedMidiScratch.ensureSize(4096);
     chorus_.prepare(sampleRate);
     delay_.prepare(sampleRate, fx[fxDlyTime].load(std::memory_order_relaxed));
     reverb_.prepare(sampleRate);
@@ -376,9 +408,17 @@ public:
       }
     }
     ccMap_.clear();
+    for (int i = 0; i < (int)kNumFmCcParams; ++i)
+      ccParamAtomics[(size_t)i].store(-1, std::memory_order_relaxed);
     if (auto *cc = obj->getProperty("ccMap").getDynamicObject()) {
-      for (const auto &kv : cc->getProperties())
-        ccMap_[kv.name.toString()] = (int)kv.value;
+      for (const auto &kv : cc->getProperties()) {
+        const juce::String key = kv.name.toString();
+        const int val = (int)kv.value;
+        ccMap_[key] = val;
+        const int idx = ccParamIndexForId(key);
+        if (idx >= 0)
+          ccParamAtomics[(size_t)idx].store(val, std::memory_order_relaxed);
+      }
     }
     syncCatalogIndex();
     return true;
@@ -389,10 +429,16 @@ public:
             "transpose", "bendRange"};
   }
   int getCCForParam(const juce::String &id) const {
+    const int idx = ccParamIndexForId(id);
+    if (idx >= 0)
+      return ccParamAtomics[(size_t)idx].load(std::memory_order_relaxed);
     auto it = ccMap_.find(id);
     return it != ccMap_.end() ? it->second : -1;
   }
   void setCCForParam(const juce::String &id, int cc) {
+    const int idx = ccParamIndexForId(id);
+    if (idx >= 0)
+      ccParamAtomics[(size_t)idx].store(cc, std::memory_order_relaxed);
     if (cc < 0)
       ccMap_.erase(id);
     else
@@ -411,29 +457,31 @@ public:
     if (panicPending.exchange(false, std::memory_order_acq_rel))
       panicNow();
 
-    juce::MidiBuffer merged;
+    mergedMidiScratch.clear();
     {
-      juce::MidiBuffer injected;
       juce::SpinLock::ScopedTryLockType sl(uiMidiLock);
-      if (sl.isLocked())
-        injected.swapWith(uiMidiQueue);
-      if (!injected.isEmpty())
-        merged.addEvents(injected, 0, -1, 0);
+      if (sl.isLocked() && !uiMidiQueue.isEmpty()) {
+        mergedMidiScratch.addEvents(uiMidiQueue, 0, -1, 0);
+        uiMidiQueue.clear();
+      }
     }
-    merged.addEvents(midiMessages, 0, -1, 0);
+    if (!midiMessages.isEmpty())
+      mergedMidiScratch.addEvents(midiMessages, 0, -1, 0);
 
-    for (const auto meta : merged) {
+    for (const auto meta : mergedMidiScratch) {
       const auto msg = meta.getMessage();
       if (msg.isNoteOn() && msg.getVelocity() > 0) {
-        if (sustainOn.load())
-          heldNotes.insert(msg.getNoteNumber());
-        engine_.noteOn(msg.getNoteNumber(), msg.getVelocity());
+        const int note = juce::jlimit(0, 127, msg.getNoteNumber());
+        if (sustainOn.load(std::memory_order_relaxed))
+          heldNotes.set((size_t)note, true);
+        engine_.noteOn(note, msg.getVelocity());
       } else if (msg.isNoteOff() || (msg.isNoteOn() && msg.getVelocity() == 0)) {
-        if (sustainOn.load()) {
-          heldNotes.insert(msg.getNoteNumber());
+        const int note = juce::jlimit(0, 127, msg.getNoteNumber());
+        if (sustainOn.load(std::memory_order_relaxed)) {
+          heldNotes.set((size_t)note, true);
         } else {
-          heldNotes.erase(msg.getNoteNumber());
-          engine_.noteOff(msg.getNoteNumber());
+          heldNotes.set((size_t)note, false);
+          engine_.noteOff(note);
         }
       } else if (msg.isController()) {
         handleCC(msg.getControllerNumber(), msg.getControllerValue());
@@ -441,7 +489,7 @@ public:
         engine_.setPitchBend(msg.getPitchWheelValue());
       } else if (msg.isAllNotesOff() || msg.isAllSoundOff()) {
         engine_.allNotesOff();
-        heldNotes.clear();
+        heldNotes.reset();
       }
     }
 
@@ -600,43 +648,65 @@ private:
       setVolume(value / 127.0f);
       break;
     case 64:
-      sustainOn.store(value >= 64);
+      sustainOn.store(value >= 64, std::memory_order_relaxed);
       if (value < 64) {
-        for (int n : heldNotes)
-          engine_.noteOff(n);
-        heldNotes.clear();
+        for (size_t n = 0; n < 128; ++n) {
+          if (heldNotes.test(n))
+            engine_.noteOff((int)n);
+        }
+        heldNotes.reset();
       }
       break;
     case 120:
     case 123:
       engine_.allNotesOff();
-      heldNotes.clear();
+      heldNotes.reset();
       break;
     default:
       break;
     }
-    for (const auto &kv : ccMap_) {
-      if (kv.second != cc)
+    const float norm = value / 127.0f;
+    bool patchModified = false;
+    auto &p = engine_.patch();
+    for (int i = 0; i < (int)kNumFmCcParams; ++i) {
+      if (ccParamAtomics[(size_t)i].load(std::memory_order_relaxed) != cc)
         continue;
-      auto &p = engine_.patch();
-      const float norm = value / 127.0f;
-      if (kv.first == "volume")
+      switch (i) {
+      case ccParamVolume:
         setVolume(norm);
-      else if (kv.first == "feedback")
+        break;
+      case ccParamFeedback:
         p.d[135] = (uint8_t)(norm * 7.0f);
-      else if (kv.first == "algorithm") {
+        patchModified = true;
+        break;
+      case ccParamAlgorithm: {
         const int mx = FanfareFm::fmModeMaxAlg(engine_.mode());
         p.d[134] = (uint8_t)juce::jlimit(0, mx - 1, (int)(norm * mx));
-      } else if (kv.first == "lfoRate")
+        patchModified = true;
+        break;
+      }
+      case ccParamLfoRate:
         p.d[137] = (uint8_t)(norm * 99.0f);
-      else if (kv.first == "lfoPmd")
+        patchModified = true;
+        break;
+      case ccParamLfoPmd:
         p.d[139] = (uint8_t)(norm * 99.0f);
-      else if (kv.first == "lfoAmd")
+        patchModified = true;
+        break;
+      case ccParamLfoAmd:
         p.d[140] = (uint8_t)(norm * 99.0f);
-      else if (kv.first == "transpose")
+        patchModified = true;
+        break;
+      case ccParamTranspose:
         p.d[144] = (uint8_t)juce::jlimit(0, 48, (int)(norm * 48.0f));
-      engine_.setPatch(p);
+        patchModified = true;
+        break;
+      default:
+        break;
+      }
     }
+    if (patchModified)
+      engine_.setPatch(p);
   }
 
   FanfareFm::FmEngine engine_;
@@ -645,6 +715,7 @@ private:
   std::vector<int32_t> scratchInt;
   std::vector<float> fxBuf;
   std::array<std::atomic<float>, kNumFmFx> fx{};
+  std::array<std::atomic<int>, kNumFmCcParams> ccParamAtomics{};
   FanfareSynth::Dsp::JunoChorus chorus_;
   FanfareSynth::Dsp::PingPongDelay delay_;
   FanfareDSP::LushReverb reverb_;
@@ -656,6 +727,7 @@ private:
   std::atomic<float> volume{0.8f};
   juce::SpinLock uiMidiLock;
   juce::MidiBuffer uiMidiQueue;
+  juce::MidiBuffer mergedMidiScratch;
   juce::String presetName{"E.PIANO 1"};
   juce::String presetProvenance{"DX7"};
   juce::String presetCategory{"Electric Piano & Clav"};
@@ -664,5 +736,5 @@ private:
   std::vector<PresetEntry> catalog;
   std::vector<PresetEntry> importedBank_;
   std::map<juce::String, int> ccMap_;
-  std::set<int> heldNotes;
+  std::bitset<128> heldNotes;
 };

@@ -1,0 +1,141 @@
+{
+  "stripFormat": 1,
+  "name": "Slot 10",
+  "iconIndex": 0,
+  "channelColor": "ff2a2a2a",
+  "level": 0.800000011920929,
+  "foh": true,
+  "iem": true,
+  "mute": false,
+  "inputIndex": -1,
+  "aux1": 0.0,
+  "aux2": 0.0,
+  "iemOffset": 1.0,
+  "transposeOctaves": 0,
+  "transposeSemitones": 0,
+  "lowNote": 0,
+  "highNote": 127,
+  "allowedCCs": "64,",
+  "fohCC": -1,
+  "iemCC": -1,
+  "midiChannel": -1,
+  "strip": {
+    "gateEnabled": false,
+    "gateThreshold": -60.0,
+    "eqEnabled": true,
+    "hpfFreq": 20.0,
+    "eqLow": 0.0,
+    "eqHigh": 3.599999904632568,
+    "compEnabled": false,
+    "compAmount": 0.0,
+    "chorusEnabled": false,
+    "chorusRate": 1.0,
+    "chorusMix": 0.0,
+    "reverbEnabled": false,
+    "reverbSize": 0.5,
+    "reverbMix": 0.0
+  },
+  "arpeggiator": {
+    "enabled": false,
+    "bpm": 127.0,
+    "octavesUp": 0,
+    "octavesDown": 0,
+    "gate": 0.899999976158142,
+    "patternIdx": 3
+  },
+  "harmonizer": {
+    "enabled": false,
+    "octavesUp": 1,
+    "octavesDown": 0,
+    "africaMode": 0,
+    "harmonyTargetSlot": -1
+  },
+  "sampler": {
+    "enabled": true,
+    "slots": [
+      {
+        "wavPath": "C:\\sampkes\\Korg-N1R-Clap.wav",
+        "rootNote": 21,
+        "keyLow": 21,
+        "keyHigh": 21,
+        "pitchOffset": 0.0,
+        "volume": 1.179999947547913,
+        "startRatio": 0.0,
+        "endRatio": 1.0
+      },
+      {
+        "wavPath": "",
+        "rootNote": 60,
+        "keyLow": 0,
+        "keyHigh": 127,
+        "pitchOffset": 0.0,
+        "volume": 1.0,
+        "startRatio": 0.0,
+        "endRatio": 1.0
+      },
+      {
+        "wavPath": "",
+        "rootNote": 60,
+        "keyLow": 0,
+        "keyHigh": 127,
+        "pitchOffset": 0.0,
+        "volume": 1.0,
+        "startRatio": 0.0,
+        "endRatio": 1.0
+      },
+      {
+        "wavPath": "",
+        "rootNote": 60,
+        "keyLow": 0,
+        "keyHigh": 127,
+        "pitchOffset": 0.0,
+        "volume": 1.0,
+        "startRatio": 0.0,
+        "endRatio": 1.0
+      },
+      {
+        "wavPath": "",
+        "rootNote": 60,
+        "keyLow": 0,
+        "keyHigh": 127,
+        "pitchOffset": 0.0,
+        "volume": 1.0,
+        "startRatio": 0.0,
+        "endRatio": 1.0
+      },
+      {
+        "wavPath": "",
+        "rootNote": 60,
+        "keyLow": 0,
+        "keyHigh": 127,
+        "pitchOffset": 0.0,
+        "volume": 1.0,
+        "startRatio": 0.0,
+        "endRatio": 1.0
+      },
+      {
+        "wavPath": "",
+        "rootNote": 60,
+        "keyLow": 0,
+        "keyHigh": 127,
+        "pitchOffset": 0.0,
+        "volume": 1.0,
+        "startRatio": 0.0,
+        "endRatio": 1.0
+      },
+      {
+        "wavPath": "",
+        "rootNote": 60,
+        "keyLow": 0,
+        "keyHigh": 127,
+        "pitchOffset": 0.0,
+        "volume": 1.0,
+        "startRatio": 0.0,
+        "endRatio": 1.0
+      }
+    ]
+  },
+  "ccMappings": [],
+  "ccPassthroughs": [],
+  "chain": []
+}

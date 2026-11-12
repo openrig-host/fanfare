@@ -50,18 +50,25 @@ void LibraryList::toggleFavorite(const juce::File &f) {
 }
 
 juce::Colour LibraryList::detectBadgeColour(const juce::String &name, Kind k) {
-  // Muted stage-tape colors matching HUD sound-tag palette
+  // Muted stage-tape colors matching HUD sound-tag palette. The five hues
+  // are tuned for dark surfaces; light themes (Studio Daylight, Front Panel
+  // Bright) get a darkened pass so badges stay readable off the dark palette.
+  const bool lightTheme =
+      ThemeManager::get(Theme::Role::background).getPerceivedBrightness() > 0.5f;
+  auto badge = [lightTheme](juce::Colour c) -> juce::Colour {
+    return lightTheme ? c.darker(0.35f) : c;
+  };
   juce::String n = name.toLowerCase();
   if (n.contains("piano") || n.contains("wurl") || n.contains("rhodes") || n.contains("grand") || n.contains("steinway") || n.contains("keys"))
-    return juce::Colour(0xFF3D8FB8); // Stage Blue
+    return badge(juce::Colour(0xFF3D8FB8)); // Stage Blue
   if (n.contains("organ") || n.contains("b3") || n.contains("leslie"))
-    return juce::Colour(0xFFC98A2E); // Warm Amber
+    return badge(juce::Colour(0xFFC98A2E)); // Warm Amber
   if (n.contains("brass") || n.contains("horn") || n.contains("sax"))
-    return juce::Colour(0xFFB8564F); // Coral Red
+    return badge(juce::Colour(0xFFB8564F)); // Coral Red
   if (n.contains("synth") || n.contains("lead") || n.contains("pad") || n.contains("juno") || n.contains("arp") || n.contains("square"))
-    return juce::Colour(0xFF8668B0); // Muted Violet
+    return badge(juce::Colour(0xFF8668B0)); // Muted Violet
   if (n.contains("sample") || n.contains("perc") || n.contains("marimba") || n.contains("drum") || n.contains("handclap"))
-    return juce::Colour(0xFF4A9A68); // Sage Green
+    return badge(juce::Colour(0xFF4A9A68)); // Sage Green
   if (k == Kind::Setups)
     return ThemeManager::get(Theme::Role::accent);
   return ThemeManager::get(Theme::Role::engrave);

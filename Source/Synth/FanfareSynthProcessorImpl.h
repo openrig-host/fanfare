@@ -36,6 +36,10 @@ public:
   }
 
   FanfareSynthProcessor() {
+    synthBuffer.setSize(2, FanfareSynth::DspConfig::kMinBlockSize, false, false, true);
+    synthBuffer.clear();
+    lfoScratch.assign((size_t)FanfareSynth::DspConfig::kMinBlockSize, 0.0f);
+    uiMidiQueue.ensureSize(2048);
     for (int i = 0; i < (int)units.size(); ++i)
       units[(size_t)i].initCardTolerance(i);
     for (int i = 0; i < (int)stealTails.size(); ++i)
@@ -53,6 +57,7 @@ public:
     synthBuffer.setSize(2, safeBlock, false, false, true);
     synthBuffer.clear();
     lfoScratch.assign((size_t)safeBlock, 0.0f);
+    uiMidiQueue.ensureSize(2048);
 
     chorus.prepare(currentSampleRate);
     delay.prepare(currentSampleRate, getParam(ParamId::dlyTime));
@@ -342,14 +347,11 @@ public:
       panicNow();
 
     {
-      juce::MidiBuffer injected;
-      {
-        juce::SpinLock::ScopedTryLockType sl(uiMidiLock);
-        if (sl.isLocked())
-          injected.swapWith(uiMidiQueue);
+      juce::SpinLock::ScopedTryLockType sl(uiMidiLock);
+      if (sl.isLocked() && !uiMidiQueue.isEmpty()) {
+        midiMessages.addEvents(uiMidiQueue, 0, -1, 0);
+        uiMidiQueue.clear();
       }
-      if (!injected.isEmpty())
-        midiMessages.addEvents(injected, 0, -1, 0);
     }
 
     ParamSnapshot snap;

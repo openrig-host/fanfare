@@ -406,6 +406,27 @@ private:
   juce::TextButton midiMonitorToggle{"MIDI MON"};
   std::unique_ptr<MidiMonitorComponent> midiMonitorPanel;
   bool midiMonitorVisible = false;
+  // Last-MIDI-event summary for midiMonitorLabel: written by the MIDI thread
+  // in handleIncomingMidiMessage, drained by timerCallback on the message
+  // thread (no cross-thread UI calls).
+  juce::SpinLock midiStatusLock;
+  juce::String midiStatusText;
+  void noteMidiStatus(const juce::MidiMessage &msg);
+  juce::String takeMidiStatusText() {
+    const juce::SpinLock::ScopedLockType sl(midiStatusLock);
+    return midiStatusText;
+  }
+  // Song-load outcome shown in the preload status segment with a short hold;
+  // updatePreloadStatus honours it so the automatic preload text can't wipe
+  // the message the instant it is set.
+  juce::String heldSongStatus;
+  juce::Time songStatusHoldUntil;
+  void showSongStatus(const juce::String &text) {
+    heldSongStatus = text;
+    songStatusHoldUntil = juce::Time::getCurrentTime() + juce::RelativeTime::seconds(5.0);
+    preloadStatusLabel.setVisible(true);
+    preloadStatusLabel.setText(text, juce::dontSendNotification);
+  }
 
   void changeListenerCallback(juce::ChangeBroadcaster *source) override;
 
@@ -414,6 +435,9 @@ private:
     // Skip SysEx messages - they can cause issues and we don't need them
     if (msg.isSysEx())
       return;
+
+    // Status-bar readout of the last playable event (see noteMidiStatus).
+    noteMidiStatus(msg);
 
     // Feed detailed monitor panel before any early returns so learned/triggered
     // events (and [CAPTURED] CC learn states) are always visible in the monitor.

@@ -580,6 +580,10 @@ void drawStudioButtonBackground(juce::Graphics &g, juce::Button &button,
 
 juce::Colour studioButtonTextColour(const juce::Button &button, Fanfare::ButtonRole role, bool isActive) {
   const auto &t = ThemeManager::getInstance().active();
+  // Strip tool lights: KEY / "..." buttons lit amber while their tool is
+  // active (set via the "toolActive" property from the strip timer).
+  if (static_cast<bool>(button.getProperties().getWithDefault("toolActive", false)))
+    return t.warn;
   const bool isSend = static_cast<bool>(button.getProperties().getWithDefault("isSendToggle", false));
   switch (role) {
     case Fanfare::ButtonRole::Panic:
@@ -628,6 +632,12 @@ void BoutiqueLookAndFeel::drawButtonBackground(juce::Graphics &g,
     juce::ignoreUnused(backgroundColour);
     drawStudioButtonBackground(g, button, role, isActive,
                                shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
+    // Flat Studio buttons otherwise give keyboard navigation no visual
+    // feedback: 1px accent ring while focused.
+    if (button.hasKeyboardFocus(false)) {
+      g.setColour(t.accent.withAlpha(0.9f));
+      g.drawRoundedRectangle(fullBounds.reduced(1.0f), 3.0f, 1.0f);
+    }
     return;
   }
 

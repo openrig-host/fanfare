@@ -35,6 +35,8 @@ public:
   }
   ~RackSlot() = default;
 
+  std::function<void(juce::AudioPluginInstance *)> onBeforePluginDestroyed;
+
   void prepare(double sampleRate, int maxBlockSize = 8192) {
     lastSampleRate = sampleRate;
     strip.prepare(sampleRate);
@@ -140,6 +142,8 @@ public:
         oldPlugin = std::move(pluginChain[i]);
     }
     if (oldPlugin) {
+      if (onBeforePluginDestroyed)
+        onBeforePluginDestroyed(oldPlugin.get());
       FanfareLog::safeExecutePluginCall([&]() {
         oldPlugin->releaseResources();
         oldPlugin.reset();
@@ -194,6 +198,8 @@ public:
           oldPlugin = std::move(pluginChain[i]);
       }
       if (oldPlugin) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(oldPlugin.get());
         FanfareLog::safeExecutePluginCall([&]() {
           oldPlugin->releaseResources();
           oldPlugin.reset();
@@ -240,6 +246,8 @@ public:
           oldPlugin = std::move(pluginChain[i]);
       }
       if (oldPlugin) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(oldPlugin.get());
         FanfareLog::safeExecutePluginCall([&]() {
           oldPlugin->releaseResources();
           oldPlugin.reset();
@@ -308,10 +316,10 @@ public:
     if (unbypassPanicPending.exchange(false))
       appendPanic(midiMessages, 0);
 
-    // 1. Merge injected MIDI from harmony routers (thread-safe)
+    // 1. Merge injected MIDI from harmony routers (thread-safe, non-blocking try-lock)
     {
-      juce::SpinLock::ScopedLockType sl(injectedMidiLock);
-      if (!injectedMidi.isEmpty()) {
+      juce::SpinLock::ScopedTryLockType sl(injectedMidiLock);
+      if (sl.isLocked() && !injectedMidi.isEmpty()) {
         midiMessages.addEvents(injectedMidi, 0, -1, 0);
         injectedMidi.clear();
       }
@@ -639,13 +647,31 @@ public:
                 if (i == drainSlot.load() && !drainPanicSent.exchange(true))
                   appendPanic(filteredMidiScratch, 0);
 
-                FanfareLog::safeExecutePluginCall([&]() {
+                bool callOk = FanfareLog::safeExecutePluginCall([&]() {
                   plugin->processBlock(scratchBuffer, filteredMidiScratch);
-                }, "processBlock (slot instrument)");
+                }, "processBlock (slot instrument)", i);
+
+                if (!callOk) {
+                  scratchBuffer.clear(0, numSamp);
+                  int errs = consecutivePluginErrors.fetch_add(1, std::memory_order_relaxed) + 1;
+                  if (errs >= FanfareConstants::kMaxPluginExceptionsBeforeBypass) {
+                    if (i < 3) {
+                      chainSettings[i].enabled.store(false);
+                      if (drainSlot.load() == i)
+                        drainSlot.store(-1);
+                      recordFlightEvent(i, "ERROR: Instrument faulted max consecutive times -> AUTO-DISABLED");
+                    } else {
+                      bypassed.store(true);
+                      recordFlightEvent(i, "ERROR: Plugin faulted max consecutive times -> AUTO-BYPASSED");
+                    }
+                  }
+                } else {
+                  consecutivePluginErrors.store(0, std::memory_order_relaxed);
+                }
 
                 // One-shot MIDI flow trace: fires on the first block that
                 // actually carries events, proving notes reach this plugin (lock-free RT flight ring).
-                if (filteredMidiScratch.getNumEvents() > 0 && !midiTraceLogged.exchange(true)) {
+                if (callOk && filteredMidiScratch.getNumEvents() > 0 && !midiTraceLogged.exchange(true)) {
                   recordFlightEvent(i, "TRACE: first non-empty MIDI block reached slot instrument");
                 }
                 scratchBuffer.applyGain(instGain);
@@ -672,11 +698,20 @@ public:
               } else {
                 if (i == enablePanicSlot.load())
                   enablePanicSlot.store(-1);
-                FanfareLog::safeExecutePluginCall([&]() {
+                bool callOk = FanfareLog::safeExecutePluginCall([&]() {
                   plugin->processBlock(slotBuffer, midiMessages);
-                }, "processBlock (slot effect)");
+                }, "processBlock (slot effect)", i);
+                if (!callOk) {
+                  slotBuffer.clear();
+                  int errs = consecutivePluginErrors.fetch_add(1, std::memory_order_relaxed) + 1;
+                  if (errs >= FanfareConstants::kMaxPluginExceptionsBeforeBypass) {
+                    bypassed.store(true);
+                    recordFlightEvent(i, "ERROR: Effect plugin faulted max consecutive times -> AUTO-BYPASSED");
+                  }
+                } else {
+                  consecutivePluginErrors.store(0, std::memory_order_relaxed);
+                }
               }
-              consecutivePluginErrors.store(0);
             } catch (...) {
               int errs = consecutivePluginErrors.fetch_add(1) + 1;
               if (errs >= FanfareConstants::kMaxPluginExceptionsBeforeBypass) {
@@ -753,17 +788,21 @@ public:
                   juce::AudioBuffer<float> &fohBus,
                   juce::AudioBuffer<float> &iemBus,
                   juce::AudioBuffer<float> &aux1,
-                  juce::AudioBuffer<float> &aux2) {
+                  juce::AudioBuffer<float> &aux2,
+                  int activeSamples = -1) {
     if (bypassed.load())
       return;
 
-    int numSamples = slotBuffer.getNumSamples();
+    int numSamples = (activeSamples >= 0)
+                         ? juce::jmin(activeSamples, slotBuffer.getNumSamples())
+                         : slotBuffer.getNumSamples();
     int channelsToSum =
         (slotBuffer.getNumChannels() < 2) ? slotBuffer.getNumChannels() : 2;
 
     float fohBase = fohLevel.load();
+    float iemFader = iemLevel.load(); // IEM fader is the IEM bus base level
     float offset = iemOffset.load();
-    float iemBase = fohBase * offset; // IEM level is relative to FOH
+    float iemBase = iemFader * offset; // bus level = IEM fader x IEM trim
 
     float a1Level = aux1SendLevel.load();
     float a2Level = aux2SendLevel.load();
@@ -791,11 +830,14 @@ public:
   void sumToFohBusOnly(const juce::AudioBuffer<float> &slotBuffer,
                        juce::AudioBuffer<float> &fohBus,
                        juce::AudioBuffer<float> &aux1,
-                       juce::AudioBuffer<float> &aux2) {
+                       juce::AudioBuffer<float> &aux2,
+                       int activeSamples = -1) {
     if (bypassed.load())
       return;
 
-    int numSamples = slotBuffer.getNumSamples();
+    int numSamples = (activeSamples >= 0)
+                         ? juce::jmin(activeSamples, slotBuffer.getNumSamples())
+                         : slotBuffer.getNumSamples();
     int channelsToSum = (slotBuffer.getNumChannels() < 2) ? slotBuffer.getNumChannels() : 2;
 
     float fohBase = fohLevel.load();
@@ -818,16 +860,19 @@ public:
   }
 
   void sumToIemBus(const juce::AudioBuffer<float> &slotBuffer,
-                   juce::AudioBuffer<float> &iemBus) {
+                   juce::AudioBuffer<float> &iemBus,
+                   int activeSamples = -1) {
     if (bypassed.load() || !iemEnabled.load())
       return;
 
-    int numSamples = slotBuffer.getNumSamples();
+    int numSamples = (activeSamples >= 0)
+                         ? juce::jmin(activeSamples, slotBuffer.getNumSamples())
+                         : slotBuffer.getNumSamples();
     int channelsToSum = (slotBuffer.getNumChannels() < 2) ? slotBuffer.getNumChannels() : 2;
 
-    float fohBase = fohLevel.load();
+    float iemFader = iemLevel.load(); // IEM fader is the IEM bus base level
     float offset = iemOffset.load();
-    float iemBase = fohBase * offset;
+    float iemBase = iemFader * offset; // bus level = IEM fader x IEM trim
 
     for (int ch = 0; ch < channelsToSum; ++ch) {
       const float *ptr = slotBuffer.getReadPointer(ch);
@@ -841,11 +886,14 @@ public:
   void sumToSubgroup(const juce::AudioBuffer<float> &slotBuffer,
                      juce::AudioBuffer<float> &destBuffer,
                      juce::AudioBuffer<float> &aux1,
-                     juce::AudioBuffer<float> &aux2) {
+                     juce::AudioBuffer<float> &aux2,
+                     int activeSamples = -1) {
     if (bypassed.load())
       return;
 
-    int numSamples = slotBuffer.getNumSamples();
+    int numSamples = (activeSamples >= 0)
+                         ? juce::jmin(activeSamples, slotBuffer.getNumSamples())
+                         : slotBuffer.getNumSamples();
     int channelsToSum =
         (slotBuffer.getNumChannels() < 2) ? slotBuffer.getNumChannels() : 2;
 
@@ -1039,8 +1087,10 @@ public:
   }
 
   // --- Plugin Management ---
-  void setPluginInChain(int chainIndex,
-                        std::unique_ptr<juce::AudioPluginInstance> newPlugin) {
+  void setPluginInChain(
+      int chainIndex,
+      std::unique_ptr<juce::AudioPluginInstance> newPlugin,
+      std::vector<std::unique_ptr<juce::AudioPluginInstance>> *deferredReap = nullptr) {
     if (chainIndex < 0 || chainIndex >= 3)
       return;
 
@@ -1066,14 +1116,20 @@ public:
     }
 
     if (oldPlugin) {
-      FanfareLog::safeExecutePluginCall([&]() {
-        oldPlugin->releaseResources();
-        oldPlugin.reset();
-      }, "oldPlugin releaseResources/reset");
+      if (onBeforePluginDestroyed)
+        onBeforePluginDestroyed(oldPlugin.get());
+      if (deferredReap != nullptr) {
+        deferredReap->push_back(std::move(oldPlugin));
+      } else {
+        FanfareLog::safeExecutePluginCall([&]() {
+          oldPlugin->releaseResources();
+          oldPlugin.reset();
+        }, "oldPlugin releaseResources/reset");
+      }
     }
   }
 
-  void clearChain() {
+  void clearChain(std::vector<std::unique_ptr<juce::AudioPluginInstance>> *deferredReap = nullptr) {
     invalidateAllCachedCCParams();
     std::vector<std::unique_ptr<juce::AudioPluginInstance>> oldPlugins;
     {
@@ -1082,10 +1138,16 @@ public:
     }
     for (auto &p : oldPlugins) {
       if (p) {
-        FanfareLog::safeExecutePluginCall([&]() {
-          p->releaseResources();
-          p.reset();
-        }, "pluginChain releaseResources/reset");
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(p.get());
+        if (deferredReap != nullptr) {
+          deferredReap->push_back(std::move(p));
+        } else {
+          FanfareLog::safeExecutePluginCall([&]() {
+            p->releaseResources();
+            p.reset();
+          }, "pluginChain releaseResources/reset");
+        }
       }
     }
     for (int i = 0; i < 3; ++i) {
@@ -1095,7 +1157,9 @@ public:
     }
   }
 
-  void clearChainPreserve(const std::set<int> &chainIndicesToPreserve) {
+  void clearChainPreserve(
+      const std::set<int> &chainIndicesToPreserve,
+      std::vector<std::unique_ptr<juce::AudioPluginInstance>> *deferredReap = nullptr) {
     invalidateAllCachedCCParams();
     std::vector<std::unique_ptr<juce::AudioPluginInstance>> oldPlugins;
     {
@@ -1111,10 +1175,16 @@ public:
     }
     for (auto &p : oldPlugins) {
       if (p) {
-        FanfareLog::safeExecutePluginCall([&]() {
-          p->releaseResources();
-          p.reset();
-        }, "pluginChain preserve releaseResources/reset");
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(p.get());
+        if (deferredReap != nullptr) {
+          deferredReap->push_back(std::move(p));
+        } else {
+          FanfareLog::safeExecutePluginCall([&]() {
+            p->releaseResources();
+            p.reset();
+          }, "pluginChain preserve releaseResources/reset");
+        }
       }
     }
   }
@@ -1470,11 +1540,10 @@ public:
           fohLevel.store(ccVal / 127.0f);
         }
 
-        // IEM Trim / Level Control (0 = mute, 64 ~= unity 1.0x FOH, 127 = 2.0x / +6 dB)
+        // IEM Level Control: drives the IEM fader directly (the IEM trim
+        // knob stays independent so learned CCs and trims don't fight)
         if (iemCC.load() >= 0 && ccNum == iemCC.load()) {
-          const float norm = ccVal / 127.0f;
-          iemLevel.store(norm);
-          iemOffset.store(norm * 2.0f);
+          iemLevel.store(ccVal / 127.0f);
         }
 
         // Mute toggle: press (value > 64, same convention as setup
@@ -1713,7 +1782,7 @@ private:
 
   std::atomic<float> aux1SendLevel{0.0f};
   std::atomic<float> aux2SendLevel{0.0f};
-  std::atomic<float> iemOffset{1.0f}; // 1.0 = same as FOH, >1.0 = louder in IEM
+  std::atomic<float> iemOffset{1.0f}; // IEM trim: 1.0 = unity vs IEM fader, >1.0 = louder
   std::atomic<size_t> estimatedRamBytes{0};
   std::atomic<int> outputTarget{-1};
 

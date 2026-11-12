@@ -74,7 +74,8 @@ public:
 
     bool transpose12AsScale = true;
 
-    // MPE configuration. FIXME - make this switchable
+    // MPE configuration. Switchable via FmEngine::setMpeEnabled(); the
+    // vendored msfa still has no per-channel decode layer that reads it.
     bool mpeEnabled = true;
     int mpePitchBendRange = 24;
     

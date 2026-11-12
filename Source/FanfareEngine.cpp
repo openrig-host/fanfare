@@ -49,6 +49,18 @@ FanfareEngine::FanfareEngine()
             if (targetSlot >= 0 && targetSlot < (int)slots.size())
               slots[targetSlot]->injectMidi(buffer);
           });
+      slots[i]->onBeforePluginDestroyed = [this](juce::AudioPluginInstance *pi) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(pi);
+      };
+    }
+    for (auto &aux : auxReturns) {
+      if (aux) {
+        aux->onBeforePluginDestroyed = [this](juce::AudioPluginInstance *pi) {
+          if (onBeforePluginDestroyed)
+            onBeforePluginDestroyed(pi);
+        };
+      }
     }
 
     initializeDefaultScenes();
@@ -93,6 +105,8 @@ FanfareEngine::~FanfareEngine()
     // Release Master FX chains
     for (auto &p : fohPluginChain) {
       if (p) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(p.get());
         FanfareLog::safeExecutePluginCall([&]() {
           p->releaseResources();
           p.reset();
@@ -103,6 +117,8 @@ FanfareEngine::~FanfareEngine()
 
     for (auto &p : iemPluginChain) {
       if (p) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(p.get());
         FanfareLog::safeExecutePluginCall([&]() {
           p->releaseResources();
           p.reset();
@@ -490,14 +506,17 @@ void FanfareEngine::deleteScene(int index)
 // Lock-free, zero-allocation slot DSP execution used by both Sequential and
   // Parallel Work-Sharing paths (eliminates juce::ThreadPool job->pool reuse races).
   void FanfareEngine::executeSlotDsp(int slotIdx, const float *const *rawInput,
-                      int numInputChannels, bool seedOnly) noexcept 
+                      int numInputChannels, bool seedOnly,
+                      int activeSamples) noexcept 
 {
     juce::ScopedNoDenormals noDenormals;
     if (slotIdx >= 0 && slotIdx < (int)slots.size()) {
       auto &slot = slots[slotIdx];
       auto &scratch = scratchBuffers[slotIdx];
       auto &midi = slotMidiBuffers[slotIdx];
-      int numSamples = scratch.getNumSamples();
+      int numSamples = (activeSamples > 0)
+                           ? juce::jmin(activeSamples, scratch.getNumSamples())
+                           : scratch.getNumSamples();
 
       int inputIdx = slot->getInputChannelIndex();
       if (inputIdx >= 0 && rawInput != nullptr && inputIdx < numInputChannels) {
@@ -515,8 +534,12 @@ void FanfareEngine::deleteScene(int index)
         }
       }
 
-      if (!seedOnly)
-        slot->processBlock(scratch, midi);
+      if (!seedOnly) {
+        juce::AudioBuffer<float> activeView(scratch.getArrayOfWritePointers(),
+                                            scratch.getNumChannels(),
+                                            numSamples);
+        slot->processBlock(activeView, midi);
+      }
     }
   }
 
@@ -524,28 +547,30 @@ void FanfareEngine::deleteScene(int index)
 
 void FanfareEngine::prepareToPlay(int samplesPerBlockExpected, double sampleRate) 
 {
+    ScopedAudioQuietWindow quietWindow(*this);
     currentSampleRate = sampleRate;
     currentBlockSize = samplesPerBlockExpected;
-    // We use 32 channels internally as a safety margin for multi-out VST3s
-    fohBus.setSize(32, samplesPerBlockExpected);
-    iemBus.setSize(32, samplesPerBlockExpected);
+    dspActiveSamples.store(samplesPerBlockExpected, std::memory_order_relaxed);
+    // Stereo buses (multi-out VST3 instruments render into RackSlot::scratchBuffer and sum stereo into slotBuffer)
+    fohBus.setSize(2, samplesPerBlockExpected);
+    iemBus.setSize(2, samplesPerBlockExpected);
 
-    // Initialize per-slot scratch buffers
+    // Initialize per-slot stereo scratch buffers
     scratchBuffers.resize(slots.size() + auxReturns.size());
 
     for (int i = 0; i < (int)slots.size(); ++i) {
       slots[i]->prepare(sampleRate, samplesPerBlockExpected);
-      scratchBuffers[i].setSize(32, samplesPerBlockExpected);
+      scratchBuffers[i].setSize(2, samplesPerBlockExpected);
     }
 
     // Scratch buffers for Aux Returns
     for (int i = 0; i < (int)auxReturns.size(); ++i) {
       auxReturns[i]->prepare(sampleRate, samplesPerBlockExpected);
-      scratchBuffers[slots.size() + i].setSize(32, samplesPerBlockExpected);
+      scratchBuffers[slots.size() + i].setSize(2, samplesPerBlockExpected);
     }
 
-    aux1Bus.setSize(32, samplesPerBlockExpected);
-    aux2Bus.setSize(32, samplesPerBlockExpected);
+    aux1Bus.setSize(2, samplesPerBlockExpected);
+    aux2Bus.setSize(2, samplesPerBlockExpected);
 
     // Pre-allocate per-block reusable buffers (avoid heap allocs on audio thread)
     dummyAux1.setSize(2, samplesPerBlockExpected);
@@ -1154,11 +1179,23 @@ void FanfareEngine::applyRig(const juce::var &rig)
     if (!rig.isObject())
       return;
 
+    struct ReapFlushOnExit {
+      FanfareEngine &eng;
+      ~ReapFlushOnExit() { eng.flushReapQueue(); }
+    } reapFlusher{*this};
+
     ScopedAudioQuietWindow quietWindow(*this);
 
     // Note: ScopedAudioQuietWindow pauses audio processing cleanly without spinning or priority inversions.
-    // We avoid holding the global audio lock across all plugin setStateInformation calls to prevent
-    // deadlocks with internal VST3 engine threads (Kontakt, Roland Zenology, etc.).
+    // Displaced plugins are moved into pendingReapPlugins and destroyed by ReapFlushOnExit AFTER
+    // quietWindow exits and audio resumes.
+
+    for (int i = 0; i < 3; ++i) {
+      fohFxFaultCount[i].store(0, std::memory_order_relaxed);
+      iemFxFaultCount[i].store(0, std::memory_order_relaxed);
+      fohFxBypassed[i].store(false, std::memory_order_relaxed);
+      iemFxBypassed[i].store(false, std::memory_order_relaxed);
+    }
 
     fohMasterLevel = (float)rig.getProperty("fohMasterLevel", 1.0);
     iemMasterLevel = (float)rig.getProperty("iemMasterLevel", 1.0);
@@ -1181,20 +1218,13 @@ void FanfareEngine::applyRig(const juce::var &rig)
         if (v.isObject())
           loadPluginFromVarSmart(-1, i, v, true);
       }
-      // Clear any extra plugins beyond new chain size
-      std::vector<std::unique_ptr<juce::AudioPluginInstance>> oldMasterFoh;
+      // Defer destruction of any extra plugins beyond new chain size until after quietWindow
       {
         juce::SpinLock::ScopedLockType mfl(masterFxLock);
         while (fohPluginChain.size() > fohArr->size()) {
           if (fohPluginChain.back())
-            oldMasterFoh.push_back(std::move(fohPluginChain.back()));
+            enqueueReapPlugin(std::move(fohPluginChain.back()));
           fohPluginChain.pop_back();
-        }
-      }
-      for (auto &p : oldMasterFoh) {
-        if (p) {
-          p->releaseResources();
-          p.reset();
         }
       }
     } else {
@@ -1207,20 +1237,13 @@ void FanfareEngine::applyRig(const juce::var &rig)
         if (v.isObject())
           loadPluginFromVarSmart(-1, i, v, false);
       }
-      // Clear any extra plugins beyond new chain size
-      std::vector<std::unique_ptr<juce::AudioPluginInstance>> oldMasterIem;
+      // Defer destruction of any extra plugins beyond new chain size until after quietWindow
       {
         juce::SpinLock::ScopedLockType mfl(masterFxLock);
         while (iemPluginChain.size() > iemArr->size()) {
           if (iemPluginChain.back())
-            oldMasterIem.push_back(std::move(iemPluginChain.back()));
+            enqueueReapPlugin(std::move(iemPluginChain.back()));
           iemPluginChain.pop_back();
-        }
-      }
-      for (auto &p : oldMasterIem) {
-        if (p) {
-          p->releaseResources();
-          p.reset();
         }
       }
     } else {
@@ -1477,8 +1500,8 @@ void FanfareEngine::applyRig(const juce::var &rig)
           }
         }
 
-        // Pass 2: Clear only non-matching plugins, then load
-        s->clearChainPreserve(pluginsToReuse);
+        // Pass 2: Clear only non-matching plugins (deferring destruction until after quietWindow), then load
+        s->clearChainPreserve(pluginsToReuse, &pendingReapPlugins);
         bool anyChainSynthRestored = false;
         if (auto *chainArr = v.getProperty("chain", juce::var()).getArray()) {
           for (int p = 0; p < chainArr->size(); ++p) {
@@ -1551,7 +1574,7 @@ void FanfareEngine::applyRig(const juce::var &rig)
         s->setIemEnabled(false);
         s->setFadersLinked(true);
         s->setBypass(true);
-        s->clearChain();
+        s->clearChain(&pendingReapPlugins);
         s->clearAllCCMappings();
         s->clearAllCCPassthroughs();
         s->getMp3Player().clearPlaylist();
@@ -1589,7 +1612,7 @@ void FanfareEngine::applyRig(const juce::var &rig)
               pluginsToReuse.insert(p);
           }
         }
-        aux->clearChainPreserve(pluginsToReuse);
+        aux->clearChainPreserve(pluginsToReuse, &pendingReapPlugins);
         if (auto *chainArr = av.getProperty("chain", juce::var()).getArray()) {
           for (int p = 0; p < chainArr->size() && p < 3; ++p) {
             auto pv = chainArr->getReference(p);
@@ -1602,7 +1625,7 @@ void FanfareEngine::applyRig(const juce::var &rig)
     } else {
       for (auto &aux : auxReturns)
         if (aux)
-          aux->clearChain();
+          aux->clearChain(&pendingReapPlugins);
     }
 
     // Scenes (Presets)
@@ -2031,6 +2054,10 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
 {
     if (slotIdx < 0 || slotIdx >= (int)slots.size())
       return;
+    struct ReapFlushOnExit {
+      FanfareEngine &eng;
+      ~ReapFlushOnExit() { eng.flushReapQueue(); }
+    } reapFlusher{*this};
     ScopedAudioQuietWindow quietWindow(*this);
     juce::ScopedLock sl(lock);
     auto *s = slots[slotIdx].get();
@@ -2168,7 +2195,7 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
           pluginsToReuse.insert(p);
       }
     }
-    s->clearChainPreserve(pluginsToReuse);
+    s->clearChainPreserve(pluginsToReuse, &pendingReapPlugins);
     for (int c = 0; c < 3; ++c) {
       if (pluginsToReuse.find(c) == pluginsToReuse.end()) {
         s->clearChainSlotMidiOut(c);
@@ -2542,13 +2569,25 @@ bool FanfareEngine::loadPluginFromVar(int slotIdx, int chainIdx, const juce::var
     if (!installedOk)
       return false;
 
+    auto *reapTarget = isApplyingRig.load(std::memory_order_acquire)
+                           ? &pendingReapPlugins
+                           : nullptr;
     if (slotIdx >= 100) {
       int r = slotIdx - 100;
       if (r < (int)auxReturns.size())
-        auxReturns[r]->setPluginInChain(chainIdx, std::move(instance));
+        auxReturns[r]->setPluginInChain(chainIdx, std::move(instance), reapTarget);
     } else if (slotIdx >= 0) {
-      slots[slotIdx]->setPluginInChain(chainIdx, std::move(instance));
+      slots[slotIdx]->setPluginInChain(chainIdx, std::move(instance), reapTarget);
     } else {
+      if (chainIdx >= 0 && chainIdx < 3) {
+        if (isFohOrChannel) {
+          fohFxFaultCount[chainIdx].store(0, std::memory_order_relaxed);
+          fohFxBypassed[chainIdx].store(false, std::memory_order_relaxed);
+        } else {
+          iemFxFaultCount[chainIdx].store(0, std::memory_order_relaxed);
+          iemFxBypassed[chainIdx].store(false, std::memory_order_relaxed);
+        }
+      }
       std::unique_ptr<juce::AudioPluginInstance> displaced;
       {
         juce::SpinLock::ScopedLockType mfl(masterFxLock);
@@ -2559,8 +2598,16 @@ bool FanfareEngine::loadPluginFromVar(int slotIdx, int chainIdx, const juce::var
         chain[chainIdx] = std::move(instance);
       }
       if (displaced) {
-        displaced->releaseResources();
-        displaced.reset();
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(displaced.get());
+        if (reapTarget != nullptr) {
+          enqueueReapPlugin(std::move(displaced));
+        } else {
+          FanfareLog::safeExecutePluginCall([&]() {
+            displaced->releaseResources();
+            displaced.reset();
+          }, "displaced masterFx releaseResources/reset");
+        }
       }
     }
     return installedOk;
@@ -2688,20 +2735,33 @@ void FanfareEngine::clearMasterChains()
       oldFoh.swap(fohPluginChain);
       oldIem.swap(iemPluginChain);
     }
+    const bool deferReap = isApplyingRig.load(std::memory_order_acquire);
     for (auto &p : oldFoh) {
       if (p != nullptr) {
-        FanfareLog::safeExecutePluginCall([&]() {
-          p->releaseResources();
-          p.reset();
-        }, "oldFoh releaseResources/reset");
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(p.get());
+        if (deferReap) {
+          enqueueReapPlugin(std::move(p));
+        } else {
+          FanfareLog::safeExecutePluginCall([&]() {
+            p->releaseResources();
+            p.reset();
+          }, "oldFoh releaseResources/reset");
+        }
       }
     }
     for (auto &p : oldIem) {
       if (p != nullptr) {
-        FanfareLog::safeExecutePluginCall([&]() {
-          p->releaseResources();
-          p.reset();
-        }, "oldIem releaseResources/reset");
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(p.get());
+        if (deferReap) {
+          enqueueReapPlugin(std::move(p));
+        } else {
+          FanfareLog::safeExecutePluginCall([&]() {
+            p->releaseResources();
+            p.reset();
+          }, "oldIem releaseResources/reset");
+        }
       }
     }
   }
@@ -2712,6 +2772,7 @@ void FanfareEngine::clearAllRacks()
 {
     const bool alreadyApplying = isApplyingRig.exchange(true, std::memory_order_seq_cst);
     struct ClearGuard {
+      FanfareEngine &eng;
       std::atomic<bool> &flag;
       std::atomic<juce::int64> &endTicks;
       bool restoreFalse;
@@ -2719,9 +2780,10 @@ void FanfareEngine::clearAllRacks()
         if (restoreFalse) {
           endTicks.store(juce::Time::getHighResolutionTicks(), std::memory_order_release);
           flag.store(false, std::memory_order_release);
+          eng.flushReapQueue();
         }
       }
-    } guard{isApplyingRig, lastRigApplyEndTicks, !alreadyApplying};
+    } guard{*this, isApplyingRig, lastRigApplyEndTicks, !alreadyApplying};
 
     for (int waitIter = 0;
          (isInProcessAudio.load(std::memory_order_acquire) ||
@@ -2734,11 +2796,11 @@ void FanfareEngine::clearAllRacks()
     juce::ScopedLock sl(lock);
     for (auto &slot : slots) {
       if (slot)
-        slot->clearChain();
+        slot->clearChain(&pendingReapPlugins);
     }
     for (auto &slot : auxReturns) {
       if (slot)
-        slot->clearChain();
+        slot->clearChain(&pendingReapPlugins);
     }
     clearMasterChains();
     lastAppliedPluginStates.clear();
@@ -2867,9 +2929,9 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
 {
 #ifdef _WIN32
     FanfareLog::t_isRealtimeAudioThread = true;
-    // Kernel Priority 15 without MMCSS (never subject to MMCSS 80% throttling,
-    // yet 3-5 full priority levels above Kontakt/Roland/UI threads in ABOVE_NORMAL_PRIORITY_CLASS).
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    // Priority HIGHEST (below the ASIO thread's MMCSS Pro Audio Priority 24 so a runaway
+    // helper can never preempt or starve the driver thread, yet above normal UI/plugin worker threads).
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
     uint32_t appliedGen = 0;
     while (!dspShutdown.load(std::memory_order_acquire)) {
@@ -2904,7 +2966,8 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
           break;
         }
         const int slotIdx = dspSlotQueue[qIdx];
-        executeSlotDsp(slotIdx, dspRawInput, dspNumInputs, false);
+        executeSlotDsp(slotIdx, dspRawInput, dspNumInputs, false,
+                       dspActiveSamples.load(std::memory_order_relaxed));
         dspInFlightWorkers.fetch_sub(1, std::memory_order_seq_cst);
       }
     }
@@ -3147,6 +3210,8 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
         }
       }
       if (oldPlugin) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(oldPlugin.get());
         FanfareLog::safeExecutePluginCall([&]() {
           oldPlugin->releaseResources();
           oldPlugin.reset();
@@ -3204,6 +3269,8 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
         chain[chainIndex] = std::move(instance);
       }
       if (oldPlugin) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(oldPlugin.get());
         FanfareLog::safeExecutePluginCall([&]() {
           oldPlugin->releaseResources();
           oldPlugin.reset();

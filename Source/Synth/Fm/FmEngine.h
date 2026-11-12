@@ -195,6 +195,18 @@ public:
   }
 
   void setPitchBend(int value14bit) { ctrls_.pitch_cc = value14bit; }
+
+  // MPE configuration switch (msfa controllers.h FIXME: "make this
+  // switchable"). The vendored msfa has no per-channel MIDI decode layer, so
+  // this only flips the Controllers flag + bend range; true per-note MPE
+  // pitch tracking is future work.
+  void setMpeEnabled(bool enabled, int pitchBendRangeSemitones = 24) {
+    ctrls_.mpeEnabled = enabled;
+    ctrls_.mpePitchBendRange =
+        pitchBendRangeSemitones < 1 ? 1 : (pitchBendRangeSemitones > 96 ? 96 : pitchBendRangeSemitones);
+  }
+  bool isMpeEnabled() const { return ctrls_.mpeEnabled; }
+  int mpePitchBendRange() const { return ctrls_.mpePitchBendRange; }
   void setModWheel(int cc7bit) {
     ctrls_.modwheel_cc = cc7bit;
     ctrls_.refresh();

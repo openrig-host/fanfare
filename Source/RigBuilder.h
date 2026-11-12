@@ -156,6 +156,7 @@ public:
                     e.pv = pv;
                     e.isFoh = isFoh;
                     e.masterIdx = p;
+                    e.key = FanfareEngine::stagingKeyFor(-1, p, isFoh);
                     e.label = juce::String(isFoh ? "FOH master " : "IEM master ") +
                               juce::String(p + 1);
                     e.name = entryName(pv);

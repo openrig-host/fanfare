@@ -280,27 +280,43 @@ void MainComponent::setupSlotComponents() {
         }
       }
       showLoadingOverlay("OPENING EDITOR", "Creating editor... (heavy plugins may take a while)");
-      juce::MessageManager::callAsync([this, slot, chainIndex]() {
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::MessageManager::callAsync([safeThis, slot, chainIndex]() {
+        if (safeThis == nullptr)
+          return;
         auto *plugin = slot->getPluginInstance(chainIndex);
         if (!plugin) {
-          hideLoadingOverlay();
+          safeThis->hideLoadingOverlay();
           return;
+        }
+        for (auto *existing : safeThis->activePluginWindows) {
+          if (auto *pw = dynamic_cast<PluginWindow*>(existing)) {
+            if (pw->pluginInstance == plugin) {
+              safeThis->hideLoadingOverlay();
+              pw->toFront(true);
+              return;
+            }
+          }
         }
         juce::AudioProcessorEditor* editor = nullptr;
         bool ok = FanfareLog::safeExecutePluginCall([&]() {
           editor = plugin->createEditor();
         }, "createEditor (" + plugin->getName() + ")");
-        hideLoadingOverlay();
+        if (safeThis == nullptr)
+          return;
+        safeThis->hideLoadingOverlay();
         if (ok && editor != nullptr) {
           auto *w = new PluginWindow(slot->getPluginName(chainIndex), editor, plugin);
-          w->onWindowClosed = [this, w] {
-            if (activePluginWindows.contains(w)) {
-              activePluginWindows.removeObject(w, false);
+          w->onWindowClosed = [safeThis, w] {
+            if (safeThis == nullptr)
+              return;
+            if (safeThis->activePluginWindows.contains(w)) {
+              safeThis->activePluginWindows.removeObject(w, false);
               w->destroyEditorNow();
               juce::MessageManager::callAsync([w]() { delete w; });
             }
           };
-          activePluginWindows.add(w);
+          safeThis->activePluginWindows.add(w);
         } else if (!ok) {
           juce::AlertWindow::showMessageBoxAsync(
               juce::MessageBoxIconType::WarningIcon, "Editor Error",
@@ -401,7 +417,7 @@ void MainComponent::setupSlotComponents() {
 
       synthOverlay->onOpenNoteRange = [this, slot, comp] {
         auto *nrComp = new NoteRangeComponent(*slot);
-        nrComp->setSize(860, 310);
+        nrComp->setSize(860, 358);
         setActiveMidiNoteLearner(nrComp);
         auto targetArea = synthOverlay != nullptr ? synthOverlay->getMidiButtonScreenBounds()
                                                   : comp->getScreenBounds();
@@ -463,7 +479,7 @@ void MainComponent::setupSlotComponents() {
 
       fmOverlay->onOpenNoteRange = [this, slot, comp] {
         auto *nrComp = new NoteRangeComponent(*slot);
-        nrComp->setSize(860, 310);
+        nrComp->setSize(860, 358);
         setActiveMidiNoteLearner(nrComp);
         auto targetArea = fmOverlay != nullptr ? fmOverlay->getMidiButtonScreenBounds()
                                                : comp->getScreenBounds();
@@ -491,7 +507,7 @@ void MainComponent::setupSlotComponents() {
     // Note Range Dialog (CallOutBox)
     comp->onShowNoteRangeDialog = [this, slot, comp] {
       auto *nrComp = new NoteRangeComponent(*slot);
-      nrComp->setSize(860, 310);
+      nrComp->setSize(860, 358);
       setActiveMidiNoteLearner(nrComp);
       auto &box = juce::CallOutBox::launchAsynchronously(
           std::unique_ptr<juce::Component>(nrComp),
@@ -722,27 +738,43 @@ void MainComponent::setupSlotComponents() {
         }
       }
       showLoadingOverlay("OPENING EDITOR", "Creating editor... (heavy plugins may take a while)");
-      juce::MessageManager::callAsync([this, slot, chainIndex]() {
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::MessageManager::callAsync([safeThis, slot, chainIndex]() {
+        if (safeThis == nullptr)
+          return;
         auto *plugin = slot->getPluginInstance(chainIndex);
         if (!plugin) {
-          hideLoadingOverlay();
+          safeThis->hideLoadingOverlay();
           return;
+        }
+        for (auto *existing : safeThis->activePluginWindows) {
+          if (auto *pw = dynamic_cast<PluginWindow*>(existing)) {
+            if (pw->pluginInstance == plugin) {
+              safeThis->hideLoadingOverlay();
+              pw->toFront(true);
+              return;
+            }
+          }
         }
         juce::AudioProcessorEditor* editor = nullptr;
         bool ok = FanfareLog::safeExecutePluginCall([&]() {
           editor = plugin->createEditor();
         }, "createEditor (" + plugin->getName() + ")");
-        hideLoadingOverlay();
+        if (safeThis == nullptr)
+          return;
+        safeThis->hideLoadingOverlay();
         if (ok && editor != nullptr) {
           auto *w = new PluginWindow(slot->getPluginName(chainIndex), editor, plugin);
-          w->onWindowClosed = [this, w] {
-            if (activePluginWindows.contains(w)) {
-              activePluginWindows.removeObject(w, false);
+          w->onWindowClosed = [safeThis, w] {
+            if (safeThis == nullptr)
+              return;
+            if (safeThis->activePluginWindows.contains(w)) {
+              safeThis->activePluginWindows.removeObject(w, false);
               w->destroyEditorNow();
               juce::MessageManager::callAsync([w]() { delete w; });
             }
           };
-          activePluginWindows.add(w);
+          safeThis->activePluginWindows.add(w);
         } else if (!ok) {
           juce::AlertWindow::showMessageBoxAsync(
               juce::MessageBoxIconType::WarningIcon, "Editor Error",
@@ -754,7 +786,7 @@ void MainComponent::setupSlotComponents() {
     // Note Range Dialog (CallOutBox)
     comp->onShowNoteRangeDialog = [this, slot, comp] {
       auto *nrComp = new NoteRangeComponent(*slot);
-      nrComp->setSize(860, 310);
+      nrComp->setSize(860, 358);
       setActiveMidiNoteLearner(nrComp);
       auto &box = juce::CallOutBox::launchAsynchronously(
           std::unique_ptr<juce::Component>(nrComp),

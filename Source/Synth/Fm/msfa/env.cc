@@ -100,7 +100,12 @@ int32_t Env::getsample() {
             }
         }
     }
-    // TODO: this would be a good place to set level to 0 when under threshold
+    // Finished envelopes (post-release) park at the smallest reachable target
+    // floor, 16 << 16; snap that residue to true silence so operators stop
+    // running denormal-range math on held-off voices. Nonzero R4 patches park
+    // above the floor and keep their authentic hold level.
+    if (ix_ >= 4 && level_ <= (16 << 16))
+        level_ = 0;
     return level_;
 }
 

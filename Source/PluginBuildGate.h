@@ -130,8 +130,10 @@ inline bool pluginRequiresMessageThread(const juce::String &path) {
         // Steinberg
         "HALion"
     };
+    const juce::String leafName = juce::File(path).getFileName();
+    const juce::String &matchTarget = leafName.isNotEmpty() ? leafName : path;
     for (const char *token : kMessageThreadTokens) {
-        if (path.containsIgnoreCase(token))
+        if (matchTarget.containsIgnoreCase(token))
             return true;
     }
     return false;

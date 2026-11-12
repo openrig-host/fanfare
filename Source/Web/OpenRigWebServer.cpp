@@ -1302,6 +1302,8 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
             return "{\"ok\":false,\"error\":\"Invalid payload\"}";
         juce::String url = jsonPayload["url"].toString().trim();
         bool playNow = (bool)jsonPayload.getProperty("playNow", false);
+        if (!YoutubeDownloadManager::isValidDownloadUrl(url))
+            return "{\"ok\":false,\"error\":\"Invalid URL: only http:// and https:// URLs are permitted\"}";
         if (url.isNotEmpty()) {
             YoutubeDownloadManager::getInstance().queueDownload(url, playNow,
                 [this, life, playNow](bool success, const juce::File& file, const juce::String& /*title*/, const juce::String& /*err*/) {
@@ -1682,7 +1684,9 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
         hudStaticDirs.add(exeDir.getChildFile("Web/static"));
         hudStaticDirs.add(exeDir.getChildFile("static"));
         hudStaticDirs.add(exeDir.getChildFile("Source/Web/static"));
+#if JUCE_DEBUG
         hudStaticDirs.add(cwdDir.getChildFile("Source/Web/static"));
+#endif
 
         if (tryServeFromDirs(hudStaticDirs))
             return true;
@@ -1703,7 +1707,9 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
     // 3. Offline Stage Manual & Supporting Assets (/manual.html, /assets-readonly/*, screenshots inside docs/)
     juce::Array<juce::File> docsDirs;
     docsDirs.add(exeDir.getChildFile("docs"));
+#if JUCE_DEBUG
     docsDirs.add(cwdDir.getChildFile("docs"));
+#endif
     docsDirs.add(FanfareConstants::getAppDirectory().getChildFile("docs"));
 
     if (tryServeFromDirs(docsDirs))

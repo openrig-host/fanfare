@@ -205,6 +205,8 @@ private:
   bool prevMp3Playing = false;
   int prevMp3Count = -1;
   juce::String prevMp3Title;
+  bool prevKeyLit = false;    // KEY button tool-light state
+  bool prevToolsActive = false; // "..." tool-light state
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RackSlotComponent)
 };

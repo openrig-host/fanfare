@@ -214,6 +214,9 @@ struct Song {
     float noteFontSize = 20.0f;
     bool noteIsMonospace = true;
     bool freshBuild = false;
+    // Top-level JSON keys the struct doesn't model are stashed here by
+    // RigSerializer so a save->load round trip never silently drops them.
+    juce::var extra;
 };
 
 struct Set {

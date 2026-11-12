@@ -2,11 +2,12 @@
 
 #include "FanfareConstants.h"
 #include "JuceHeader.h"
-#include <juce_dsp/juce_dsp.h>
 #include "LushReverb.h"
 #include "MusetteDetuner.h"
 #include <atomic>
 #include <cmath>
+#include <juce_dsp/juce_dsp.h>
+
 
 // ==============================================================================
 // OpenRig Channel Strip DSP
@@ -25,11 +26,14 @@ class SimpleGate {
 public:
   void prepare(double sampleRate) {
     sr = sampleRate;
-    attackCoeff = 1.0f - std::exp(-1.0f / (0.001f * (float)sr));  // 1ms
-    releaseCoeff = 1.0f - std::exp(-1.0f / (0.2f * (float)sr));   // 200ms
+    attackCoeff = 1.0f - std::exp(-1.0f / (0.001f * (float)sr)); // 1ms
+    releaseCoeff = 1.0f - std::exp(-1.0f / (0.2f * (float)sr));  // 200ms
   }
 
-  void setThreshold(float db) { threshold = db; }
+  void setThreshold(float db) {
+    threshold = db;
+    thresholdLinear = std::pow(10.0f, db / 20.0f);
+  }
   void setEnabled(bool enabled) { isActive = enabled; }
 
   float process(float input) {
@@ -37,11 +41,10 @@ public:
       return input;
 
     float inputAbs = std::abs(input);
-    float inputDb =
-        (inputAbs > 0.000001f) ? 20.0f * std::log10(inputAbs) : -100.0f;
 
-    // Fast Attack (1ms), Moderate Release (200ms)
-    float targetGain = (inputDb > threshold) ? 1.0f : 0.0f;
+    // Fast Attack (1ms), Moderate Release (200ms) using precomputed linear
+    // threshold
+    float targetGain = (inputAbs > thresholdLinear) ? 1.0f : 0.0f;
     float coeff = (targetGain < currentGain) ? releaseCoeff : attackCoeff;
 
     currentGain += (targetGain - currentGain) * coeff;
@@ -55,6 +58,7 @@ private:
   double sr = 44100.0;
   bool isActive = false;
   float threshold = -60.0f;
+  float thresholdLinear = 0.001f;
   float currentGain = 0.0f;
 
   float attackCoeff = 0.05f;
@@ -68,7 +72,8 @@ class Biquad {
 public:
   // Coefficients are normalized by a0 on the way in so process() avoids a
   // per-sample division (and the divide-by-zero / inf risk if a0 == 0). A
-  // degenerate a0 configures a safe passthrough instead of corrupting the chain.
+  // degenerate a0 configures a safe passthrough instead of corrupting the
+  // chain.
   void setCoefficients(float newA0, float newA1, float newA2, float newB0,
                        float newB1, float newB2) {
     if (std::abs(newA0) < 1.0e-12f) {
@@ -104,9 +109,9 @@ private:
 
 class SimpleEQ {
 public:
-  static constexpr float kBandFreqs[10] = {
-    31.25f, 62.5f, 125.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f
-  };
+  static constexpr float kBandFreqs[10] = {31.25f,  62.5f,   125.0f,  250.0f,
+                                           500.0f,  1000.0f, 2000.0f, 4000.0f,
+                                           8000.0f, 16000.0f};
 
   void prepare(double sampleRate) {
     sr = sampleRate > 0.0 ? sampleRate : 44100.0;
@@ -127,9 +132,7 @@ public:
     }
   }
 
-  void setVolGain(float db) {
-    volGainLinear = std::pow(10.0f, db / 20.0f);
-  }
+  void setVolGain(float db) { volGainLinear = std::pow(10.0f, db / 20.0f); }
 
   void setMasterGain(float db) {
     masterGainLinear = std::pow(10.0f, db / 20.0f);
@@ -146,7 +149,8 @@ public:
 
     float out = input * volGainLinear;
     for (int i = 0; i < 10; ++i) {
-      out = bands[i].process(out);
+      if (std::abs(bandGains[i]) >= 0.05f)
+        out = bands[i].process(out);
     }
     return out * masterGainLinear;
   }
@@ -162,6 +166,7 @@ private:
   void updateBand(int idx, float gainDb) {
     float f0 = kBandFreqs[idx];
     if (std::abs(gainDb) < 0.05f) {
+      bands[idx].reset();
       bands[idx].setCoefficients(1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
       return;
     }
@@ -187,10 +192,10 @@ private:
 // ==============================================================================
 enum class CompPreset {
   Manual = 0,
-  MP3Leveler,    // Smooth MP3 / Playlist Leveler
-  VocalFocus,    // Vocal / Lead Focus
-  DrumsPunch,    // Punchy Drums / Beats
-  HardLimiter    // Brickwall Peak Control
+  MP3Leveler, // Smooth MP3 / Playlist Leveler
+  VocalFocus, // Vocal / Lead Focus
+  DrumsPunch, // Punchy Drums / Beats
+  HardLimiter // Brickwall Peak Control
 };
 
 class SimpleComp {
@@ -246,6 +251,7 @@ public:
       updateCoefficients(0.010f, 0.200f);
       break;
     }
+    thresholdLinear = std::pow(10.0f, thresholdDb / 20.0f);
   }
 
   void setAmount(float amt) {
@@ -255,9 +261,7 @@ public:
     }
   }
 
-  void setMakeupGain(float db) {
-    userMakeupGainDb = db;
-  }
+  void setMakeupGain(float db) { userMakeupGainDb = db; }
 
   float getGainReductionDb() const { return currentGrDb.load(); }
 
@@ -268,16 +272,17 @@ public:
     }
 
     float inputAbs = std::abs(input);
-    float inputDb = (inputAbs > 0.000001f) ? 20.0f * std::log10(inputAbs) : -100.0f;
-
-    float overDb = inputDb - thresholdDb;
-    if (overDb < 0.0f)
-      overDb = 0.0f;
+    float overDb = 0.0f;
+    if (inputAbs > thresholdLinear) {
+      float inputDb = 20.0f * std::log10(inputAbs);
+      overDb = juce::jmax(0.0f, inputDb - thresholdDb);
+    }
 
     float grDb = overDb * (1.0f - 1.0f / ratio);
     float coeff = (grDb > envelopeDb) ? attackCoeff : releaseCoeff;
     envelopeDb += (grDb - envelopeDb) * coeff;
-    if (std::abs(envelopeDb) < 1.0e-9f) envelopeDb = 0.0f;
+    if (std::abs(envelopeDb) < 1.0e-9f)
+      envelopeDb = 0.0f;
 
     currentGrDb.store(envelopeDb);
 
@@ -293,6 +298,7 @@ private:
   int presetIndex = 0;
   float amount = 0.0f;
   float thresholdDb = -10.0f;
+  float thresholdLinear = 0.316227766f;
   float ratio = 2.0f;
   float presetMakeupDb = 0.0f;
   float userMakeupGainDb = 0.0f;
@@ -309,9 +315,7 @@ private:
 // ==============================================================================
 class SimpleChorus {
 public:
-  SimpleChorus() {
-    std::fill(std::begin(buffer), std::end(buffer), 0.0f);
-  }
+  SimpleChorus() { std::fill(std::begin(buffer), std::end(buffer), 0.0f); }
 
   void prepare(double sampleRate) {
     sr = sampleRate;
@@ -388,8 +392,8 @@ public:
     writeIdx = 0;
     timeSmoothCoeff = 1.0f - std::exp(-1.0f / (0.035f * (float)sr));
     hpCoeff = 1.0f - std::exp(-2.0f * PI * 65.0f / (float)sr);
-    currentDelaySamples = juce::jlimit(
-        1.0f, (float)(bufSize - 4), targetTimeMs * 0.001f * (float)sr);
+    currentDelaySamples = juce::jlimit(1.0f, (float)(bufSize - 4),
+                                       targetTimeMs * 0.001f * (float)sr);
     updateToneFilter(toneHz);
   }
 
@@ -405,8 +409,8 @@ public:
                      float cutoffHz, float wetMix) {
     if (enabled && !wasEnabled) {
       reset();
-      currentDelaySamples = juce::jlimit(
-          4.0f, (float)(bufSize - 8), timeMs * 0.001f * (float)sr);
+      currentDelaySamples =
+          juce::jlimit(4.0f, (float)(bufSize - 8), timeMs * 0.001f * (float)sr);
     }
     wasEnabled = enabled;
     isActive = enabled;
@@ -424,8 +428,8 @@ public:
     if (!isActive || mix <= 0.001f || bufSize < 32)
       return;
 
-    const float targetSamples = juce::jlimit(
-        4.0f, (float)(bufSize - 8), targetTimeMs * 0.001f * (float)sr);
+    const float targetSamples = juce::jlimit(4.0f, (float)(bufSize - 8),
+                                             targetTimeMs * 0.001f * (float)sr);
     currentDelaySamples +=
         (targetSamples - currentDelaySamples) * timeSmoothCoeff;
 
@@ -445,12 +449,16 @@ public:
     // Damping LPF + gentle 65 Hz HPF in feedback path so repeats stay musical
     lpStateL += (delL - lpStateL) * lpCoeff;
     lpStateR += (delR - lpStateR) * lpCoeff;
-    if (std::abs(lpStateL) < 1.0e-15f) lpStateL = 0.0f;
-    if (std::abs(lpStateR) < 1.0e-15f) lpStateR = 0.0f;
+    if (std::abs(lpStateL) < 1.0e-15f)
+      lpStateL = 0.0f;
+    if (std::abs(lpStateR) < 1.0e-15f)
+      lpStateR = 0.0f;
     hpStateL += (lpStateL - hpStateL) * hpCoeff;
     hpStateR += (lpStateR - hpStateR) * hpCoeff;
-    if (std::abs(hpStateL) < 1.0e-15f) hpStateL = 0.0f;
-    if (std::abs(hpStateR) < 1.0e-15f) hpStateR = 0.0f;
+    if (std::abs(hpStateL) < 1.0e-15f)
+      hpStateL = 0.0f;
+    if (std::abs(hpStateR) < 1.0e-15f)
+      hpStateR = 0.0f;
     float filtL = lpStateL - hpStateL;
     float filtR = lpStateR - hpStateR;
 
@@ -509,8 +517,7 @@ public:
 
 private:
   void updateToneFilter(float hz) {
-    const float clamped =
-        juce::jlimit(400.0f, (float)(sr * 0.45), hz);
+    const float clamped = juce::jlimit(400.0f, (float)(sr * 0.45), hz);
     lpCoeff = 1.0f - std::exp(-2.0f * PI * clamped / (float)sr);
   }
 
@@ -522,8 +529,7 @@ private:
     const int i0 = (int)readPos;
     const int i1 = (i0 + 1) % bufSize;
     const float frac = readPos - (float)i0;
-    return buf[(size_t)(i0 % bufSize)] * (1.0f - frac) +
-           buf[(size_t)i1] * frac;
+    return buf[(size_t)(i0 % bufSize)] * (1.0f - frac) + buf[(size_t)i1] * frac;
   }
 
   std::vector<float> bufL, bufR;
@@ -632,10 +638,8 @@ public:
       return false;
     if (f.getFullPathName() == loadedPath && hasIR)
       return true;
-    convolution.loadImpulseResponse(f,
-                                    juce::dsp::Convolution::Stereo::yes,
-                                    juce::dsp::Convolution::Trim::yes,
-                                    0,
+    convolution.loadImpulseResponse(f, juce::dsp::Convolution::Stereo::yes,
+                                    juce::dsp::Convolution::Trim::yes, 0,
                                     juce::dsp::Convolution::Normalise::yes);
     loadedPath = f.getFullPathName();
     synthesizedSr = 0.0;
@@ -643,7 +647,8 @@ public:
     return true;
   }
 
-  bool loadBuiltinPreset(const juce::String &presetId, bool forceReload = false) {
+  bool loadBuiltinPreset(const juce::String &presetId,
+                         bool forceReload = false) {
     const int idx = findBuiltinPresetIndex(presetId);
     if (idx < 0)
       return false;
@@ -657,8 +662,7 @@ public:
     if (irBuf.getNumSamples() <= 0)
       return false;
 
-    convolution.loadImpulseResponse(std::move(irBuf),
-                                    targetSr,
+    convolution.loadImpulseResponse(std::move(irBuf), targetSr,
                                     juce::dsp::Convolution::Stereo::yes,
                                     juce::dsp::Convolution::Trim::no,
                                     juce::dsp::Convolution::Normalise::no);
@@ -715,10 +719,12 @@ public:
   }
 
 private:
-  // Fast deterministic PRNG so synthesized stereo spaces never drift between loads.
+  // Fast deterministic PRNG so synthesized stereo spaces never drift between
+  // loads.
   struct FastRng {
     juce::uint64 state;
-    explicit FastRng(juce::uint64 seed) : state(seed ? seed : 0x9E3779B97F4A7C15ULL) {}
+    explicit FastRng(juce::uint64 seed)
+        : state(seed ? seed : 0x9E3779B97F4A7C15ULL) {}
     juce::uint64 nextU64() {
       juce::uint64 x = (state += 0x9E3779B97F4A7C15ULL);
       x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ULL;
@@ -735,7 +741,9 @@ private:
     float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
     static OfflineBiquad makeHPF(double sampleRate, float freqHz, float q) {
       OfflineBiquad f;
-      const float w0 = 2.0f * PI * juce::jlimit(10.0f, (float)(sampleRate * 0.45), freqHz) / (float)sampleRate;
+      const float w0 = 2.0f * PI *
+                       juce::jlimit(10.0f, (float)(sampleRate * 0.45), freqHz) /
+                       (float)sampleRate;
       const float cs = std::cos(w0), sn = std::sin(w0);
       const float alpha = sn / (2.0f * q);
       const float a0 = 1.0f + alpha;
@@ -748,7 +756,9 @@ private:
     }
     static OfflineBiquad makeLPF(double sampleRate, float freqHz, float q) {
       OfflineBiquad f;
-      const float w0 = 2.0f * PI * juce::jlimit(40.0f, (float)(sampleRate * 0.47), freqHz) / (float)sampleRate;
+      const float w0 = 2.0f * PI *
+                       juce::jlimit(40.0f, (float)(sampleRate * 0.47), freqHz) /
+                       (float)sampleRate;
       const float cs = std::cos(w0), sn = std::sin(w0);
       const float alpha = sn / (2.0f * q);
       const float a0 = 1.0f + alpha;
@@ -759,10 +769,13 @@ private:
       f.a2 = (1.0f - alpha) / a0;
       return f;
     }
-    static OfflineBiquad makePeak(double sampleRate, float freqHz, float q, float gainDb) {
+    static OfflineBiquad makePeak(double sampleRate, float freqHz, float q,
+                                  float gainDb) {
       OfflineBiquad f;
       const float A = std::pow(10.0f, gainDb / 40.0f);
-      const float w0 = 2.0f * PI * juce::jlimit(20.0f, (float)(sampleRate * 0.46), freqHz) / (float)sampleRate;
+      const float w0 = 2.0f * PI *
+                       juce::jlimit(20.0f, (float)(sampleRate * 0.46), freqHz) /
+                       (float)sampleRate;
       const float cs = std::cos(w0), sn = std::sin(w0);
       const float alpha = sn / (2.0f * q);
       const float a0 = 1.0f + alpha / A;
@@ -814,7 +827,8 @@ private:
       if (sumSq > maxSumSq)
         maxSumSq = sumSq;
     }
-    // Scale energy relative to 48 kHz so perceived loudness stays identical at 44.1 / 48 / 96 kHz
+    // Scale energy relative to 48 kHz so perceived loudness stays identical
+    // at 44.1 / 48 / 96 kHz
     const double scaledRms = std::sqrt(maxSumSq * (48000.0 / sampleRate));
     if (scaledRms > 1.0e-9) {
       const float gain = (float)((double)targetNorm / scaledRms);
@@ -856,26 +870,33 @@ private:
 
   static juce::AudioBuffer<float> synthesizeSpace(const SpaceSpec &sp,
                                                   double sampleRate) {
-    const double totalSec = juce::jmax((double)sp.rt60Low, (double)sp.rt60Mid) * 1.12 +
-                            (double)sp.preDelaySec + 0.05;
-    const int numSamples = juce::jmax(256, (int)std::ceil(totalSec * sampleRate));
+    const double totalSec =
+        juce::jmax((double)sp.rt60Low, (double)sp.rt60Mid) * 1.12 +
+        (double)sp.preDelaySec + 0.05;
+    const int numSamples =
+        juce::jmax(256, (int)std::ceil(totalSec * sampleRate));
     juce::AudioBuffer<float> buf(2, numSamples);
     buf.clear();
 
     float *left = buf.getWritePointer(0);
     float *right = buf.getWritePointer(1);
 
-    // 1. 3D Shoebox Image-Source Early Reflections (asymmetric source & ORTF pair)
-    const float rx = sp.lx * 0.41f, ry = sp.ly * 0.31f, rz = juce::jmin(1.55f, sp.lz * 0.46f);
-    const float sx = sp.lx * 0.64f, sy = sp.ly * 0.72f, sz = juce::jmin(1.42f, sp.lz * 0.42f);
+    // 1. 3D Shoebox Image-Source Early Reflections (asymmetric source & ORTF
+    // pair)
+    const float rx = sp.lx * 0.41f, ry = sp.ly * 0.31f,
+                rz = juce::jmin(1.55f, sp.lz * 0.46f);
+    const float sx = sp.lx * 0.64f, sy = sp.ly * 0.72f,
+                sz = juce::jmin(1.42f, sp.lz * 0.42f);
     const float ddx0 = sx - rx, ddy0 = sy - ry, ddz0 = sz - rz;
     const float directDist = std::sqrt(ddx0 * ddx0 + ddy0 * ddy0 + ddz0 * ddz0);
 
     FastRng erRng(sp.seed ^ 0xA5A5F0F012345678ULL);
     for (int nx = -4; nx <= 4; ++nx) {
-      const float ix = (nx & 1) ? ((float)(nx + 1) * sp.lx - sx) : ((float)nx * sp.lx + sx);
+      const float ix =
+          (nx & 1) ? ((float)(nx + 1) * sp.lx - sx) : ((float)nx * sp.lx + sx);
       for (int ny = -4; ny <= 4; ++ny) {
-        const float iy = (ny & 1) ? ((float)(ny + 1) * sp.ly - sy) : ((float)ny * sp.ly + sy);
+        const float iy = (ny & 1) ? ((float)(ny + 1) * sp.ly - sy)
+                                  : ((float)ny * sp.ly + sy);
         for (int nz = -3; nz <= 3; ++nz) {
           if (nx == 0 && ny == 0 && nz == 0)
             continue;
@@ -883,12 +904,14 @@ private:
           if (order > 5)
             continue;
 
-          const float iz = (nz & 1) ? ((float)(nz + 1) * sp.lz - sz) : ((float)nz * sp.lz + sz);
+          const float iz = (nz & 1) ? ((float)(nz + 1) * sp.lz - sz)
+                                    : ((float)nz * sp.lz + sz);
           const float dx = ix - rx, dy = iy - ry, dz = iz - rz;
           const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-          const double relSec = (double)sp.preDelaySec +
-                                (double)juce::jmax(0.0f, dist - directDist) / 343.0 +
-                                (double)(erRng.nextBipolar() * 0.00035f);
+          const double relSec =
+              (double)sp.preDelaySec +
+              (double)juce::jmax(0.0f, dist - directDist) / 343.0 +
+              (double)(erRng.nextBipolar() * 0.00035f);
 
           const float horiz = std::sqrt(dx * dx + dy * dy + 1.0e-6f);
           const float sinTheta = juce::jlimit(-1.0f, 1.0f, dx / horiz);
@@ -896,23 +919,30 @@ private:
 
           // ORTF stereo capsule spacing (+/- 0.25 ms ITD + cardioid ILD)
           const double itdSec = 0.00025 * (double)sinTheta;
-          const float cardL = 0.55f + 0.45f * (-0.82f * sinTheta + 0.57f * cosTheta);
-          const float cardR = 0.55f + 0.45f * (0.82f * sinTheta + 0.57f * cosTheta);
+          const float cardL =
+              0.55f + 0.45f * (-0.82f * sinTheta + 0.57f * cosTheta);
+          const float cardR =
+              0.55f + 0.45f * (0.82f * sinTheta + 0.57f * cosTheta);
 
           const float polarity = ((order & 1) == 0) ? -1.0f : 1.0f;
           const float atten = (directDist / juce::jmax(dist, 1.0f)) *
-                              std::pow(sp.wallReflect, (float)order) * sp.erGain * polarity;
+                              std::pow(sp.wallReflect, (float)order) *
+                              sp.erGain * polarity;
 
-          const int spread = juce::jlimit(1, 8, (order - 1) * (int)std::round(sampleRate / 44100.0));
-          addSoftenedTap(left, numSamples, (relSec - itdSec) * sampleRate, atten * cardL, spread);
-          addSoftenedTap(right, numSamples, (relSec + itdSec) * sampleRate, atten * cardR, spread);
+          const int spread = juce::jlimit(
+              1, 8, (order - 1) * (int)std::round(sampleRate / 44100.0));
+          addSoftenedTap(left, numSamples, (relSec - itdSec) * sampleRate,
+                         atten * cardL, spread);
+          addSoftenedTap(right, numSamples, (relSec + itdSec) * sampleRate,
+                         atten * cardR, spread);
         }
       }
     }
 
     // 2. Decorrelated True-Stereo 3-Band Velvet-Noise Diffuse Tail
     const float gLow = 1.0f - std::exp(-2.0f * PI * 260.0f / (float)sampleRate);
-    const float gMidHi = 1.0f - std::exp(-2.0f * PI * 2800.0f / (float)sampleRate);
+    const float gMidHi =
+        1.0f - std::exp(-2.0f * PI * 2800.0f / (float)sampleRate);
     const float kLn1000 = 6.9077553f; // ln(10^3) for -60 dB RT60 decay
 
     for (int ch = 0; ch < 2; ++ch) {
@@ -931,10 +961,14 @@ private:
 
         float excite = 0.0f;
         if (i >= nextPulse) {
-          // Smoothly ramp velvet pulse density from 2000/s to 4400/s as echo density builds
-          const float density = 2000.0f + 2400.0f * (1.0f - std::exp(-t / 0.08f));
+          // Smoothly ramp velvet pulse density from 2000/s to 4400/s as echo
+          // density builds
+          const float density =
+              2000.0f + 2400.0f * (1.0f - std::exp(-t / 0.08f));
           const float avgGrid = juce::jmax(2.0f, (float)sampleRate / density);
-          const int step = juce::jmax(1, (int)std::round(avgGrid * (0.45f + 1.10f * rng.nextFloat01())));
+          const int step = juce::jmax(
+              1,
+              (int)std::round(avgGrid * (0.45f + 1.10f * rng.nextFloat01())));
           const float sign = (rng.nextU64() & 1ULL) ? 1.0f : -1.0f;
           excite = sign * (0.65f + 0.35f * rng.nextFloat01());
           nextPulse = i + step;
@@ -950,29 +984,36 @@ private:
         const float envLow = std::exp(-kLn1000 * t / sp.rt60Low);
         const float envMid = std::exp(-kLn1000 * t / sp.rt60Mid);
         const float envHigh = std::exp(-kLn1000 * t / sp.rt60High);
-        const float bloom = 1.0f - std::exp(-t / juce::jmax(0.002f, sp.bloomSec));
+        const float bloom =
+            1.0f - std::exp(-t / juce::jmax(0.002f, sp.bloomSec));
 
         const float wetSample =
-            sp.tailGain * bloom * (bandLow * envLow + bandMid * envMid + bandHigh * envHigh);
+            sp.tailGain * bloom *
+            (bandLow * envLow + bandMid * envMid + bandHigh * envHigh);
 
         // Progressive distance air absorption along late tail
-        const float dynCutoff =
-            juce::jmax(1400.0f, sp.airLpfHz * std::exp(-0.45f * t / sp.rt60Mid));
+        const float dynCutoff = juce::jmax(
+            1400.0f, sp.airLpfHz * std::exp(-0.45f * t / sp.rt60Mid));
         const float gAir =
-            1.0f - std::exp(-2.0f * PI * juce::jmin(dynCutoff, (float)(sampleRate * 0.44)) /
+            1.0f - std::exp(-2.0f * PI *
+                            juce::jmin(dynCutoff, (float)(sampleRate * 0.44)) /
                             (float)sampleRate);
         airState += gAir * (wetSample - airState);
         out[i] += airState;
       }
 
       // Clean sub-bass rumble HPF and gentle top-end polish
-      OfflineBiquad::makeHPF(sampleRate, sp.hpfHz, 0.707f).process(out, numSamples);
-      OfflineBiquad::makeLPF(sampleRate, sp.airLpfHz, 0.707f).process(out, numSamples);
+      OfflineBiquad::makeHPF(sampleRate, sp.hpfHz, 0.707f)
+          .process(out, numSamples);
+      OfflineBiquad::makeLPF(sampleRate, sp.airLpfHz, 0.707f)
+          .process(out, numSamples);
 
       // 25 ms cosine fade-out at buffer end so tail terminates silently
-      const int fadeSamples = juce::jmin(numSamples / 4, (int)(0.025 * sampleRate));
+      const int fadeSamples =
+          juce::jmin(numSamples / 4, (int)(0.025 * sampleRate));
       for (int k = 0; k < fadeSamples; ++k) {
-        const float w = 0.5f * (1.0f - std::cos(PI * (float)k / (float)fadeSamples));
+        const float w =
+            0.5f * (1.0f - std::cos(PI * (float)k / (float)fadeSamples));
         out[numSamples - 1 - k] *= w;
       }
     }
@@ -981,8 +1022,8 @@ private:
     return buf;
   }
 
-  static void runOfflineAllpass(float *samples, int numSamples, int delaySamples,
-                                float feedback) {
+  static void runOfflineAllpass(float *samples, int numSamples,
+                                int delaySamples, float feedback) {
     if (delaySamples <= 0 || numSamples <= 0)
       return;
     std::vector<float> line((size_t)delaySamples, 0.0f);
@@ -1003,9 +1044,11 @@ private:
     juce::AudioBuffer<float> buf(2, numSamples);
     buf.clear();
 
-    const int preDelay = (int)std::round(0.004 * sampleRate); // 4 ms studio plate onset
+    const int preDelay =
+        (int)std::round(0.004 * sampleRate); // 4 ms studio plate onset
     const float gLow = 1.0f - std::exp(-2.0f * PI * 300.0f / (float)sampleRate);
-    const float gMidHi = 1.0f - std::exp(-2.0f * PI * 3400.0f / (float)sampleRate);
+    const float gMidHi =
+        1.0f - std::exp(-2.0f * PI * 3400.0f / (float)sampleRate);
     const float kLn1000 = 6.9077553f;
 
     const double apMs[2][4] = {
@@ -1028,8 +1071,10 @@ private:
         float excite = 0.0f;
         if (i >= nextPulse) {
           const float avgGrid = juce::jmax(2.0f, (float)(sampleRate / 5200.0));
-          const int step = juce::jmax(1, (int)std::round(avgGrid * (0.4f + 1.2f * rng.nextFloat01())));
-          excite = ((rng.nextU64() & 1ULL) ? 1.0f : -1.0f) * (0.7f + 0.3f * rng.nextFloat01());
+          const int step = juce::jmax(
+              1, (int)std::round(avgGrid * (0.4f + 1.2f * rng.nextFloat01())));
+          excite = ((rng.nextU64() & 1ULL) ? 1.0f : -1.0f) *
+                   (0.7f + 0.3f * rng.nextFloat01());
           nextPulse = i + step;
         }
         lpLow += gLow * (excite - lpLow);
@@ -1045,19 +1090,26 @@ private:
         out[i] += bloom * (bLow * envLow + bMid * envMid + bHigh * envHigh);
       }
 
-      // 4 cascaded short Schroeder allpasses create classic tensioned steel dispersion
+      // 4 cascaded short Schroeder allpasses create classic tensioned steel
+      // dispersion
       for (int a = 0; a < 4; ++a) {
-        const int dSamp = juce::jmax(2, (int)std::round(apMs[ch][a] * 0.001 * sampleRate));
+        const int dSamp =
+            juce::jmax(2, (int)std::round(apMs[ch][a] * 0.001 * sampleRate));
         runOfflineAllpass(out, numSamples, dSamp, 0.62f);
       }
 
-      OfflineBiquad::makeHPF(sampleRate, 115.0f, 0.75f).process(out, numSamples);
-      OfflineBiquad::makePeak(sampleRate, 3200.0f, 1.1f, 1.8f).process(out, numSamples);
-      OfflineBiquad::makeLPF(sampleRate, 10500.0f, 0.707f).process(out, numSamples);
+      OfflineBiquad::makeHPF(sampleRate, 115.0f, 0.75f)
+          .process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 3200.0f, 1.1f, 1.8f)
+          .process(out, numSamples);
+      OfflineBiquad::makeLPF(sampleRate, 10500.0f, 0.707f)
+          .process(out, numSamples);
 
-      const int fadeSamples = juce::jmin(numSamples / 4, (int)(0.025 * sampleRate));
+      const int fadeSamples =
+          juce::jmin(numSamples / 4, (int)(0.025 * sampleRate));
       for (int k = 0; k < fadeSamples; ++k) {
-        const float w = 0.5f * (1.0f - std::cos(PI * (float)k / (float)fadeSamples));
+        const float w =
+            0.5f * (1.0f - std::cos(PI * (float)k / (float)fadeSamples));
         out[numSamples - 1 - k] *= w;
       }
     }
@@ -1067,28 +1119,37 @@ private:
   }
 
   static juce::AudioBuffer<float> synthesizeWarmCab2x12(double sampleRate) {
-    const int numSamples = juce::jmax(128, (int)std::ceil(0.065 * sampleRate)); // 65 ms cab + studio air
+    const int numSamples = juce::jmax(
+        128, (int)std::ceil(0.065 * sampleRate)); // 65 ms cab + studio air
     juce::AudioBuffer<float> buf(2, numSamples);
     buf.clear();
 
     for (int ch = 0; ch < 2; ++ch) {
       float *out = buf.getWritePointer(ch);
-      const double micOffsetMs = (ch == 0) ? 0.0 : 0.11; // subtle dual-mic stereo width
+      const double micOffsetMs =
+          (ch == 0) ? 0.0 : 0.11; // subtle dual-mic stereo width
 
       // Dual 12-inch speaker cones + baffle diffraction + open-back rear bounce
       addSoftenedTap(out, numSamples, (0.08 + micOffsetMs) * 0.001 * sampleRate,
                      (ch == 0) ? 1.00f : 0.94f, 0);
-      addSoftenedTap(out, numSamples, (0.23 + micOffsetMs * 1.4) * 0.001 * sampleRate,
+      addSoftenedTap(out, numSamples,
+                     (0.23 + micOffsetMs * 1.4) * 0.001 * sampleRate,
                      (ch == 0) ? 0.44f : 0.52f, 1);
-      addSoftenedTap(out, numSamples, (0.52 + micOffsetMs) * 0.001 * sampleRate, -0.22f, 1);
-      addSoftenedTap(out, numSamples, (1.18 + micOffsetMs) * 0.001 * sampleRate, 0.15f, 1);
-      addSoftenedTap(out, numSamples, ((ch == 0 ? 3.25 : 3.48)) * 0.001 * sampleRate, -0.26f, 3);
-      addSoftenedTap(out, numSamples, ((ch == 0 ? 5.90 : 6.25)) * 0.001 * sampleRate, 0.09f, 4);
+      addSoftenedTap(out, numSamples, (0.52 + micOffsetMs) * 0.001 * sampleRate,
+                     -0.22f, 1);
+      addSoftenedTap(out, numSamples, (1.18 + micOffsetMs) * 0.001 * sampleRate,
+                     0.15f, 1);
+      addSoftenedTap(out, numSamples,
+                     ((ch == 0 ? 3.25 : 3.48)) * 0.001 * sampleRate, -0.26f, 3);
+      addSoftenedTap(out, numSamples,
+                     ((ch == 0 ? 5.90 : 6.25)) * 0.001 * sampleRate, 0.09f, 4);
 
-      // Subtle tight tracking booth floor/wall reflections (-24 dB) for natural stereo feel
+      // Subtle tight tracking booth floor/wall reflections (-24 dB) for natural
+      // stereo feel
       FastRng rng(0x32783132434142ULL + (juce::uint64)(ch * 7919ULL));
       for (int r = 0; r < 14; ++r) {
-        const double tMs = 8.5 + (double)r * 2.6 + (double)rng.nextFloat01() * 1.4;
+        const double tMs =
+            8.5 + (double)r * 2.6 + (double)rng.nextFloat01() * 1.4;
         const float env = 0.045f * std::exp(-(float)tMs / 16.0f) *
                           ((rng.nextU64() & 1ULL) ? 1.0f : -1.0f);
         addSoftenedTap(out, numSamples, tMs * 0.001 * sampleRate, env, 3);
@@ -1096,17 +1157,26 @@ private:
 
       // 2x12 open-back speaker enclosure & paper-cone resonance cascade
       OfflineBiquad::makeHPF(sampleRate, 82.0f, 0.88f).process(out, numSamples);
-      OfflineBiquad::makePeak(sampleRate, 118.0f, 1.55f, 4.5f).process(out, numSamples);
-      OfflineBiquad::makePeak(sampleRate, 420.0f, 1.30f, -4.0f).process(out, numSamples);
-      OfflineBiquad::makePeak(sampleRate, 1380.0f, 1.20f, 2.0f).process(out, numSamples);
-      OfflineBiquad::makePeak(sampleRate, 2450.0f, 1.55f, 3.8f).process(out, numSamples);
-      OfflineBiquad::makePeak(sampleRate, 4150.0f, 2.60f, -2.5f).process(out, numSamples);
-      OfflineBiquad::makeLPF(sampleRate, 4850.0f, 0.85f).process(out, numSamples);
-      OfflineBiquad::makeLPF(sampleRate, 5600.0f, 0.707f).process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 118.0f, 1.55f, 4.5f)
+          .process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 420.0f, 1.30f, -4.0f)
+          .process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 1380.0f, 1.20f, 2.0f)
+          .process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 2450.0f, 1.55f, 3.8f)
+          .process(out, numSamples);
+      OfflineBiquad::makePeak(sampleRate, 4150.0f, 2.60f, -2.5f)
+          .process(out, numSamples);
+      OfflineBiquad::makeLPF(sampleRate, 4850.0f, 0.85f)
+          .process(out, numSamples);
+      OfflineBiquad::makeLPF(sampleRate, 5600.0f, 0.707f)
+          .process(out, numSamples);
 
-      const int fadeSamples = juce::jmin(numSamples / 3, (int)(0.012 * sampleRate));
+      const int fadeSamples =
+          juce::jmin(numSamples / 3, (int)(0.012 * sampleRate));
       for (int k = 0; k < fadeSamples; ++k) {
-        const float w = 0.5f * (1.0f - std::cos(PI * (float)k / (float)fadeSamples));
+        const float w =
+            0.5f * (1.0f - std::cos(PI * (float)k / (float)fadeSamples));
         out[numSamples - 1 - k] *= w;
       }
     }
@@ -1119,25 +1189,25 @@ private:
                                                          double sampleRate) {
     switch (presetIdx) {
     case 0: // Studio Wood Room (0.55s)
-      return synthesizeSpace(
-          {7.4f, 5.3f, 3.2f, 0.79f, 0.62f, 0.55f, 0.28f, 0.006f, 0.014f, 75.0f,
-           7800.0f, 0.34f, 0.22f, 0.55f, 0x574F4F44524F4F4DULL},
-          sampleRate);
+      return synthesizeSpace({7.4f, 5.3f, 3.2f, 0.79f, 0.62f, 0.55f, 0.28f,
+                              0.006f, 0.014f, 75.0f, 7800.0f, 0.34f, 0.22f,
+                              0.55f, 0x574F4F44524F4F4DULL},
+                             sampleRate);
     case 1: // Warm Studio Chamber (1.05s)
-      return synthesizeSpace(
-          {9.8f, 6.9f, 3.9f, 0.84f, 1.15f, 1.05f, 0.48f, 0.011f, 0.024f, 85.0f,
-           6200.0f, 0.30f, 0.26f, 0.55f, 0x4348414D42455231ULL},
-          sampleRate);
+      return synthesizeSpace({9.8f, 6.9f, 3.9f, 0.84f, 1.15f, 1.05f, 0.48f,
+                              0.011f, 0.024f, 85.0f, 6200.0f, 0.30f, 0.26f,
+                              0.55f, 0x4348414D42455231ULL},
+                             sampleRate);
     case 2: // Symphony Concert Hall (2.1s)
-      return synthesizeSpace(
-          {24.5f, 16.8f, 12.2f, 0.89f, 2.35f, 2.10f, 0.92f, 0.018f, 0.046f,
-           80.0f, 7000.0f, 0.26f, 0.28f, 0.55f, 0x434F4E4348414C4CULL},
-          sampleRate);
+      return synthesizeSpace({24.5f, 16.8f, 12.2f, 0.89f, 2.35f, 2.10f, 0.92f,
+                              0.018f, 0.046f, 80.0f, 7000.0f, 0.26f, 0.28f,
+                              0.55f, 0x434F4E4348414C4CULL},
+                             sampleRate);
     case 3: // Stone Sanctuary (3.0s)
-      return synthesizeSpace(
-          {38.0f, 21.5f, 18.5f, 0.92f, 3.30f, 3.00f, 1.15f, 0.026f, 0.072f,
-           90.0f, 5800.0f, 0.22f, 0.30f, 0.54f, 0x434154484544524CULL},
-          sampleRate);
+      return synthesizeSpace({38.0f, 21.5f, 18.5f, 0.92f, 3.30f, 3.00f, 1.15f,
+                              0.026f, 0.072f, 90.0f, 5800.0f, 0.22f, 0.30f,
+                              0.54f, 0x434154484544524CULL},
+                             sampleRate);
     case 4: // Vintage Studio Plate (1.5s)
       return synthesizePlate(sampleRate);
     case 5: // 2x12 Warm Tube Cab
@@ -1176,7 +1246,8 @@ public:
   std::atomic<float> gateThreshold{-60.0f};
 
   std::atomic<bool> eqEnabled{false};
-  std::atomic<bool> eqCurveMode{false}; // false = Independent, true = Proportional Curve Link
+  std::atomic<bool> eqCurveMode{
+      false}; // false = Independent, true = Proportional Curve Link
   std::atomic<float> hpfFreq{20.0f};
   std::atomic<float> lowShelfGain{0.0f};
   std::atomic<float> highShelfGain{0.0f};
@@ -1195,7 +1266,8 @@ public:
 
   // Stereo / Ping-Pong / Mono / Tape Delay
   std::atomic<bool> delayEnabled{false};
-  std::atomic<int> delayMode{0}; // 0 = Stereo, 1 = Ping-Pong, 2 = Mono, 3 = Tape Warm
+  std::atomic<int> delayMode{
+      0}; // 0 = Stereo, 1 = Ping-Pong, 2 = Mono, 3 = Tape Warm
   std::atomic<float> delayTimeMs{375.0f};
   std::atomic<float> delayFeedback{0.35f};
   std::atomic<float> delayTone{6500.0f};
@@ -1213,11 +1285,13 @@ public:
   MusetteDetuner musette;
   std::atomic<bool> musetteEnabled{false};
   std::atomic<float> musetteCents{6.0f};
-  std::atomic<int> musetteMode{0}; // 0 = 2-Reed MM, 1 = 3-Reed MMM, 2 = TEMU Musette
+  std::atomic<int> musetteMode{
+      0}; // 0 = 2-Reed MM, 1 = 3-Reed MMM, 2 = TEMU Musette
   std::atomic<bool> musette3Reed{false};
   std::atomic<float> musetteMix{0.25f};
 
-  // Input Channel Mode: 0 = Stereo, 1 = Mono (L+R), 2 = Mono (Left), 3 = Mono (Right)
+  // Input Channel Mode: 0 = Stereo, 1 = Mono (L+R), 2 = Mono (Left), 3 = Mono
+  // (Right)
   std::atomic<int> channelMode{0};
 
   // Cached parameter state to prevent per-block coefficient recomputation
@@ -1226,7 +1300,8 @@ public:
   bool cachedEqEnabled = false;
   float cachedVolGain = -999.0f;
   float cachedMasterGain = -999.0f;
-  float cachedEqBands[10] = {-999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f, -999.0f};
+  float cachedEqBands[10] = {-999.0f, -999.0f, -999.0f, -999.0f, -999.0f,
+                             -999.0f, -999.0f, -999.0f, -999.0f, -999.0f};
   bool cachedCompEnabled = false;
   float cachedCompAmt = -999.0f;
   float cachedCompMakeup = -999.0f;
@@ -1263,7 +1338,7 @@ public:
     float cAmt = compAmount.load();
     float cMakeup = compMakeupDb.load();
     int cPreset = compPreset.load();
-    
+
     bool choEnabled = chorusEnabled.load();
     float choRate = chorusRate.load();
     float choMix = chorusMix.load();
@@ -1290,7 +1365,8 @@ public:
       gateR.setThreshold(gThresh);
     }
 
-    if (eEnabled != cachedEqEnabled || vGain != cachedVolGain || mGain != cachedMasterGain) {
+    if (eEnabled != cachedEqEnabled || vGain != cachedVolGain ||
+        mGain != cachedMasterGain) {
       cachedEqEnabled = eEnabled;
       cachedVolGain = vGain;
       cachedMasterGain = mGain;
@@ -1311,7 +1387,8 @@ public:
       }
     }
 
-    if (cEnabled != cachedCompEnabled || cAmt != cachedCompAmt || cMakeup != cachedCompMakeup || cPreset != cachedCompPreset) {
+    if (cEnabled != cachedCompEnabled || cAmt != cachedCompAmt ||
+        cMakeup != cachedCompMakeup || cPreset != cachedCompPreset) {
       cachedCompEnabled = cEnabled;
       cachedCompAmt = cAmt;
       cachedCompMakeup = cMakeup;
@@ -1324,7 +1401,8 @@ public:
       compR.setAmount(cAmt);
     }
 
-    if (choEnabled != cachedChorusEnabled || choRate != cachedChorusRate || choMix != cachedChorusMix) {
+    if (choEnabled != cachedChorusEnabled || choRate != cachedChorusRate ||
+        choMix != cachedChorusMix) {
       cachedChorusEnabled = choEnabled;
       cachedChorusRate = choRate;
       cachedChorusMix = choMix;

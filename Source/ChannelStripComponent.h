@@ -554,7 +554,7 @@ public:
     };
     iemLevelKnob.setValue(slot.getIemOffset(), juce::dontSendNotification);
     iemLevelKnob.setTooltip(
-        "Per-Strip IEM Trim relative to FOH fader (-inf to +6.0 dB; double-click for 0.0 dB unity)");
+        "Per-Strip IEM Trim relative to the IEM fader (-inf to +6.0 dB; double-click for 0.0 dB unity)");
     iemLevelKnob.onValueChange = [this] {
       slot.setIemOffset((float)iemLevelKnob.getValue());
     };

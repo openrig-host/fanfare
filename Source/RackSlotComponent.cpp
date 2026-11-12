@@ -323,7 +323,7 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   iemOffsetKnob.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
   iemOffsetKnob.setRange(0.0, 2.0);
   iemOffsetKnob.setValue(1.0);
-  iemOffsetKnob.setTooltip("IEM Offset (relative to FOH)");
+  iemOffsetKnob.setTooltip("IEM Trim (relative to the IEM fader)");
   iemOffsetKnob.onValueChange = [this] {
     slot.setIemOffset((float)iemOffsetKnob.getValue());
   };
@@ -475,9 +475,9 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   };
 
   addAndMakeVisible(noteRangeButton);
-  noteRangeButton.setButtonText("NR");
+  noteRangeButton.setButtonText("KEY");
   Fanfare::setButtonRole(noteRangeButton, Fanfare::ButtonRole::Standard);
-  noteRangeButton.setTooltip("Note Range: Restricts this channel strip to a specific key range on your controller.");
+  noteRangeButton.setTooltip("KEY: Per-socket note ranges/splits and strip transpose. Lights amber when this strip is range-limited or transposed.");
   noteRangeButton.onClick = [this] {
     if (onShowNoteRangeDialog)
       onShowNoteRangeDialog();
@@ -548,7 +548,7 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
 
   addChildComponent(stripMenuBtn);
   Fanfare::setButtonRole(stripMenuBtn, Fanfare::ButtonRole::Subtle);
-  stripMenuBtn.setTooltip("Strip actions: Note range, MIDI FX, Sampler, Save/Load strip, Rename, Colour");
+  stripMenuBtn.setTooltip("Strip actions: MIDI FX, Sampler, Synths, MP3 deck, Presets, Rename, Colour. Lights amber when any of these is active.");
   stripMenuBtn.onClick = [this] { showStripActionsMenu(); };
 
   addAndMakeVisible(midiLed);
@@ -742,6 +742,26 @@ void RackSlotComponent::timerCallback() {
 
   const auto rangeStr = getActiveNoteRangeString();
   noteRangeLabel.setText(rangeStr, juce::dontSendNotification);
+
+  // Tool lights (Studio): KEY lit when the strip is range-limited or
+  // transposed; "..." lit when any of its buried performance tools is active.
+  const bool keyLit = !isReturn && (slot.getLowNote() > 0 || slot.getHighNote() < 127 ||
+                                    slot.getTransposeSemis() != 0);
+  const bool toolsActive =
+      !isReturn && !isMonitorIn &&
+      (slot.getArpeggiator().enabled.load() || slot.getHarmonizer().enabled.load() ||
+       slot.getSampler().enabled.load() || slot.hasAnySynthSlot() ||
+       (kMp3DecksEnabled && slot.getMp3Player().hasAnyTracks()));
+  if (keyLit != prevKeyLit) {
+    prevKeyLit = keyLit;
+    noteRangeButton.getProperties().set("toolActive", keyLit);
+    noteRangeButton.repaint();
+  }
+  if (toolsActive != prevToolsActive) {
+    prevToolsActive = toolsActive;
+    stripMenuBtn.getProperties().set("toolActive", toolsActive);
+    stripMenuBtn.repaint();
+  }
   const bool isCustomSplit = !rangeStr.containsIgnoreCase("(Full)");
   noteRangeLabel.setColour(juce::Label::textColourId,
                            isCustomSplit ? ThemeManager::get(Theme::Role::foh)
@@ -857,7 +877,7 @@ void RackSlotComponent::timerCallback() {
       iemRoutingBtn.setButtonText("IEM " + dbStr);
       iemRoutingBtn.setTooltip(
           "IEM Send: Strip IEM Trim is " + dbStr +
-          " relative to FOH (adjust in DYN). Hold to learn an IEM fader CC.");
+          " relative to the IEM fader (adjust in DYN). Hold to learn an IEM fader CC.");
     }
     stateChanged = true;
   }
@@ -1151,7 +1171,7 @@ void RackSlotComponent::resized() {
   iemRoutingBtn.setVisible(true);
   channelSlider.setVisible(true);
   ccButton.setVisible(!isReturn);
-  noteRangeButton.setVisible(!isReturn && !studio);
+  noteRangeButton.setVisible(!isReturn);
   noteRangeLabel.setVisible(!isReturn);
   customizeButton.setVisible(!isReturn && !isMonitorIn);
   arpButton.setVisible(!isReturn && !isMonitorIn && !studio);
@@ -1210,17 +1230,19 @@ void RackSlotComponent::resized() {
   fohRoutingBtn.setBounds(buttonArea.removeFromTop(btnHeight).reduced(3, 1));
   iemRoutingBtn.setBounds(buttonArea.removeFromTop(btnHeight).reduced(3, 1));
 
-  // CC / NR / DYN row above MUTE (in Studio: CC / DYN / ... menu)
+  // CC / KEY / DYN row above MUTE (in Studio: CC / DYN / KEY / ... menu)
   auto ctrlRow = bounds.removeFromBottom(20);
   if (studio && !isReturn) {
     if (isMonitorIn) {
-      int colWidth = ctrlRow.getWidth() / 2;
-      ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(2, 1));
-      stripMenuBtn.setBounds(ctrlRow.reduced(2, 1));
-    } else {
       int colWidth = ctrlRow.getWidth() / 3;
       ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(2, 1));
+      noteRangeButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
+      stripMenuBtn.setBounds(ctrlRow.reduced(2, 1));
+    } else {
+      int colWidth = ctrlRow.getWidth() / 4;
+      ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(2, 1));
       customizeButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
+      noteRangeButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
       stripMenuBtn.setBounds(ctrlRow.reduced(2, 1));
     }
   } else {
@@ -1570,24 +1592,24 @@ void RackSlotComponent::showStripActionsMenu() {
                                ? slot.getName()
                                : ("Strip " + juce::String(slotIndex + 1));
   menu.addSectionHeader(hdr);
-  menu.addItem(1, "Note range & transpose...");
+  // Note range (KEY), DYN and CC now have their own buttons in the strip's
+  // control row, so the menu carries the buried tools only, grouped:
   if (!isMonitorIn) {
-    menu.addItem(2, "Dynamics, EQ & sends (DYN)...");
+    menu.addSectionHeader("Performance");
     menu.addItem(3, "MIDI effects (Arp / Harmonizer)...");
     menu.addItem(4, "8-pad sampler...");
     menu.addItem(5, "BLEEP-216 synth...");
+    menu.addItem(12, "CoplanDX synth...");
     if (kMp3DecksEnabled)
       menu.addItem(6, "MP3 playlist deck...");
+    menu.addSeparator();
   }
-  menu.addItem(7, "CC parameter mappings...");
-  menu.addSeparator();
+  menu.addSectionHeader("Strip");
   menu.addItem(8, "Save strip preset...");
   menu.addItem(9, "Load strip preset...");
   menu.addSeparator();
   menu.addItem(10, "Rename strip...");
   menu.addItem(11, "Strip colour...");
-  if (!isMonitorIn)
-    menu.addItem(12, "CoplanDX synth...");
 
   juce::Component::SafePointer<RackSlotComponent> safe(this);
   menu.showMenuAsync(

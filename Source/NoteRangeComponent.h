@@ -18,6 +18,9 @@
  *  - Draggable range handles with color-coded active highlights
  *  - Individual MIDI Note Learn with arming and reset controls
  *  - Automatic synchronization of the overarching strip note filter
+ *
+ * A strip-wide TRANSPOSE bar (same setting as the MIDI FX dialog transpose)
+ * sits under the three sockets.
  */
 class NoteRangeComponent : public juce::Component,
                            public juce::Timer,
@@ -122,8 +125,40 @@ public:
                             "Open the Note Range & Keyboard Split section of the User's Manual");
     addAndMakeVisible(helpButton);
 
+    // Strip transpose — same setting as the MIDI FX dialog's transpose, so
+    // splits and transposition live in one place.
+    transposeSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    transposeSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    transposeSlider.setRange(-48, 48, 1);
+    transposeSlider.setValue(slot.getTransposeSemis(), juce::dontSendNotification);
+    transposeSlider.setTooltip(
+        "Transpose this whole strip up/down in semitones (-48..+48). This is the same setting as Transpose in the MIDI effects dialog.");
+    transposeSlider.onValueChange = [this] {
+      slot.setTransposeSemis((int)transposeSlider.getValue());
+      repaint();
+    };
+    addAndMakeVisible(transposeSlider);
+
+    static constexpr int trspDeltas[] = {-12, -1, 0, 1, 12};
+    const char *trspLabels[] = {"-12", "-1", "0", "+1", "+12"};
+    for (int i = 0; i < 5; ++i) {
+      trspBtns[i].setButtonText(trspLabels[i]);
+      Fanfare::setButtonRole(trspBtns[i], Fanfare::ButtonRole::Standard);
+      trspBtns[i].setTooltip(i == 2 ? "Clear transpose (0)"
+                                    : "Transpose " + juce::String(trspDeltas[i] > 0 ? "+" : "") +
+                                          juce::String(trspDeltas[i]) + " semitones from current");
+      trspBtns[i].onClick = [this, i] {
+        const int cur = slot.getTransposeSemis();
+        const int next = (trspDeltas[i] == 0) ? 0 : juce::jlimit(-48, 48, cur + trspDeltas[i]);
+        slot.setTransposeSemis(next);
+        transposeSlider.setValue(next, juce::dontSendNotification);
+        repaint();
+      };
+      addAndMakeVisible(trspBtns[i]);
+    }
+
     startTimerHz(25);
-    setSize(860, 310);
+    setSize(860, 358);
   }
 
   ~NoteRangeComponent() override { stopTimer(); }
@@ -142,6 +177,21 @@ public:
     resetAllButton.setBounds(bottomArea.removeFromLeft(96));
     helpButton.setBounds(bottomArea.removeFromRight(76));
     r.removeFromBottom(4);
+
+    // Transpose bar (34px): label + readout painted, slider + quick buttons live
+    auto trspRow = r.removeFromBottom(34);
+    r.removeFromTop(3);
+    transposeArea = trspRow;
+    {
+      auto btnsR = trspRow.removeFromRight(5 * 46 + 4 * 3);
+      for (int i = 0; i < 5; ++i) {
+        trspBtns[i].setBounds(btnsR.removeFromLeft(46).reduced(1, 2));
+        btnsR.removeFromLeft(3);
+      }
+      trspRow.removeFromLeft(150); // painted label + readout zone
+      trspRow.removeFromRight(6);
+      transposeSlider.setBounds(trspRow.reduced(2, 6));
+    }
 
     // 3 Socket lanes
     const int totalAvailable = r.getHeight();
@@ -188,7 +238,7 @@ public:
     // Dialog Title
     g.setColour(ThemeManager::get(Theme::Role::text));
     g.setFont(BoutiqueLookAndFeel::condensedFont(14.5f, 0.05f));
-    g.drawText("KEYBOARD SPLITS & NOTE RANGES", 14, 5, 230, 20, juce::Justification::centredLeft);
+    g.drawText("NOTE RANGES, SPLITS & TRANSPOSE", 14, 5, 230, 20, juce::Justification::centredLeft);
 
     // Strip name pill
     g.setColour(ThemeManager::get(Theme::Role::accent));
@@ -208,6 +258,24 @@ public:
     // Paint each of the 3 socket rows
     for (int i = 0; i < 3; ++i) {
       paintSocketRow(g, i);
+    }
+
+    // Transpose bar chrome
+    if (transposeArea.getHeight() > 0) {
+      const auto tr = transposeArea.toFloat();
+      Fanfare::ModalFrame::paintRecessedWell(g, tr, 2.0f);
+      g.setColour(ThemeManager::get(Theme::Role::textDim));
+      g.setFont(BoutiqueLookAndFeel::condensedFont(12.5f, 0.05f));
+      g.drawText("TRANSPOSE", tr.getX() + 12, tr.getY(), 92, tr.getHeight(),
+                 juce::Justification::centredLeft);
+      const int semis = slot.getTransposeSemis();
+      const juce::String readout =
+          semis == 0 ? "no transpose" : ((semis > 0 ? "+" : "") + juce::String(semis) + " st");
+      g.setColour(semis == 0 ? ThemeManager::get(Theme::Role::textFaint)
+                             : ThemeManager::get(Theme::Role::accent));
+      g.setFont(BoutiqueLookAndFeel::monoFont(11.5f, true));
+      g.drawText(readout, tr.getX() + 104, tr.getY(), 42, tr.getHeight(),
+                 juce::Justification::centredLeft);
     }
   }
 
@@ -328,6 +396,7 @@ private:
   juce::Rectangle<int> headerArea;
   juce::Rectangle<int> socketHeaderAreas[3];
   juce::Rectangle<float> keyboardAreas[3];
+  juce::Rectangle<int> transposeArea;
 
   juce::TextButton enableBtns[3];
   juce::TextButton learnBtns[3];
@@ -336,6 +405,9 @@ private:
   juce::TextButton doneButton;
   juce::TextButton resetAllButton;
   juce::TextButton helpButton{"HAAALP!"};
+
+  juce::Slider transposeSlider;
+  juce::TextButton trspBtns[5];
 
   void timerCallback() override {
     // Periodically refresh in case slot settings change externally
@@ -355,6 +427,11 @@ private:
         updateEnableButtonText(i);
         changed = true;
       }
+    }
+    const int extSemis = slot.getTransposeSemis();
+    if ((int)transposeSlider.getValue() != extSemis) {
+      transposeSlider.setValue(extSemis, juce::dontSendNotification);
+      changed = true;
     }
     if (changed)
       repaint();

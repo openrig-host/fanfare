@@ -16,6 +16,7 @@
 
 inline std::atomic<uint32_t> g_audioThreadId{0};
 inline thread_local bool t_isRealtimeAudioThread = false;
+inline std::atomic<uint32_t> g_rtPluginFaultCount{0};
 
 namespace FanfareLog {
 
@@ -140,6 +141,14 @@ inline void logToFile(const juce::String &msg) {
 
 // Drain the queue and write to disk. Call from the message thread (e.g. Timer).
 inline void flushLog() {
+  uint32_t rtFaults = g_rtPluginFaultCount.exchange(0, std::memory_order_relaxed);
+  if (rtFaults > 0) {
+    const juce::ScopedLock sl(logQueueLock);
+    logQueue.add(juce::Time::getCurrentTime().toString(true, true) +
+                 " [ERROR] SEH/Plugin fault caught on real-time audio thread (count=" +
+                 juce::String(rtFaults) + "; see flight recorder)");
+  }
+
   juce::StringArray toWrite;
   {
     const juce::ScopedLock sl(logQueueLock);
@@ -282,7 +291,7 @@ inline __declspec(noinline) bool executeRawSehCall(void (*fn)(void*), void* data
 #pragma warning(pop)
 
 template <typename Func>
-inline bool safeExecutePluginCall(Func&& action, const char* actionName) {
+inline bool safeExecutePluginCall(Func&& action, const char* actionName, int slotIdx = -1) {
   struct LambdaRunner {
     static void run(void* ctx) {
       auto* f = static_cast<std::remove_reference_t<Func>*>(ctx);
@@ -291,13 +300,18 @@ inline bool safeExecutePluginCall(Func&& action, const char* actionName) {
   };
   bool ok = executeRawSehCall(&LambdaRunner::run, &action);
   if (!ok) {
-    LOG_ERROR(juce::String("SEH Access Violation / Fault caught during plugin action: ") + (actionName ? actionName : "unknown"));
+    if (t_isRealtimeAudioThread || g_audioThreadId.load(std::memory_order_relaxed) == (uint32_t)::GetCurrentThreadId()) {
+      g_rtPluginFaultCount.fetch_add(1, std::memory_order_relaxed);
+      recordFlightEvent(slotIdx, actionName ? actionName : "RT plugin SEH fault");
+    } else {
+      LOG_ERROR(juce::String("SEH Access Violation / Fault caught during plugin action: ") + (actionName ? actionName : "unknown"));
+    }
   }
   return ok;
 }
 
 template <typename Func>
-inline bool safeExecutePluginCall(Func&& action, const juce::String& actionName) {
+inline bool safeExecutePluginCall(Func&& action, const juce::String& actionName, int slotIdx = -1) {
   struct LambdaRunner {
     static void run(void* ctx) {
       auto* f = static_cast<std::remove_reference_t<Func>*>(ctx);
@@ -306,18 +320,44 @@ inline bool safeExecutePluginCall(Func&& action, const juce::String& actionName)
   };
   bool ok = executeRawSehCall(&LambdaRunner::run, &action);
   if (!ok) {
-    LOG_ERROR("SEH Access Violation / Fault caught during plugin action: " + actionName);
+    if (t_isRealtimeAudioThread || g_audioThreadId.load(std::memory_order_relaxed) == (uint32_t)::GetCurrentThreadId()) {
+      g_rtPluginFaultCount.fetch_add(1, std::memory_order_relaxed);
+      recordFlightEvent(slotIdx, "RT plugin SEH fault");
+    } else {
+      LOG_ERROR("SEH Access Violation / Fault caught during plugin action: " + actionName);
+    }
   }
   return ok;
 }
 #else
 template <typename Func>
-inline bool safeExecutePluginCall(Func&& action, const juce::String& actionName) {
+inline bool safeExecutePluginCall(Func&& action, const char* actionName, int slotIdx = -1) {
   try {
     action();
     return true;
   } catch (...) {
-    LOG_ERROR("Exception caught during plugin action: " + actionName);
+    if (t_isRealtimeAudioThread) {
+      g_rtPluginFaultCount.fetch_add(1, std::memory_order_relaxed);
+      recordFlightEvent(slotIdx, actionName ? actionName : "RT plugin fault");
+    } else {
+      LOG_ERROR(juce::String("Exception caught during plugin action: ") + (actionName ? actionName : "unknown"));
+    }
+    return false;
+  }
+}
+
+template <typename Func>
+inline bool safeExecutePluginCall(Func&& action, const juce::String& actionName, int slotIdx = -1) {
+  try {
+    action();
+    return true;
+  } catch (...) {
+    if (t_isRealtimeAudioThread) {
+      g_rtPluginFaultCount.fetch_add(1, std::memory_order_relaxed);
+      recordFlightEvent(slotIdx, "RT plugin fault");
+    } else {
+      LOG_ERROR("Exception caught during plugin action: " + actionName);
+    }
     return false;
   }
 }

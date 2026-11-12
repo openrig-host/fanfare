@@ -3,6 +3,25 @@
 
 namespace Fanfare {
 
+namespace {
+// Top-level song keys varToSong/songToVar understand; anything else is
+// preserved through Song::extra so round-trips never lose foreign data.
+bool isKnownSongKey(const juce::Identifier& id) {
+    static const juce::Identifier known[] = {
+        "version",         "schemaVersion",       "name",
+        "fohMasterLevel",  "iemMasterLevel",      "fohOutputOffset",
+        "iemOutputOffset", "defaultMidiChannel",  "fohFx",
+        "iemFx",           "channels",            "scenes",
+        "currentSceneIndex", "notes",             "activeNoteTabIndex",
+        "noteFontSize",    "noteIsMonospace",     "freshBuild",
+    };
+    for (const auto& k : known)
+        if (id == k)
+            return true;
+    return false;
+}
+}
+
 bool RigSerializer::readSongFromFile(const juce::File& file, Song& outSong) {
     LoadResult result = load(file);
     if (!result.ok)
@@ -28,6 +47,18 @@ juce::String RigSerializer::serializeSong(const Song& song) {
 bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
     if (!rig.isObject())
         return false;
+
+    // Stash keys this struct doesn't model (newer schema fields, third-party
+    // tools) so the next save writes them back instead of dropping them.
+    {
+        auto* extras = new juce::DynamicObject();
+        if (auto* obj = rig.getDynamicObject()) {
+            for (const auto& prop : obj->getProperties())
+                if (!isKnownSongKey(prop.name))
+                    extras->setProperty(prop.name, prop.value);
+        }
+        out.extra = juce::var(extras);
+    }
 
     out.fohMasterLevel = (float)rig.getProperty("fohMasterLevel", 1.0);
     out.iemMasterLevel = (float)rig.getProperty("iemMasterLevel", 1.0);
@@ -665,6 +696,14 @@ juce::var RigSerializer::songToVar(const Song& song) {
     rig->setProperty("noteFontSize", (double)song.noteFontSize);
     rig->setProperty("noteIsMonospace", song.noteIsMonospace);
     rig->setProperty("freshBuild", song.freshBuild);
+
+    // Re-attach keys captured on load (Song::extra) unless the struct now
+    // models them explicitly.
+    if (auto* extras = song.extra.getDynamicObject()) {
+        for (const auto& prop : extras->getProperties())
+            if (!rig->hasProperty(prop.name))
+                rig->setProperty(prop.name, prop.value);
+    }
 
     return juce::var(rig);
 }

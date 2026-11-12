@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(Fanfare VERSION 1.6.0 LANGUAGES C CXX)
+project(Fanfare VERSION 1.6.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,6 +20,13 @@ juce_add_gui_app(Fanfare
     ICON_BIG        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Resources/Fanfare_Icon.png"
     ICON_SMALL      "${CMAKE_CURRENT_SOURCE_DIR}/Source/Resources/Fanfare_Icon.png"
 )
+
+# The juceaide-generated resources.rc (embedded VERSIONINFO) only re-fires on
+# icon changes, so it can go stale across version bumps. Remove it at
+# configure time so the build regenerates it from the current PROJECT_VERSION.
+if(WIN32)
+    file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/Fanfare_artefacts/JuceLibraryCode/Fanfare_resources.rc")
+endif()
 
 # All compilation units (must match the Projucer source list).
 target_sources(Fanfare PRIVATE

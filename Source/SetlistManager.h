@@ -376,15 +376,18 @@ public:
         obj->setProperty("activeIndex", activeIndex);
 
         file.getParentDirectory().createDirectory();
-        juce::FileOutputStream fos(file);
-        if (fos.openedOk()) {
-            fos.setPosition(0);
-            fos.truncate();
-            juce::JSON::writeToStream(fos, juce::var(obj.get()));
-            currentSetlistFile = file;
-            return true;
+        // Stage through a temp sibling and rename so a crash mid-save can't
+        // leave a truncated setlist (same pattern as RigSerializer::save;
+        // moveFileTo uses MOVEFILE_REPLACE_EXISTING on Windows).
+        juce::File temp = file.getSiblingFile(file.getFileName() + ".tmp");
+        if (!temp.replaceWithText(juce::JSON::toString(juce::var(obj.get()))))
+            return false;
+        if (!temp.moveFileTo(file)) {
+            temp.deleteFile();
+            return false;
         }
-        return false;
+        currentSetlistFile = file;
+        return true;
     }
 
     bool loadSetlist(const juce::File& file) {

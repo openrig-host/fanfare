@@ -1,7 +1,7 @@
 #pragma once
 
-#include <JuceHeader.h>
 #include "Logger.h"
+#include <JuceHeader.h>
 #include <atomic>
 #include <cmath>
 #include <vector>
@@ -13,11 +13,12 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <windows.h>
-#include <powerbase.h>
-#include <powrprof.h>
 #include <pdh.h>
 #include <pdhmsg.h>
+#include <powerbase.h>
+#include <powrprof.h>
+#include <windows.h>
+
 #pragma comment(lib, "powrprof.lib")
 #pragma comment(lib, "pdh.lib")
 #endif
@@ -36,7 +37,8 @@
 class ThermalMonitor : private juce::Thread {
 public:
   struct Snapshot {
-    bool warningActive = false;     // True while actively throttled or within 20s latch
+    bool warningActive =
+        false; // True while actively throttled or within 20s latch
     bool activelyThrottled = false; // True on the most recent 2s sample
     int tempCelsius = -1;           // -1 if ACPI thermal zone unavailable
     int peakTempCelsius = -1;
@@ -46,8 +48,9 @@ public:
     int osTurboCapMhz = 0;
     int passiveLimitPct = 100;
     int pctOfMaxFreq = 100;
-    juce::String badgeText;         // Short text for top bar, e.g. "THERMAL 92C" or "THERMAL"
-    juce::String reasonText;        // Human-readable reason for tooltip/dialog/logs
+    juce::String
+        badgeText; // Short text for top bar, e.g. "THERMAL 92C" or "THERMAL"
+    juce::String reasonText; // Human-readable reason for tooltip/dialog/logs
   };
 
   ThermalMonitor() : juce::Thread("FanfareThermalMonitor") {}
@@ -76,8 +79,9 @@ public:
 
   void acknowledgeLatch() {
     latchedUntilMs.store(0, std::memory_order_relaxed);
-    warningActiveFlag.store(activelyThrottledFlag.load(std::memory_order_relaxed),
-                            std::memory_order_relaxed);
+    warningActiveFlag.store(
+        activelyThrottledFlag.load(std::memory_order_relaxed),
+        std::memory_order_relaxed);
   }
 
   bool isWarningActive() const {
@@ -138,7 +142,8 @@ public:
 
 private:
 #ifdef _WIN32
-  // Matches Windows kernel PROCESSOR_POWER_INFORMATION layout (omitted from winnt.h)
+  // Matches Windows kernel PROCESSOR_POWER_INFORMATION layout (omitted from
+  // winnt.h)
   struct WinProcessorPowerInfo {
     ULONG Number;
     ULONG MaxMhz;
@@ -153,7 +158,7 @@ private:
   static constexpr int kHighTempTriggerC = 96;
   static constexpr int kHighTempImmediateC = 99;
   static constexpr int kHighTempClearC = 89;
-  static constexpr int kSustainedHighTempPolls = 2;
+  static constexpr int kSustainedHighTempPolls = 1;
 
   std::atomic<uintptr_t> backgroundMask{0};
   std::atomic<float> audioCpuPct{0.0f};
@@ -184,9 +189,9 @@ private:
     PDH_HCOUNTER maxFreqPctCounter = nullptr;
 
     if (::PdhOpenQueryW(nullptr, 0, &query) == ERROR_SUCCESS) {
-      if (::PdhAddEnglishCounterW(
-              query, L"\\Thermal Zone Information(*)\\Temperature", 0,
-              &tempCounter) != ERROR_SUCCESS) {
+      if (::PdhAddEnglishCounterW(query,
+                                  L"\\Thermal Zone Information(*)\\Temperature",
+                                  0, &tempCounter) != ERROR_SUCCESS) {
         tempCounter = nullptr;
       }
       if (::PdhAddEnglishCounterW(
@@ -195,8 +200,9 @@ private:
         passiveCounter = nullptr;
       }
       if (::PdhAddEnglishCounterW(
-              query, L"\\Processor Information(_Total)\\% Processor Performance",
-              0, &perfPctCounter) != ERROR_SUCCESS) {
+              query,
+              L"\\Processor Information(_Total)\\% Processor Performance", 0,
+              &perfPctCounter) != ERROR_SUCCESS) {
         perfPctCounter = nullptr;
       }
       if (::PdhAddEnglishCounterW(
@@ -210,7 +216,8 @@ private:
 
     SYSTEM_INFO sysInfo{};
     ::GetSystemInfo(&sysInfo);
-    const int numProcs = juce::jlimit(1, 128, (int)sysInfo.dwNumberOfProcessors);
+    const int numProcs =
+        juce::jlimit(1, 128, (int)sysInfo.dwNumberOfProcessors);
     std::vector<WinProcessorPowerInfo> pwrBuf((size_t)numProcs);
 
     bool wasOverTemp = false;
@@ -218,6 +225,9 @@ private:
     int highTempPollStreak = 0;
     int lastObservedOsCapMhz = -1;
     int healthyOsLimitMhz = 0;
+    int cachedOsCapMhz = 0;
+    int cachedOsThrottlePct = 100;
+    int osCapPollCounter = 0;
 
     while (!threadShouldExit()) {
       const uintptr_t wantMask = backgroundMask.load(std::memory_order_relaxed);
@@ -226,16 +236,19 @@ private:
         ::SetThreadAffinityMask(::GetCurrentThread(), (DWORD_PTR)wantMask);
       }
 
-      // 0. Check whether Windows power plan has an intentional turbo cap (PROCFREQMAX / PROCTHROTTLEMAX)
-      // On Intel Speed Shift / CPPC, an OS turbo cap (e.g. 2800/3600 MHz out of 4400 MHz turbo)
-      // scales PROCESSOR_POWER_INFORMATION.MhzLimit proportionally against NominalMhz (e.g. 1040/1600),
-      // even though the CPU is unthrottled and boosting cleanly above base clock.
-      int activeOsCapMhz = 0;
-      int activeOsThrottlePct = 100;
-      readActiveOsFrequencyCap(activeOsCapMhz, activeOsThrottlePct);
-      osFreqCapAtom.store(activeOsCapMhz, std::memory_order_relaxed);
+      // 0. Check whether Windows power plan has an intentional turbo cap
+      // (PROCFREQMAX / PROCTHROTTLEMAX) Sampled every 6th poll (~30s) rather
+      // than every cycle to avoid unnecessary Power Manager RPC overhead.
+      if (osCapPollCounter == 0) {
+        readActiveOsFrequencyCap(cachedOsCapMhz, cachedOsThrottlePct);
+        osFreqCapAtom.store(cachedOsCapMhz, std::memory_order_relaxed);
+      }
+      osCapPollCounter = (osCapPollCounter + 1) % 6;
+      const int activeOsCapMhz = cachedOsCapMhz;
+      const int activeOsThrottlePct = cachedOsThrottlePct;
       const bool hasIntentionalOsCap =
-          (activeOsCapMhz > 0) || (activeOsThrottlePct > 0 && activeOsThrottlePct < 100);
+          (activeOsCapMhz > 0) ||
+          (activeOsThrottlePct > 0 && activeOsThrottlePct < 100);
       if (activeOsCapMhz != lastObservedOsCapMhz) {
         lastObservedOsCapMhz = activeOsCapMhz;
         healthyOsLimitMhz = 0;
@@ -244,7 +257,8 @@ private:
       // 1. Kernel per-core MhzLimit vs MaxMhz (< 5 us)
       int sampleNominalMhz = 0;
       int sampleMinLimitMhz = 0;
-      const ULONG bufBytes = (ULONG)(pwrBuf.size() * sizeof(WinProcessorPowerInfo));
+      const ULONG bufBytes =
+          (ULONG)(pwrBuf.size() * sizeof(WinProcessorPowerInfo));
       if (::CallNtPowerInformation(ProcessorInformation, nullptr, 0,
                                    pwrBuf.data(), bufBytes) == 0) {
         for (int i = 0; i < numProcs; ++i) {
@@ -287,8 +301,8 @@ private:
           if (::PdhGetFormattedCounterValue(perfPctCounter, PDH_FMT_DOUBLE,
                                             nullptr, &val) == ERROR_SUCCESS &&
               val.CStatus == ERROR_SUCCESS && sampleNominalMhz > 0) {
-            sampleEffectiveMhz =
-                (int)std::round((double)sampleNominalMhz * (val.doubleValue / 100.0));
+            sampleEffectiveMhz = (int)std::round((double)sampleNominalMhz *
+                                                 (val.doubleValue / 100.0));
           }
         }
         if (maxFreqPctCounter != nullptr) {
@@ -312,7 +326,8 @@ private:
       if (sampleEffectiveMhz > 0)
         effectiveClockMhz.store(sampleEffectiveMhz, std::memory_order_relaxed);
 
-      // 3. Evaluate true thermal / firmware throttle conditions (ignoring intentional OS turbo caps)
+      // 3. Evaluate true thermal / firmware throttle conditions (ignoring
+      // intentional OS turbo caps)
       if (sampleTempC >= kHighTempTriggerC) {
         ++highTempPollStreak;
         if (sampleTempC >= kHighTempImmediateC ||
@@ -330,41 +345,48 @@ private:
         if (!hasIntentionalOsCap) {
           firmwareClamped = (sampleMinLimitMhz < (sampleNominalMhz * 95) / 100);
         } else {
-          // OS turbo cap is active: only alert if BIOS/EC pushes MhzLimit down below the OS cap
-          // (Event ID 37 thermal step-down) or into severe PROCHOT limp mode (<= 38% of base).
+          // OS turbo cap is active: only alert if BIOS/EC pushes MhzLimit down
+          // below the OS cap (Event ID 37 thermal step-down) or into severe
+          // PROCHOT limp mode (<= 38% of base).
           const bool droppedBelowOsCap =
-              (healthyOsLimitMhz > 0 && sampleMinLimitMhz < (healthyOsLimitMhz * 90) / 100);
+              (healthyOsLimitMhz > 0 &&
+               sampleMinLimitMhz < (healthyOsLimitMhz * 90) / 100);
           const bool severeProchot =
               (sampleMinLimitMhz <= (sampleNominalMhz * 38) / 100);
           firmwareClamped = droppedBelowOsCap || severeProchot;
         }
       }
 
-      const bool passiveClamped = (samplePassivePct > 0 && samplePassivePct < 98);
+      const bool passiveClamped =
+          (samplePassivePct > 0 && samplePassivePct < 98);
       const float dspLoad = audioCpuPct.load(std::memory_order_relaxed);
       const bool clockCrushedUnderLoad =
           (dspLoad >= 35.0f && sampleNominalMhz > 0 && sampleEffectiveMhz > 0 &&
            sampleEffectiveMhz < (sampleNominalMhz * 80) / 100);
 
-      const bool rawThrottled =
-          firmwareClamped || passiveClamped || wasOverTemp || clockCrushedUnderLoad;
+      const bool rawThrottled = firmwareClamped || passiveClamped ||
+                                wasOverTemp || clockCrushedUnderLoad;
       activelyThrottledFlag.store(rawThrottled, std::memory_order_relaxed);
 
-      const juce::int64 nowMs = (juce::int64)juce::Time::getMillisecondCounter();
+      const juce::int64 nowMs =
+          (juce::int64)juce::Time::getMillisecondCounter();
       if (rawThrottled) {
-        latchedUntilMs.store(nowMs + kLatchDurationMs, std::memory_order_relaxed);
+        latchedUntilMs.store(nowMs + kLatchDurationMs,
+                             std::memory_order_relaxed);
 
         juce::StringArray reasons;
         if (firmwareClamped) {
-          reasons.add("Firmware clock clamp (" + juce::String(sampleMinLimitMhz) +
-                      "/" + juce::String(sampleNominalMhz) + " MHz)");
+          reasons.add("Firmware clock clamp (" +
+                      juce::String(sampleMinLimitMhz) + "/" +
+                      juce::String(sampleNominalMhz) + " MHz)");
         }
         if (passiveClamped) {
           reasons.add("ACPI passive thermal limit (" +
                       juce::String(samplePassivePct) + "%)");
         }
         if (wasOverTemp) {
-          reasons.add("High CPU temperature (" + juce::String(sampleTempC) + " C)");
+          reasons.add("High CPU temperature (" + juce::String(sampleTempC) +
+                      " C)");
         }
         if (clockCrushedUnderLoad) {
           reasons.add("Clock crushed to ~" + juce::String(sampleEffectiveMhz) +
@@ -378,21 +400,25 @@ private:
         if (!wasLoggedThrottle) {
           wasLoggedThrottle = true;
           LOG_WARN("CPU THERMAL / FIRMWARE THROTTLE DETECTED: " + joined +
-                   (sampleTempC > 0 ? (" | Temp: " + juce::String(sampleTempC) + " C")
-                                    : juce::String()));
+                   (sampleTempC > 0
+                        ? (" | Temp: " + juce::String(sampleTempC) + " C")
+                        : juce::String()));
         }
-      } else if (wasLoggedThrottle && nowMs >= latchedUntilMs.load(std::memory_order_relaxed)) {
+      } else if (wasLoggedThrottle &&
+                 nowMs >= latchedUntilMs.load(std::memory_order_relaxed)) {
         wasLoggedThrottle = false;
         LOG_INFO("CPU thermal / firmware throttle cleared" +
-                 (sampleTempC > 0 ? (" (Temp: " + juce::String(sampleTempC) + " C)")
-                                  : juce::String()));
+                 (sampleTempC > 0
+                      ? (" (Temp: " + juce::String(sampleTempC) + " C)")
+                      : juce::String()));
       }
 
       const bool showWarning =
-          rawThrottled || (nowMs < latchedUntilMs.load(std::memory_order_relaxed));
+          rawThrottled ||
+          (nowMs < latchedUntilMs.load(std::memory_order_relaxed));
       warningActiveFlag.store(showWarning, std::memory_order_relaxed);
 
-      wait(2000);
+      wait(5000);
     }
 
     if (query != nullptr) {
@@ -400,7 +426,7 @@ private:
     }
 #else
     while (!threadShouldExit()) {
-      wait(2000);
+      wait(5000);
     }
 #endif
   }
@@ -418,26 +444,40 @@ private:
 
     // Subgroup: SUB_PROCESSOR {54533251-82be-4824-96c1-47b60b740d00}
     static const GUID kSubProcessor = {
-        0x54533251, 0x82be, 0x4824, {0x96, 0xc1, 0x47, 0xb6, 0x0b, 0x74, 0x0d, 0x00}};
+        0x54533251,
+        0x82be,
+        0x4824,
+        {0x96, 0xc1, 0x47, 0xb6, 0x0b, 0x74, 0x0d, 0x00}};
     // PROCFREQMAX {75b0ae3f-bce0-45a7-8c89-c9611c25e100}
     static const GUID kProcFreqMax0 = {
-        0x75b0ae3f, 0xbce0, 0x45a7, {0x8c, 0x89, 0xc9, 0x61, 0x1c, 0x25, 0xe1, 0x00}};
+        0x75b0ae3f,
+        0xbce0,
+        0x45a7,
+        {0x8c, 0x89, 0xc9, 0x61, 0x1c, 0x25, 0xe1, 0x00}};
     // PROCFREQMAX1 {75b0ae3f-bce0-45a7-8c89-c9611c25e101}
     static const GUID kProcFreqMax1 = {
-        0x75b0ae3f, 0xbce0, 0x45a7, {0x8c, 0x89, 0xc9, 0x61, 0x1c, 0x25, 0xe1, 0x01}};
+        0x75b0ae3f,
+        0xbce0,
+        0x45a7,
+        {0x8c, 0x89, 0xc9, 0x61, 0x1c, 0x25, 0xe1, 0x01}};
     // PROCTHROTTLEMAX {bc5038f7-23e0-4960-96da-33abaf5935ec}
     static const GUID kProcThrottleMax = {
-        0xbc5038f7, 0x23e0, 0x4960, {0x96, 0xda, 0x33, 0xab, 0xaf, 0x59, 0x35, 0xec}};
+        0xbc5038f7,
+        0x23e0,
+        0x4960,
+        {0x96, 0xda, 0x33, 0xab, 0xaf, 0x59, 0x35, 0xec}};
 
     SYSTEM_POWER_STATUS sps{};
     const bool onBattery =
         (::GetSystemPowerStatus(&sps) != 0 && sps.ACLineStatus == 0);
 
     auto readVal = [&](const GUID &settingGuid, DWORD &outVal) -> bool {
-      return (onBattery ? ::PowerReadDCValueIndex(nullptr, activeScheme, &kSubProcessor,
-                                                  &settingGuid, &outVal)
-                        : ::PowerReadACValueIndex(nullptr, activeScheme, &kSubProcessor,
-                                                  &settingGuid, &outVal)) == ERROR_SUCCESS;
+      return (onBattery ? ::PowerReadDCValueIndex(nullptr, activeScheme,
+                                                  &kSubProcessor, &settingGuid,
+                                                  &outVal)
+                        : ::PowerReadACValueIndex(nullptr, activeScheme,
+                                                  &kSubProcessor, &settingGuid,
+                                                  &outVal)) == ERROR_SUCCESS;
     };
 
     DWORD f0 = 0, f1 = 0, tmax = 100;
@@ -456,8 +496,8 @@ private:
   static double readMaxCounterArrayValue(PDH_HCOUNTER counter) {
     DWORD bufSize = 0;
     DWORD itemCount = 0;
-    PDH_STATUS st = ::PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE,
-                                                   &bufSize, &itemCount, nullptr);
+    PDH_STATUS st = ::PdhGetFormattedCounterArrayW(
+        counter, PDH_FMT_DOUBLE, &bufSize, &itemCount, nullptr);
     if (st != (PDH_STATUS)PDH_MORE_DATA || bufSize == 0 || itemCount == 0)
       return -1.0;
 
@@ -480,8 +520,8 @@ private:
   static double readMinCounterArrayValue(PDH_HCOUNTER counter) {
     DWORD bufSize = 0;
     DWORD itemCount = 0;
-    PDH_STATUS st = ::PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE,
-                                                   &bufSize, &itemCount, nullptr);
+    PDH_STATUS st = ::PdhGetFormattedCounterArrayW(
+        counter, PDH_FMT_DOUBLE, &bufSize, &itemCount, nullptr);
     if (st != (PDH_STATUS)PDH_MORE_DATA || bufSize == 0 || itemCount == 0)
       return -1.0;
 
@@ -503,4 +543,3 @@ private:
   }
 #endif
 };
-

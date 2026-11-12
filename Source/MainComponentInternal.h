@@ -49,16 +49,18 @@ class PluginWindow : public juce::DocumentWindow {
 public:
   std::function<void()> onWindowClosed;
   juce::AudioPluginInstance* pluginInstance = nullptr;
+  bool editorDestroyed = false;
 
   PluginWindow(const juce::String &name, juce::Component *content, juce::AudioPluginInstance* pi)
       : DocumentWindow(name, ThemeManager::get(Theme::Role::panel),
                        DocumentWindow::closeButton |
                            DocumentWindow::minimiseButton),
         pluginInstance(pi) {
-    setContentOwned(content, true);
-    setResizable(true, false);
     setUsingNativeTitleBar(true);
-    centreWithSize(content->getWidth(), content->getHeight());
+    setResizable(true, false);
+    setContentOwned(content, true);
+    if (content != nullptr)
+      centreWithSize(content->getWidth(), content->getHeight());
     setVisible(true);
     toFront(true);
   }
@@ -67,12 +69,16 @@ public:
   // while both the parent DocumentWindow HWND and the owning AudioPluginInstance
   // are still alive (avoiding use-after-free when unloading plugins).
   void destroyEditorNow() {
+    onWindowClosed = nullptr;
+    if (editorDestroyed)
+      return;
+    editorDestroyed = true;
+    setVisible(false);
     if (getContentComponent() != nullptr) {
       FanfareLog::safeExecutePluginCall([this]() {
         clearContentComponent();
       }, "PluginEditor destructor");
     }
-    setVisible(false);
     pluginInstance = nullptr;
   }
 

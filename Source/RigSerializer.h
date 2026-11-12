@@ -95,16 +95,31 @@ public:
             file.copyFileTo(bak);
         }
 
-        juce::File temp = file.getSiblingFile(file.getFileName() + ".tmp");
-        // Clean a stray temp file from a previous failed write.
+        juce::File temp = file.getSiblingFile(
+            file.getFileName() + "." + juce::Uuid().toString().substring(0, 8) + ".tmp");
         if (temp.existsAsFile())
             temp.deleteFile();
 
-        if (!temp.replaceWithText(jsonText))
+        bool writeOk = false;
+        {
+            juce::FileOutputStream out(temp);
+            if (out.openedOk()) {
+                writeOk = out.writeText(jsonText, false, false, nullptr);
+                out.flush();
+                writeOk = writeOk && out.getStatus().wasOk();
+            }
+        }
+        if (!writeOk) {
+            temp.deleteFile();
             return false;
+        }
 
         // moveFileTo uses MOVEFILE_REPLACE_EXISTING on Windows -> atomic replace.
-        return temp.moveFileTo(file);
+        if (!temp.moveFileTo(file)) {
+            temp.deleteFile();
+            return false;
+        }
+        return true;
     }
 
     /** Validate required structural fields. Returns a non-empty string on error. */

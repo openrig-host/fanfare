@@ -186,6 +186,14 @@ void MainComponent::updatePreloadStatus() {
     }
   }
 
+  // A recent song-load outcome owns the segment briefly (showSongStatus) so
+  // the automatic preload text can't wipe it the instant it is set.
+  if (songStatusHoldUntil > juce::Time::getCurrentTime()) {
+    preloadStatusLabel.setVisible(true);
+    preloadStatusLabel.setText(heldSongStatus, juce::dontSendNotification);
+    return;
+  }
+
   if (preloadTarget.existsAsFile()) {
     preloadStatusLabel.setVisible(true);
     nextUpLabel.setVisible(true);
@@ -213,6 +221,7 @@ void MainComponent::updatePreloadStatus() {
     nextUpLabel.setText(capsuleText, juce::dontSendNotification);
     nextUpLabel.setColour(juce::Label::textColourId, stateCol);
   } else {
+    heldSongStatus = ""; // hold (if any) has expired
     preloadStatusLabel.setText("", juce::dontSendNotification);
     preloadStatusLabel.setVisible(false);
     nextUpLabel.setText("", juce::dontSendNotification);
@@ -287,8 +296,10 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
                     }
                     // Active-queue highlighting is driven by updatePreloadStatus()
                     // via the SetlistManager change broadcaster (setActiveIndex).
-                    safeThis->midiMonitorLabel.setText("SONG: " + message,
-                                                       juce::dontSendNotification);
+                    // Song status belongs in the wide preload segment (with a
+                    // hold so preload text can't instantly wipe it); the left
+                    // segment stays reserved for live MIDI readout.
+                    safeThis->showSongStatus("SONG: " + message);
 
                     if (!failed.empty()) {
                         safeThis->showMissingPluginsWarning(failed);
@@ -311,9 +322,8 @@ void MainComponent::loadRigAsync(const juce::File &file, int buttonIndexForHighl
                 } else {
                     // Rollback-by-construction: current rig is untouched.
                     if (message == "Cancelled") {
-                        safeThis->midiMonitorLabel.setText(
-                            "SONG: Switch cancelled (current song unchanged)",
-                            juce::dontSendNotification);
+                        safeThis->showSongStatus(
+                            "SONG: Switch cancelled (current song unchanged)");
                         LOG_INFO("Rig transition cancelled by user for: " + fileName);
                     } else {
                         juce::AlertWindow::showAsync(
