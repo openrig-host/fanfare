@@ -1,5 +1,8 @@
 param()
 
+# Fail loudly: a silently skipped input would corrupt the generated header.
+$ErrorActionPreference = "Stop"
+
 function Convert-FileToByteArray([string]$filePath, [string]$varName) {
     $bytes = [System.IO.File]::ReadAllBytes($filePath)
     $sb = [System.Text.StringBuilder]::new()
@@ -25,11 +28,14 @@ $sbAll = [System.Text.StringBuilder]::new()
 [void]$sbAll.AppendLine("namespace EmbeddedWebAssets {")
 [void]$sbAll.AppendLine()
 
-$docsRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\docs")).Path
+# ProviderPath (not Path) keeps plain OS paths for network locations where
+# Resolve-Path().Path returns a provider-qualified string .NET cannot read.
+$docsRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\docs")).ProviderPath
 
 [void]$sbAll.Append((Convert-FileToByteArray (Join-Path $PSScriptRoot "static\index.html") "INDEX_HTML_DATA"))
 [void]$sbAll.Append((Convert-FileToByteArray (Join-Path $PSScriptRoot "static\style.css") "STYLE_CSS_DATA"))
 [void]$sbAll.Append((Convert-FileToByteArray (Join-Path $PSScriptRoot "static\app.js") "APP_JS_DATA"))
+[void]$sbAll.Append((Convert-FileToByteArray (Join-Path $PSScriptRoot "static\plugin_mirror.html") "PLUGIN_MIRROR_HTML_DATA"))
 [void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "manual.html") "MANUAL_HTML_DATA"))
 [void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "Fanfare_Icon.png") "MANUAL_ICON_PNG_DATA"))
 [void]$sbAll.Append((Convert-FileToByteArray (Join-Path $docsRoot "assets-readonly\css\main.css") "MANUAL_MAIN_CSS_DATA"))

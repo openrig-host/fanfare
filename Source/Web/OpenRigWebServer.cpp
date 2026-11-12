@@ -31,6 +31,7 @@
   #include <sys/types.h>
   #include <sys/socket.h>
   #include <netinet/in.h>
+  #include <netinet/tcp.h>
   #include <arpa/inet.h>
   #include <unistd.h>
   #include <fcntl.h>
@@ -94,6 +95,19 @@ namespace {
         return err == WSAETIMEDOUT || err == WSAEWOULDBLOCK;
     #else
         return errno == EAGAIN || errno == EWOULDBLOCK;
+    #endif
+    }
+
+    void setTcpNoDelay(SocketType sock) noexcept {
+        // Disable Nagle coalescing: without this, small WebSocket frames (touch
+        // events, pong replies) and interleaved JPEG frames can stall in the
+        // send buffer for 40-200 ms, blowing the Live Plugin Mirror latency
+        // budget (< 30 ms).
+        int one = 1;
+    #if JUCE_WINDOWS
+        ::setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char*)&one, sizeof(one));
+    #else
+        ::setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     #endif
     }
 
@@ -375,6 +389,17 @@ WebServer::WebServer(FanfareEngine& eng, MainComponent* mc)
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 #endif
+
+    // Live Plugin Mirror: capture -> JPEG -> binary WebSocket fan-out.
+    // The sink runs on the streamer's encoder thread and only fans out to
+    // subscribed clients; the audience probe keeps the capture pump idle while
+    // nobody is watching.
+    mirrorCapture = std::make_unique<PluginMirrorCapture>();
+    mirrorStreamer = std::make_unique<PluginMirrorStreamer>(*mirrorCapture);
+    mirrorStreamer->setAudienceProbe([this]() { return hasMirrorSubscribers(); });
+    mirrorStreamer->setFrameSink([this](const std::vector<uint8_t>& jpeg) {
+        broadcastBinaryToMirrorSubscribers(jpeg.data(), jpeg.size());
+    });
 }
 
 WebServer::~WebServer() {
@@ -435,6 +460,7 @@ void WebServer::stopServer() {
         lifetime->alive.store(false, std::memory_order_release);
     serverRunning.store(false, std::memory_order_release);
     stopTimer();
+    stopPluginMirror();
 
     if (listenSocket != nullptr) {
         SocketType s = (SocketType)(uintptr_t)listenSocket;
@@ -609,6 +635,8 @@ void WebServer::handleClientConnection(void* socketHandle) {
             std::lock_guard<std::mutex> lock(clientSocketsMutex);
             activeHttpSockets.erase(socketHandle);
             activeWsClients.erase(socketHandle);
+            mirrorSubscribers.erase(socketHandle);
+            mirrorSubscriberCount.store((int)mirrorSubscribers.size(), std::memory_order_release);
         }
         SOCKET_CLOSE(sock);
     };
@@ -638,6 +666,7 @@ void WebServer::handleClientConnection(void* socketHandle) {
         const juce::String secKey = extractHeaderValue(headers, "Sec-WebSocket-Key");
         if (secKey.isNotEmpty() && handleWebSocketHandshake(socketHandle, secKey)) {
             setSocketTimeoutsMs(sock, 2000, 5000);
+            setTcpNoDelay(sock); // low-latency frame delivery for the mirror stream
             {
                 std::lock_guard<std::mutex> lock(clientSocketsMutex);
                 activeHttpSockets.erase(socketHandle);
@@ -825,7 +854,7 @@ void WebServer::handleWebSocketSession(void* socketHandle) {
                 continue;
             } else if (opcode == 0x1) { // Text frame
                 juce::String textMsg = juce::String::fromUTF8((const char*)payload.data(), (int)payload.size());
-                processIncomingWsMessage(textMsg);
+                processIncomingWsMessage(socketHandle, textMsg);
             }
         }
     } catch (...) {
@@ -864,7 +893,81 @@ void WebServer::broadcastWebSocket(const juce::String& jsonMessage) {
     }
 }
 
-void WebServer::processIncomingWsMessage(const juce::String& messageText) {
+void WebServer::sendWebSocketTextToClient(void* socketHandle, const juce::String& jsonMessage) {
+    std::lock_guard<std::mutex> lock(clientSocketsMutex);
+    if (activeWsClients.count(socketHandle) == 0)
+        return;
+
+    size_t payloadLen = (size_t)jsonMessage.getNumBytesAsUTF8();
+    std::vector<uint8_t> frame;
+    frame.reserve(payloadLen + 10);
+
+    frame.push_back(0x81); // FIN + Text opcode
+
+    if (payloadLen <= 125) {
+        frame.push_back((uint8_t)payloadLen);
+    } else if (payloadLen <= 65535) {
+        frame.push_back(126);
+        frame.push_back((uint8_t)((payloadLen >> 8) & 0xFF));
+        frame.push_back((uint8_t)(payloadLen & 0xFF));
+    } else {
+        frame.push_back(127);
+        for (int i = 7; i >= 0; --i)
+            frame.push_back((uint8_t)((payloadLen >> (i * 8)) & 0xFF));
+    }
+
+    const char* rawUtf8 = jsonMessage.toRawUTF8();
+    frame.insert(frame.end(), rawUtf8, rawUtf8 + payloadLen);
+
+    SocketType cs = (SocketType)(uintptr_t)socketHandle;
+    sendAll(cs, frame.data(), frame.size());
+}
+
+void WebServer::broadcastBinaryToMirrorSubscribers(const void* data, size_t size) {
+    if (data == nullptr || size == 0)
+        return;
+
+    // PROTOTYPE NOTE: frames are written synchronously under clientSocketsMutex
+    // (same pattern as broadcastWebSocket) so a socket can never be closed
+    // mid-send. A production deployment should move to per-client outbound
+    // queues so one slow tablet cannot stall the encoder thread.
+    std::lock_guard<std::mutex> lock(clientSocketsMutex);
+    if (mirrorSubscribers.empty())
+        return;
+
+    std::vector<uint8_t> frame;
+    frame.reserve(size + 10);
+
+    frame.push_back(0x82); // FIN + Binary opcode (JPEG payload)
+
+    if (size <= 125) {
+        frame.push_back((uint8_t)size);
+    } else if (size <= 65535) {
+        frame.push_back(126);
+        frame.push_back((uint8_t)((size >> 8) & 0xFF));
+        frame.push_back((uint8_t)(size & 0xFF));
+    } else {
+        frame.push_back(127);
+        for (int i = 7; i >= 0; --i)
+            frame.push_back((uint8_t)((size >> (i * 8)) & 0xFF));
+    }
+
+    const uint8_t* bytes = static_cast<const uint8_t*>(data);
+    frame.insert(frame.end(), bytes, bytes + size);
+
+    for (void* client : mirrorSubscribers) {
+        SocketType cs = (SocketType)(uintptr_t)client;
+        sendAll(cs, frame.data(), frame.size());
+    }
+}
+
+bool WebServer::hasMirrorSubscribers() {
+    // Lock-free: called from the capture timer (message thread) and the
+    // encoder thread - must never block behind socket I/O.
+    return mirrorSubscriberCount.load(std::memory_order_acquire) > 0;
+}
+
+void WebServer::processIncomingWsMessage(void* socketHandle, const juce::String& messageText) {
     auto json = juce::JSON::parse(messageText);
     if (!json.isObject()) return;
 
@@ -1055,6 +1158,18 @@ void WebServer::processIncomingWsMessage(const juce::String& messageText) {
         root->setProperty("type", "mixer");
         root->setProperty("data", buildMixerJson());
         broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
+    } else if (type == "mirror_subscribe") {
+        handleMirrorSubscribe(socketHandle);
+    } else if (type == "mirror_unsubscribe") {
+        handleMirrorUnsubscribe(socketHandle);
+    } else if (type == "plugin_touch") {
+        // Reverse touch input: {"type":"plugin_touch","action":"down","x":420,"y":180}
+        PluginMirrorInputHandler::TouchEvent evt;
+        if (!PluginMirrorInputHandler::parseTouchMessage(messageText, evt))
+            return;
+        mirrorInput.inject(evt, mirrorCapture->getFrameInfo());
+    } else if (type == "get_mirror_status") {
+        sendWebSocketTextToClient(socketHandle, getPluginMirrorStatusJson());
     } else if (type == "ping") {
         juce::DynamicObject::Ptr root = new juce::DynamicObject();
         root->setProperty("type", "pong");
@@ -1120,6 +1235,126 @@ void WebServer::notifyMp3Changed() {
     root->setProperty("type", "mp3");
     root->setProperty("data", buildMp3Json());
     broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
+}
+
+// =====================================================================
+// Live Plugin Mirror (prototype)
+// =====================================================================
+
+void WebServer::registerPluginMirrorSource(juce::Component* editorContent,
+                                           void* nativeWindowHandle,
+                                           const juce::String& name) {
+    PluginMirrorCapture::Target target;
+    if (nativeWindowHandle != nullptr) {
+        // Native capture is preferred: VST3 editors hosting their own child
+        // windows do not paint into createComponentSnapshot.
+        target.kind = PluginMirrorCapture::Target::Kind::NativeWindow;
+        target.nativeWindowHandle = nativeWindowHandle;
+    } else if (editorContent != nullptr) {
+        target.kind = PluginMirrorCapture::Target::Kind::JuceComponent;
+        target.component = editorContent;
+    }
+    target.name = name;
+
+    if (mirrorCapture != nullptr)
+        mirrorCapture->setTarget(target);
+
+    // Geometry may have changed - refresh subscribed clients.
+    if (hasMirrorSubscribers())
+        broadcastWebSocket(juce::JSON::toString(buildMirrorInfoJson()));
+}
+
+bool WebServer::startPluginMirror(int targetFps, float jpegQuality) {
+    if (mirrorStreamer == nullptr || mirrorCapture == nullptr || !mirrorCapture->hasTarget())
+        return false;
+    mirrorStreamer->start(targetFps, jpegQuality);
+    if (hasMirrorSubscribers())
+        broadcastWebSocket(juce::JSON::toString(buildMirrorInfoJson()));
+    return true;
+}
+
+void WebServer::stopPluginMirror() {
+    if (mirrorStreamer != nullptr)
+        mirrorStreamer->stop();
+    std::lock_guard<std::mutex> lock(clientSocketsMutex);
+    mirrorSubscribers.clear();
+    mirrorSubscriberCount.store(0, std::memory_order_release);
+}
+
+bool WebServer::isPluginMirrorActive() const {
+    return mirrorStreamer != nullptr && mirrorStreamer->isStreaming();
+}
+
+void WebServer::handleMirrorSubscribe(void* socketHandle) {
+    {
+        std::lock_guard<std::mutex> lock(clientSocketsMutex);
+        mirrorSubscribers.insert(socketHandle);
+        mirrorSubscriberCount.store((int)mirrorSubscribers.size(), std::memory_order_release);
+    }
+
+    // Announce stream geometry so the client can map touch coordinates.
+    sendWebSocketTextToClient(socketHandle, juce::JSON::toString(buildMirrorInfoJson()));
+
+    // Lazy start on the message thread (juce::Timer affinity).
+    auto life = lifetime;
+    juce::MessageManager::callAsync([this, life]() {
+        if (!life || !life->alive.load(std::memory_order_acquire))
+            return;
+        if (!isPluginMirrorActive() && mirrorCapture != nullptr && mirrorCapture->hasTarget())
+            startPluginMirror();
+    });
+}
+
+void WebServer::handleMirrorUnsubscribe(void* socketHandle) {
+    std::lock_guard<std::mutex> lock(clientSocketsMutex);
+    mirrorSubscribers.erase(socketHandle);
+    mirrorSubscriberCount.store((int)mirrorSubscribers.size(), std::memory_order_release);
+}
+
+juce::var WebServer::buildMirrorInfoJson() {
+    const auto frame = mirrorCapture != nullptr ? mirrorCapture->getFrameInfo()
+                                                : PluginMirrorCapture::FrameInfo();
+    const auto target = mirrorCapture != nullptr ? mirrorCapture->getTarget()
+                                                 : PluginMirrorCapture::Target();
+
+    juce::DynamicObject::Ptr root = new juce::DynamicObject();
+    root->setProperty("type", "mirror_info");
+    root->setProperty("active", isPluginMirrorActive());
+    root->setProperty("target", target.name);
+    root->setProperty("width", frame.frameWidth);
+    root->setProperty("height", frame.frameHeight);
+    root->setProperty("fps", mirrorStreamer != nullptr ? mirrorStreamer->getTargetFps() : 0);
+    root->setProperty("jpegQuality", mirrorStreamer != nullptr ? (double)mirrorStreamer->getJpegQuality() : 0.0);
+    return juce::var(root.get());
+}
+
+juce::String WebServer::getPluginMirrorStatusJson() {
+    const auto frame = mirrorCapture != nullptr ? mirrorCapture->getFrameInfo()
+                                                : PluginMirrorCapture::FrameInfo();
+    const auto target = mirrorCapture != nullptr ? mirrorCapture->getTarget()
+                                                 : PluginMirrorCapture::Target();
+
+    juce::DynamicObject::Ptr root = new juce::DynamicObject();
+    root->setProperty("type", "mirror_status");
+    root->setProperty("active", isPluginMirrorActive());
+    root->setProperty("target", target.name);
+    root->setProperty("width", frame.frameWidth);
+    root->setProperty("height", frame.frameHeight);
+
+    if (mirrorStreamer != nullptr) {
+        auto& stats = mirrorStreamer->getStats();
+        root->setProperty("fps", mirrorStreamer->getTargetFps());
+        root->setProperty("measuredFps", stats.measuredFps.load());
+        root->setProperty("jpegQuality", (double)mirrorStreamer->getJpegQuality());
+        root->setProperty("framesCaptured", stats.framesCaptured.load());
+        root->setProperty("framesEncoded", stats.framesEncoded.load());
+        root->setProperty("framesSent", stats.framesSent.load());
+        root->setProperty("framesDropped", stats.framesDropped.load());
+        root->setProperty("jpegBytes", (int)stats.lastJpegBytes.load());
+        root->setProperty("encodeMs", stats.lastEncodeMs.load());
+    }
+    root->setProperty("subscribers", mirrorSubscriberCount.load(std::memory_order_acquire));
+    return juce::JSON::toString(juce::var(root.get()));
 }
 
 // REST API and Static Request Router
@@ -1701,6 +1936,9 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
         return true;
     } else if (cleanPath == "/app.js") {
         sendHttpDataResponse(socketHandle, 200, "application/javascript; charset=utf-8", EmbeddedWebAssets::APP_JS_DATA, EmbeddedWebAssets::APP_JS_DATA_LEN, extraHeader);
+        return true;
+    } else if (cleanPath == "/plugin_mirror.html") {
+        sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", EmbeddedWebAssets::PLUGIN_MIRROR_HTML_DATA, EmbeddedWebAssets::PLUGIN_MIRROR_HTML_DATA_LEN, extraHeader);
         return true;
     }
 

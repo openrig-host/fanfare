@@ -1,6 +1,9 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "PluginMirrorCapture.h"
+#include "PluginMirrorInput.h"
+#include "PluginMirrorStreamer.h"
 #include <vector>
 #include <string>
 #include <memory>
@@ -66,6 +69,29 @@ public:
     // Broadcast raw WebSocket text message to all connected clients
     void broadcastWebSocket(const juce::String& jsonMessage);
 
+    // ===== Live Plugin Mirror (prototype) ================================
+    // Streams JPEG frames of a plugin editor to subscribed tablet clients over
+    // binary WebSocket frames and injects reverse touch events back into the
+    // captured window. See PluginMirrorCapture/Streamer/Input headers.
+    // ---------------------------------------------------------------------
+
+    /** Registers the plugin editor window to mirror (called on the message
+        thread when a plugin editor opens). Prefers native window capture when
+        a handle is given (required for editors hosting their own child
+        windows), falling back to the JUCE component snapshot path. */
+    void registerPluginMirrorSource(juce::Component* editorContent,
+                                    void* nativeWindowHandle,
+                                    const juce::String& name);
+
+    /** Starts the capture/stream loop (message thread). Usually auto-called
+        when the first client sends mirror_subscribe. */
+    bool startPluginMirror(int targetFps = 20, float jpegQuality = 0.72f);
+    void stopPluginMirror();
+    bool isPluginMirrorActive() const;
+
+    /** Status/stats payload shared by get_mirror_status and the HUD. */
+    juce::String getPluginMirrorStatusJson();
+
 private:
     struct LifetimeState {
         std::atomic<bool> alive{true};
@@ -106,7 +132,15 @@ private:
     juce::String handleApiPost(const juce::String& path, const juce::var& jsonPayload);
 
     // WebSocket Message Dispatch
-    void processIncomingWsMessage(const juce::String& messageText);
+    void processIncomingWsMessage(void* socketHandle, const juce::String& messageText);
+
+    // Live Plugin Mirror plumbing
+    void sendWebSocketTextToClient(void* socketHandle, const juce::String& jsonMessage);
+    void broadcastBinaryToMirrorSubscribers(const void* data, size_t size);
+    bool hasMirrorSubscribers();
+    void handleMirrorSubscribe(void* socketHandle);
+    void handleMirrorUnsubscribe(void* socketHandle);
+    juce::var buildMirrorInfoJson();
 
     // Static Asset Serving
     juce::String getMimeType(const juce::String& filePath);
@@ -141,6 +175,14 @@ private:
 
     // Telemetry throttling
     int telemetryThrottleCount = 0;
+
+    // Live Plugin Mirror state (subscribers guarded by clientSocketsMutex so a
+    // socket can never be closed mid-broadcast; see activeWsClients)
+    std::unordered_set<void*> mirrorSubscribers;
+    std::atomic<int> mirrorSubscriberCount{0};
+    std::unique_ptr<PluginMirrorCapture> mirrorCapture;
+    std::unique_ptr<PluginMirrorStreamer> mirrorStreamer;
+    PluginMirrorInputHandler mirrorInput;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WebServer)
 };

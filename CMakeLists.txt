@@ -56,6 +56,9 @@ target_sources(Fanfare PRIVATE
     Source/AssetLoader.cpp
     Source/FanfareEngine.cpp
     Source/Web/OpenRigWebServer.cpp
+    Source/Web/PluginMirrorCapture.cpp
+    Source/Web/PluginMirrorInput.cpp
+    Source/Web/PluginMirrorStreamer.cpp
     Source/Web/StageHotspotController.cpp
     Source/Web/StageRemoteModalOverlay.cpp
     Source/Synth/Fm/FmSupport.cpp

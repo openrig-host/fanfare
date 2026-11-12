@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Fanfare - Live Plugin Mirror</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #131619; color: #cdd6e0;
+    font: 13px/1.4 system-ui, sans-serif; overscroll-behavior: none; }
+  #wrap { display: flex; flex-direction: column; height: 100%; }
+  #bar { display: flex; gap: 10px; align-items: center; padding: 8px 12px;
+    background: #1b2026; border-bottom: 1px solid #2a3138; }
+  .pill { padding: 3px 10px; border-radius: 999px; background: #262d34;
+    font-variant-numeric: tabular-nums; }
+  .ok { color: #7bd88f; } .bad { color: #e07171; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; }
+  /* Intrinsic-aspect scaling: the canvas behaves like an <img> */
+  #mirror { max-width: 100%; max-height: 100%; background: #000;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    cursor: crosshair; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="bar">
+    <span id="conn" class="pill bad">offline</span>
+    <span id="info" class="pill">no stream</span>
+    <span id="stats" class="pill"></span>
+  </div>
+  <div id="stage"><canvas id="mirror" width="800" height="600"></canvas></div>
+</div>
+
+<script>
+'use strict';
+// Live Plugin Mirror client prototype.
+// Streams: mirror_subscribe -> binary WebSocket frames (JPEG) -> <canvas>.
+// Reverse input: pointer events -> plugin_touch JSON -> synthetic OS mouse.
+// (Alternative streaming method on the server: MJPEG over HTTP
+//  multipart/x-mixed-replace at /api/mirror/stream.mjpg - not used here since
+//  a single WebSocket carries both the frame stream and the input channel.)
+
+(function () {
+  const canvas = document.getElementById('mirror');
+  const ctx = canvas.getContext('2d');
+  const connEl = document.getElementById('conn');
+  const infoEl = document.getElementById('info');
+  const statsEl = document.getElementById('stats');
+
+  // ---- Auth token (same scheme as the Stage HUD / app.js) ----
+  const params = new URLSearchParams(location.search);
+  const qToken = params.get('token') || '';
+  if (qToken) sessionStorage.setItem('fanfareSessionToken', qToken);
+  const token = sessionStorage.getItem('fanfareSessionToken') || '';
+
+  let ws = null;
+  let frameW = canvas.width, frameH = canvas.height;
+  let pendingFrame = null;   // latest undecoded JPEG Blob (latest-frame-wins)
+  let decoding = false;
+
+  function connect() {
+    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(scheme + '//' + location.host + '/ws?token=' + encodeURIComponent(token));
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      connEl.textContent = 'online';
+      connEl.className = 'pill ok';
+      ws.send(JSON.stringify({ type: 'mirror_subscribe' }));
+    };
+
+    ws.onmessage = (e) => {
+      if (typeof e.data === 'string') {
+        let msg;
+        try { msg = JSON.parse(e.data); } catch (_) { return; }
+        if (msg.type === 'mirror_info') {
+          if (msg.width > 0 && msg.height > 0) {
+            frameW = msg.width;
+            frameH = msg.height;
+            if (canvas.width !== frameW || canvas.height !== frameH) {
+              canvas.width = frameW; canvas.height = frameH;
+            }
+          }
+          infoEl.textContent = (msg.target || 'stream') + ' ' + frameW + 'x' + frameH +
+                               ' @ ' + (msg.fps || '?') + 'fps';
+        } else if (msg.type === 'mirror_status') {
+          statsEl.textContent = (msg.measuredFps || 0).toFixed(1) + ' fps | ' +
+                                Math.round((msg.jpegBytes || 0) / 1024) + ' KB | ' +
+                                (msg.encodeMs || 0).toFixed(1) + ' ms enc';
+        }
+      } else {
+        pendingFrame = new Blob([e.data], { type: 'image/jpeg' });
+      }
+    };
+
+    ws.onclose = () => {
+      connEl.textContent = 'reconnecting...';
+      connEl.className = 'pill bad';
+      setTimeout(connect, 2000);
+    };
+    ws.onerror = () => ws.close();
+  }
+
+  // ---- Render loop: decode at most one (the newest) JPEG per animation frame ----
+  function render() {
+    if (pendingFrame && !decoding) {
+      const blob = pendingFrame;
+      pendingFrame = null;
+      decoding = true;
+      createImageBitmap(blob).then((bmp) => {
+        ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+        bmp.close();
+        decoding = false;
+      }).catch(() => { decoding = false; });
+    }
+    requestAnimationFrame(render);
+  }
+
+  // ---- Reverse touch: canvas pixels -> mirror frame pixels -> plugin_touch ----
+  function frameCoords(e) {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: Math.round((e.clientX - r.left) / r.width * frameW),
+      y: Math.round((e.clientY - r.top) / r.height * frameH)
+    };
+  }
+
+  function sendTouch(action, e) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const p = frameCoords(e);
+    ws.send(JSON.stringify({
+      type: 'plugin_touch', action: action, x: p.x, y: p.y, pointerId: e.pointerId
+    }));
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!e.isPrimary) return;
+    canvas.setPointerCapture(e.pointerId);
+    sendTouch('down', e);
+    e.preventDefault();
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!e.isPrimary) return;
+    sendTouch('move', e);
+    e.preventDefault();
+  });
+  const release = (e) => { if (e.isPrimary) sendTouch('up', e); };
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
+
+  connect();
+  requestAnimationFrame(render);
+})();
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
-// MainComponent.cpp - part of MainComponent (mechanical split, see nov8mistral.md)
-// Windows MMCSS for real-time audio thread priority
+// MainComponent.cpp - part of MainComponent (mechanical split, see
+// nov8mistral.md) Windows MMCSS for real-time audio thread priority
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <dbt.h>
 #include <mmsystem.h>
+
 
 #pragma comment(lib, "winmm.lib")
 #endif

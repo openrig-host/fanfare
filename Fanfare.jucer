@@ -130,6 +130,18 @@
             file="Source/Web/OpenRigWebServer.h"/>
       <FILE id="webServerCpp" name="OpenRigWebServer.cpp" compile="1" resource="0"
             file="Source/Web/OpenRigWebServer.cpp"/>
+      <FILE id="pmCaptureH" name="PluginMirrorCapture.h" compile="0" resource="0"
+            file="Source/Web/PluginMirrorCapture.h"/>
+      <FILE id="pmCaptureCpp" name="PluginMirrorCapture.cpp" compile="1" resource="0"
+            file="Source/Web/PluginMirrorCapture.cpp"/>
+      <FILE id="pmInputH" name="PluginMirrorInput.h" compile="0" resource="0"
+            file="Source/Web/PluginMirrorInput.h"/>
+      <FILE id="pmInputCpp" name="PluginMirrorInput.cpp" compile="1" resource="0"
+            file="Source/Web/PluginMirrorInput.cpp"/>
+      <FILE id="pmStreamerH" name="PluginMirrorStreamer.h" compile="0" resource="0"
+            file="Source/Web/PluginMirrorStreamer.h"/>
+      <FILE id="pmStreamerCpp" name="PluginMirrorStreamer.cpp" compile="1" resource="0"
+            file="Source/Web/PluginMirrorStreamer.cpp"/>
       <FILE id="qrCodeH" name="QrCodeGenerator.h" compile="0" resource="0"
             file="Source/Web/QrCodeGenerator.h"/>
       <FILE id="hotspotH" name="StageHotspotController.h" compile="0" resource="0"
