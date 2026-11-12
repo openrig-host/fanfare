@@ -1,0 +1,267 @@
+<!DOCTYPE HTML>
+<html lang="en">
+	<head>
+		<title>On Glitches - Fanfare Dev Blog</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="description" content="Nothing worse than playing a beautiful piano VST and hearing a click. Practical realities of low-latency Windows audio, thermal traps, power schemes, long USB cables, and the never-ending war on glitches." />
+		<link rel="canonical" href="https://openrig-host.github.io/fanfare/blog/2026-11-12-on-glitches.html" />
+		<link rel="icon" type="image/png" href="../Fanfare_Icon.png" />
+		<meta property="og:site_name" content="Fanfare Dev Blog" />
+		<meta property="og:type" content="article" />
+		<meta property="og:title" content="On Glitches" />
+		<meta property="og:description" content="Nothing worse than playing a beautiful piano VST and hearing a click. Real-world notes on buffer size, thermal throttling, Windows power schemes, USB cables, and Fanfare's in-flight audio recorder." />
+		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<style>
+			:root {
+				--bg: #1e1e1e;
+				--panel: #252525;
+				--raised: #2f2f2f;
+				--border: #3a3a3a;
+				--border-strong: #4b4b4b;
+				--text: #f2f2f2;
+				--body: #dedede;
+				--dim: #bfbfbf;
+				--faint: #8f8f8f;
+				--accent: #ffa02f;
+				--accent-hover: #ffb964;
+			}
+			* { box-sizing: border-box; margin: 0; padding: 0; }
+			html { scroll-behavior: smooth; }
+			body {
+				background-color: var(--bg) !important;
+				color: var(--body);
+				font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+				font-size: 16px;
+				line-height: 1.75;
+			}
+			.topbar {
+				display: flex; align-items: center; gap: 18px;
+				padding: 14px 22px;
+				background: var(--panel);
+				border-bottom: 1px solid var(--border);
+			}
+			.topbar .brand {
+				color: var(--text); font-weight: 700; font-size: 17px;
+				text-decoration: none;
+			}
+			.topbar .brand span { color: var(--accent); }
+			.topbar a.nav { color: var(--dim); text-decoration: none; font-size: 14px; }
+			.topbar a.nav:hover { color: var(--accent); }
+
+			article {
+				max-width: 760px;
+				margin: 0 auto;
+				padding: 48px 24px 72px;
+			}
+			.breadcrumb {
+				font-size: 13px;
+				color: var(--faint);
+				margin-bottom: 16px;
+			}
+			.breadcrumb a {
+				color: var(--faint);
+				text-decoration: none;
+			}
+			.breadcrumb a:hover {
+				color: var(--accent);
+			}
+			h1 {
+				color: var(--text);
+				font-size: 32px;
+				line-height: 1.25;
+				margin-bottom: 8px;
+			}
+			.post-meta {
+				color: var(--faint);
+				font-size: 14px;
+				margin-bottom: 36px;
+				border-bottom: 1px solid var(--border);
+				padding-bottom: 18px;
+			}
+			h2 {
+				color: var(--text);
+				font-size: 22px;
+				margin: 36px 0 12px;
+				line-height: 1.35;
+			}
+			p {
+				margin-bottom: 20px;
+			}
+			blockquote {
+				border-left: 3px solid var(--accent);
+				background: var(--panel);
+				padding: 16px 20px;
+				margin: 24px 0;
+				color: var(--text);
+				font-style: italic;
+			}
+			.callout {
+				background: var(--panel);
+				border: 1px solid var(--border);
+				border-left: 3px solid var(--accent);
+				border-radius: 4px;
+				padding: 18px 22px;
+				margin: 28px 0;
+			}
+			.callout-title {
+				color: var(--accent);
+				font-weight: 700;
+				font-size: 15px;
+				margin-bottom: 8px;
+				text-transform: uppercase;
+				letter-spacing: 0.5px;
+			}
+			.callout p:last-child {
+				margin-bottom: 0;
+			}
+			ol {
+				margin: 20px 0 28px 24px;
+			}
+			li {
+				margin-bottom: 14px;
+				padding-left: 6px;
+			}
+			li strong {
+				color: var(--text);
+			}
+			code {
+				background: #141414;
+				color: #ffa02f;
+				padding: 2px 6px;
+				border-radius: 3px;
+				font-family: Consolas, monospace;
+				font-size: 14px;
+			}
+			.divider {
+				border: 0;
+				border-top: 1px solid var(--border);
+				margin: 40px 0;
+			}
+			footer {
+				text-align: center;
+				color: var(--faint);
+				font-size: 13px;
+				padding: 28px 0 36px;
+				border-top: 1px solid var(--border);
+			}
+			footer a {
+				color: var(--faint);
+				text-decoration: none;
+			}
+			footer a:hover {
+				color: var(--accent);
+			}
+		</style>
+	</head>
+	<body>
+		<div class="topbar">
+			<a class="brand" href="../index.html">f&amp; <span>Fanfare</span></a>
+			<a class="nav" href="index.html">Blog</a>
+			<a class="nav" href="../manual.html">Manual</a>
+			<a class="nav" href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a>
+		</div>
+
+		<article>
+			<div class="breadcrumb">
+				<a href="index.html">&larr; Back to Dev Blog</a>
+			</div>
+
+			<h1>On Glitches</h1>
+			<div class="post-meta">
+				<span>November 12, 2026</span> &middot; <span>By Dave Waugh</span> &middot; <span>Live Performance &amp; Audio Engineering</span>
+			</div>
+
+			<p>
+				There is nothing worse than playing a beautiful, soulful piece on an awesome piano VST. You're dreaming you're in front of a nine-foot Yamaha C7 grand, the piano stool is practically shaking from the bass vibrations, the chords are blooming, it's sounding glorious, and then&mdash;
+			</p>
+
+			<blockquote>
+				*click*
+			</blockquote>
+
+			<p>
+				Arrrgh. Stupid Windows.
+			</p>
+
+			<p>
+				Every keyboard player who has ever taken a laptop onto a live stage knows that sudden sinking feeling. In the studio, a momentary buffer underrun is an annoyance. Live on stage, in the middle of a delicate ballad or a high-energy transition, a glitch cuts through the PA like nails on a chalkboard.
+			</p>
+
+			<p>
+				Here is a "yeah, you probably know this" checklist of things that turn bad into worse when dealing with Windows, live ASIO audio, and gig performance:
+			</p>
+
+			<h2>1. Getting Too Greedy With the Buffer Size</h2>
+			<p>
+				I am 100% guilty of this. You sit down with a nice fast laptop, a quality audio interface, and you think: <em>Come on! What could possibly go wrong? 64 samples, baby!</em>
+			</p>
+			<p>
+				At 44.1 kHz, a 64-sample buffer gives you an audio callback window of exactly <strong>1.45 milliseconds</strong>. That means if the operating system, a background DPC routine, a USB bus transaction, or an ACPI driver hiccup holds up the audio thread for even 1.5 milliseconds, your audio output starves, and you hear that awful click.
+			</p>
+			<p>
+				The no-fun reality is that whatever imperceptible timing advantage you think you're gaining between 64 and 128 samples is completely offset by what you surrender in real-world stability. Even 256 samples (5.8 ms) is entirely playable in most live band situations. Lately, I've found my sweet spot firmly planted at <strong>128 samples (2.90 ms)</strong>&mdash;it feels immediate under the fingers, but gives the host the breathing room it needs to stay rock-solid.
+			</p>
+
+			<h2>2. Thermal Issues (The Silent Performance Killer)</h2>
+			<p>
+				Performance guides rarely talk about this, but I've become super sensitive to self-inflicted, boneheaded thermal traps. Like setting your laptop down on a padded nylon surface at the top of an amp rack or flight case.
+			</p>
+			<p>
+				It operates on the exact same principle as running your laptop on a thick bed blanket: the chassis cooks, heat gets trapped underneath, and the soft fabric might even choke the intake vents entirely. Within ten minutes under warm stage lights, the CPU core temperature creeps past 95&deg;C, the hardware initiates aggressive thermal throttling (PROCHOT), the clock frequency gets crushed down to base speed, and... <em>*click*</em>.
+			</p>
+			<p>
+				The solution is simple: keep it on a hard, flat surface, or jam something rigid under the back feet to give the underside air clearance.
+			</p>
+			<p>
+				I recently picked up one of those quiet, flat laptop cooling fan pads on Amazon for $20. While it's one more minor thing to pack in the cable bag, it's something I'm immensely glad to have humming silently under the machine on a hot summer festival stage or cramped club.
+			</p>
+
+			<h2>3. Windows Power Management &amp; Battery Traps</h2>
+			<p>
+				Every laptop has its own proprietary vendor power management stack running under the hood, and it is well worth your time to get acquainted with it. Low-latency live audio requires your CPU to fire on all cylinders immediately when a burst of polyphony hits. That will not happen if the OS scheduler is constantly trying to downclock cores into power-saving states (EcoQoS or C-state sleep).
+			</p>
+			<p>
+				<strong>Rule #1:</strong> Never gig on battery power. ABSOLUTELY make sure your power brick is plugged into clean mains power. On battery, Windows aggressively parks cores and caps turbo boost. Ensure your active power profile is set to High Performance, and disable any background eco-throttling.
+			</p>
+
+			<h2>4. The Crazy-Long USB Cable</h2>
+			<p>
+				I ran head-first into this exact problem at a gig a month ago. I was using my keyboard's onboard USB audio/MIDI interface (a single USB connection handling bidirectional 24-bit multi-channel audio along with dense MIDI traffic).
+			</p>
+			<p>
+				Standard passive USB 2.0 cables have a strict maximum reliable run length (typically around 5 meters / 16 feet). At this particular gig, stage layout logistics required putting the laptop a good distance away (long story). I pushed past the limit, and mid-set, the audio simply stopped. The app looked like it was happily playing, meters were bouncing, but zero sound was reaching the outputs. It took a while to diagnose.
+			</p>
+			<p>
+				To solve it on the spot, I placed a powered USB hub midway in the run to regenerate the signal. In general, putting an unneeded hub between your laptop and your primary audio interface is something you want to avoid. But in this case, restoring signal integrity with a clean, powered hub saved the evening.
+			</p>
+
+			<hr class="divider" />
+
+			<div class="callout">
+				<div class="callout-title">The Engineering Behind the Gig</div>
+				<p>
+					Inside Fanfare, every single audio block is timed down to the microsecond. The engine writes a continuous, real-time log of buffer underruns, callback execution times, CPU temperature, and system load&mdash;acting like an <strong>in-flight flight data recorder</strong> for live sound.
+				</p>
+			</div>
+
+			<p>
+				Having that flight recorder has been invaluable for developing Fanfare. When a stall happens, the logs show us the exact truth: did a DSP voice take too long to compute? Or did the audio callback finish in 0.2 milliseconds while the entire operating system was descheduled by a background driver for 130 milliseconds?
+			</p>
+
+			<p>
+				Ultimately, building a sovereign live performance rig is a never-ending war on glitches. Any new feature added to Fanfare&mdash;whether it's our zero-latency parallel DSP work-sharing pool, the native BLEEP-216 analog engine, or the new CoplanDX FM synth&mdash;has to prove itself under fire and guarantee it won't make real-time stability worse.
+			</p>
+
+			<p>
+				This isn't unique to Fanfare. The commercial hosts I gigged with for years had their own weird underrun and glitch idiosyncrasies. It's the reality of pushing general-purpose PC hardware to deliver millisecond-accurate acoustic instruments. Respect the buffer, keep your machine cool, feed it clean power, and give your audio thread the room it needs to sing.
+			</p>
+		</article>
+
+		<footer>
+			<p>&copy; Fanfare &middot; <a href="../index.html">Home</a> &middot; <a href="index.html">Blog</a> &middot; <a href="../manual.html">Manual</a> &middot; <a href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a></p>
+		</footer>
+	</body>
+</html>
+
