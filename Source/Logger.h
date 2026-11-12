@@ -48,6 +48,14 @@ inline ProcessMemoryStats getMemoryStats() {
   return stats;
 }
 
+inline uint32_t getCurrentThreadId() noexcept {
+#ifdef _WIN32
+  return (uint32_t)::GetCurrentThreadId();
+#else
+  return (uint32_t)(uintptr_t)juce::Thread::getCurrentThreadId();
+#endif
+}
+
 enum class Level { Debug, Info, Warning, Error };
 
 inline Level currentMinLevel = Level::Info;
@@ -114,7 +122,7 @@ inline void log(Level level, const juce::String &msg) {
   juce::String fullMsg =
       juce::Time::getCurrentTime().toString(true, true) + " " + prefix + msg;
 
-  if (level >= Level::Warning && !t_isRealtimeAudioThread && g_audioThreadId.load() != (uint32_t)::GetCurrentThreadId()) {
+  if (level >= Level::Warning && !t_isRealtimeAudioThread && g_audioThreadId.load() != getCurrentThreadId()) {
     // Write warnings and errors synchronously to disk ONLY if on a non-audio thread
     writeDirectlyToFile(fullMsg);
   } else {
@@ -130,7 +138,7 @@ inline void log(Level level, const juce::String &msg) {
 inline void logToFile(const juce::String &msg) {
   juce::String fullMsg =
       juce::Time::getCurrentTime().toString(true, true) + " - " + msg;
-  if (!t_isRealtimeAudioThread && g_audioThreadId.load() != (uint32_t)::GetCurrentThreadId()) {
+  if (!t_isRealtimeAudioThread && g_audioThreadId.load() != getCurrentThreadId()) {
     writeDirectlyToFile(fullMsg);
   } else {
     // Audio thread: never touch disk — queue for the message-thread flush.
@@ -186,6 +194,7 @@ inline void flushLog() {
 } // namespace FanfareLog
 
 using FanfareLog::logToFile;
+using FanfareLog::getCurrentThreadId;
 
 /**
  * Logarithmic scale for VU meters
@@ -217,7 +226,7 @@ inline void recordFlightEvent(int slotIdx, const char* msg) {
   size_t idx = g_flightRecorderHead.fetch_add(1, std::memory_order_relaxed) % kFlightRecorderSize;
   auto& ev = g_flightRecorder[idx];
   ev.timestampMs = (uint64_t)juce::Time::currentTimeMillis();
-  ev.threadId = (uint32_t)::GetCurrentThreadId();
+  ev.threadId = getCurrentThreadId();
   ev.slotIdx = slotIdx;
   size_t i = 0;
   for (; msg[i] != '\0' && i < sizeof(ev.message) - 1; ++i) {

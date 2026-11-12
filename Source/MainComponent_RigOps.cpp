@@ -1,4 +1,4 @@
-#// MainComponent_RigOps.cpp - part of MainComponent (mechanical split, see nov8mistral.md)
+// MainComponent_RigOps.cpp - part of MainComponent (mechanical split, see nov8mistral.md)
 // Windows MMCSS for real-time audio thread priority
 #ifdef _WIN32
 #ifndef NOMINMAX

@@ -167,9 +167,7 @@ void processAudio(const float *const *inputData, int numInputs,
                     juce::MidiBuffer &midi) {
     juce::ScopedNoDenormals noDenormals;
     FanfareLog::t_isRealtimeAudioThread = true;
-#ifdef _WIN32
-    FanfareLog::g_audioThreadId.store((uint32_t)::GetCurrentThreadId(), std::memory_order_relaxed);
-#endif
+    FanfareLog::g_audioThreadId.store(FanfareLog::getCurrentThreadId(), std::memory_order_relaxed);
 
     // CRITICAL: Clear hardware output buffers unconditionally first to prevent feedback
     for (int i = 0; i < numOutputs; ++i)

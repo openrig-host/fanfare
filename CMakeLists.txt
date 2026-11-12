@@ -4,9 +4,17 @@ project(Fanfare VERSION 1.6.1 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Path to a JUCE checkout (cloned by CI, or C:/JUCE locally).
+# Path to a JUCE checkout (cloned by CI, C:/JUCE on Windows, or ~/JUCE on macOS).
 if(NOT DEFINED JUCE_ROOT)
-    set(JUCE_ROOT "C:/JUCE" CACHE PATH "Path to JUCE root directory")
+    if(WIN32)
+        set(JUCE_ROOT "C:/JUCE" CACHE PATH "Path to JUCE root directory")
+    elseif(EXISTS "$ENV{HOME}/JUCE")
+        set(JUCE_ROOT "$ENV{HOME}/JUCE" CACHE PATH "Path to JUCE root directory")
+    elseif(EXISTS "/opt/homebrew/opt/juce")
+        set(JUCE_ROOT "/opt/homebrew/opt/juce" CACHE PATH "Path to JUCE root directory")
+    else()
+        set(JUCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/JUCE" CACHE PATH "Path to JUCE root directory")
+    endif()
 endif()
 
 # Pull in JUCE's CMake helpers (juce_add_gui_app, the module targets, etc.).
@@ -107,6 +115,19 @@ if(WIN32)
 
     add_custom_command(TARGET Fanfare POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Fanfare>" "${CMAKE_CURRENT_SOURCE_DIR}/Fanfare.exe"
+    )
+endif()
+
+if(APPLE)
+    target_compile_definitions(Fanfare PUBLIC
+        JUCE_PLUGINHOST_AU=1
+    )
+    set_target_properties(Fanfare PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.fanfare.app"
+        MACOSX_BUNDLE_BUNDLE_NAME "Fanfare"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     )
 endif()
 

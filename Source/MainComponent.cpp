@@ -822,6 +822,9 @@ void MainComponent::stopUsbDeviceWatcher() {
     usbNotifyHwnd = nullptr;
   }
 }
+#else
+void MainComponent::startUsbDeviceWatcher() {}
+void MainComponent::stopUsbDeviceWatcher() {}
 #endif
 
 void MainComponent::syncHotplugMidiInputs(bool isInitialSetup) {
