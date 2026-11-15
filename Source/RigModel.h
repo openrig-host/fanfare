@@ -18,6 +18,7 @@ struct PluginState {
     int highNote = 127;
     float level = 1.0f;
     bool enabled = true;
+    int midiChannel = 0; // 0 = Strip, 1..16 = channel override
 
     // MIDI OUT target (instead of hosting a plugin). When isMidiOut is true
     // this chain slot forwards its filtered MIDI to the named hardware/software
@@ -145,6 +146,7 @@ struct SongSlot {
     bool fadersLinked = true;
     bool bypassed = false;
     int inputChannelIndex = -1;
+    bool inputStereo = false;
     float aux1Send = 0.0f;
     float aux2Send = 0.0f;
     float iemOffset = 1.0f;

@@ -56,6 +56,15 @@ public:
   bool isUnusedEmptyStrip() const;
   std::function<void(bool)> onCollapseChanged;
   std::function<void(bool)> onBypassChanged;
+
+  // Studio focus & inline layer stack selection
+  void setFocused(bool shouldFocus);
+  bool getIsFocused() const { return isFocused; }
+  void setSelectedLayer(int layerIdx);
+  int getSelectedLayer() const { return selectedLayer; }
+  int getSlotIndex() const { return slotIndex; }
+  std::function<void()> onFocusRequested;
+  void showChannelSetupDrawer(juce::Component *anchor = nullptr);
   std::function<void(int deltaX)> onDragWidth;
   std::function<void()> onStartDragWidth;
   std::function<void(int deltaPx)> onHorizontalScroll;
@@ -209,6 +218,40 @@ private:
   juce::String prevMp3Title;
   bool prevKeyLit = false;    // KEY button tool-light state
   bool prevToolsActive = false; // "..." tool-light state
+
+  // Studio "After" layout state & widgets
+  bool isFocused = false;
+  int selectedLayer = 0;
+  float layerFlashAlpha[3]{0.0f, 0.0f, 0.0f};
+  int draggingRangeHandle = 0; // 0 = none, 1 = low, 2 = high
+
+  juce::Slider layerTrimSlider;
+  juce::TextButton layerChangeLinkBtn{"CHANGE"};
+  juce::TextButton keyboardRangeBtn{"Keyboard..."};
+  juce::TextButton changeInstBtn{"Change..."};
+  juce::TextButton editLayerGuiBtn{"Edit L1 GUI"};
+
+  enum class FaderTarget { Both = 0, Foh = 1, Iem = 2 };
+  FaderTarget faderTarget = FaderTarget::Both;
+  juce::TextButton faderTargetBtn{"BOTH"};
+
+  // Cached Studio layout hit-test rectangles
+  juce::Rectangle<int> studioStackHeadBounds;
+  juce::Rectangle<int> studioInChipBounds;
+  juce::Rectangle<int> studioOutChipBounds;
+  juce::Rectangle<int> studioPlateBounds;
+  juce::Rectangle<int> studioStripNumBounds;
+  juce::Rectangle<int> studioSetupBtnBounds;
+  juce::Rectangle<int> studioRangeBarBounds;
+  juce::Rectangle<int> studioStackBounds;
+  juce::Rectangle<int> studioLayerRowBounds[3];
+  juce::Rectangle<int> studioLayerEditBounds[3];
+  juce::Rectangle<int> studioLayerEnableBounds[3];
+  juce::Rectangle<int> studioSelRangeBounds;
+
+  void syncFocusedLayerControls();
+  juce::Colour getLayerColor(int layerIdx) const;
+  juce::String getLayerDisplayName(int layerIdx) const;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RackSlotComponent)
 };

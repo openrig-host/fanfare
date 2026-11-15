@@ -39,6 +39,7 @@ void MainComponent::showEngineTuningModal() {
       engineTuningSettings,
       [this](const EngineTuningModal::Settings &s) {
         engineTuningSettings = s;
+        hasExplicitPCoresSetting = true;
         saveEngineTuningSettings();
         applyEngineTuningSettings();
       },
@@ -451,6 +452,10 @@ bool MainComponent::keyPressed(const juce::KeyPress &key,
       resized();
       return true;
     }
+    if (focusedStripIndex >= 0) {
+      setFocusedStrip(-1);
+      return true;
+    }
   }
 
   if (dynamic_cast<juce::TextEditor *>(originatingComponent) != nullptr)
@@ -495,6 +500,47 @@ bool MainComponent::keyPressed(const juce::KeyPress &key,
     if (digit >= 1 && digit <= 9 && digit <= engine.getNumScenes()) {
       recallScene(digit - 1);
       return true;
+    }
+    if (ThemeManager::isStudio() && rackSlotComponents.size() > 0) {
+      if (key == juce::KeyPress::leftKey || key == juce::KeyPress::rightKey) {
+        const int dir = (key == juce::KeyPress::rightKey) ? 1 : -1;
+        int cur = focusedStripIndex;
+        if (cur < 0)
+          cur = (dir > 0) ? 1 : 0;
+        else {
+          // Display order: 1..N-1, then 0
+          juce::Array<int> order;
+          for (int i = 1; i < rackSlotComponents.size(); ++i)
+            if (rackSlotComponents[i]->isVisible() && !rackSlotComponents[i]->isUnusedEmptyStrip())
+              order.add(i);
+          order.add(0);
+          int pos = order.indexOf(cur);
+          if (pos >= 0 && order.size() > 0)
+            cur = order[(pos + dir + order.size()) % order.size()];
+        }
+        setFocusedStrip(cur);
+        return true;
+      }
+      if (focusedStripIndex >= 0 && focusedStripIndex < rackSlotComponents.size()) {
+        auto *fc = rackSlotComponents[focusedStripIndex];
+        if (key == juce::KeyPress::upKey || key == juce::KeyPress::downKey) {
+          int lyr = fc->getSelectedLayer() + ((key == juce::KeyPress::downKey) ? 1 : -1);
+          fc->setSelectedLayer((lyr + 3) % 3);
+          return true;
+        }
+        if (key.isKeyCode('E') || key.isKeyCode('e')) {
+          if (fc->onOpenEditor)
+            fc->onOpenEditor(fc->getSelectedLayer());
+          return true;
+        }
+        if (key.isKeyCode('M') || key.isKeyCode('m')) {
+          if (auto *sl = engine.getSlot(focusedStripIndex)) {
+            sl->setBypass(!sl->isBypassed());
+            fc->repaint();
+          }
+          return true;
+        }
+      }
     }
   }
   return false;

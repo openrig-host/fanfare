@@ -154,6 +154,14 @@ private:
   void setRackScrollX(int newX);
   void scrollRackBy(int deltaPx);
   void ensureStripVisibleInRack(RackSlotComponent *target);
+  void setFocusedStrip(int slotIdx);
+  int focusedStripIndex = -1;
+
+  struct StripRulerBar : public juce::Component {
+    MainComponent *owner = nullptr;
+    void paint(juce::Graphics &g) override;
+    void mouseDown(const juce::MouseEvent &e) override;
+  } stripRulerBar;
 
   juce::Component rackStripContainer;
   RackViewport rackViewport;
@@ -177,6 +185,7 @@ private:
   std::unique_ptr<EngineTuningModal> engineTuningModal;
   std::atomic<juce::int64> suppressGlitchUntilTicks{0};
   EngineTuningModal::Settings engineTuningSettings;
+  bool hasExplicitPCoresSetting = false;
 
   void suppressGlitchDetectionForMs(int durationMs) noexcept;
   void showEngineTuningModal();

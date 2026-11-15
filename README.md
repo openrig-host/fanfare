@@ -14,7 +14,7 @@ A rack-based Windows VST3 host and MIDI router for playing live. No dropouts, no
 
 <br/>
 
-![Fanfare Live Mixer Interface](docs/full_mixer_v2.png)
+![Fanfare Live Mixer Interface](docs/fanfare_v1_7_1_console.jpg)
 
 </div>
 

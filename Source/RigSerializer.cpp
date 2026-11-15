@@ -80,6 +80,7 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
             ps.highNote = (int)v.getProperty("highNote", 127);
             ps.level = (float)v.getProperty("level", 1.0);
             ps.enabled = (bool)v.getProperty("enabled", true);
+            ps.midiChannel = (int)v.getProperty("midiChannel", 0);
             ps.isMidiOut = v.getProperty("isMidiOut", false);
             ps.midiOutDevice = v.getProperty("midiOutDevice", "").toString();
             ps.midiOutChannel = (int)v.getProperty("midiOutChannel", 1);
@@ -118,6 +119,7 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
             slot.fadersLinked = cv.getProperty("fadersLinked", true);
             slot.bypassed = cv.getProperty("mute", false);
             slot.inputChannelIndex = cv.getProperty("inputIndex", -1);
+            slot.inputStereo = (bool)cv.getProperty("inputStereo", i > 0);
             slot.aux1Send = (float)cv.getProperty("aux1", 0.0);
             slot.aux2Send = (float)cv.getProperty("aux2", 0.0);
             slot.iemOffset = (float)cv.getProperty("iemOffset", 1.0);
@@ -409,6 +411,8 @@ juce::var RigSerializer::songToVar(const Song& song) {
         o->setProperty("highNote", ps.highNote);
         o->setProperty("level", (double)ps.level);
         o->setProperty("enabled", ps.enabled);
+        if (ps.midiChannel != 0)
+            o->setProperty("midiChannel", ps.midiChannel);
         o->setProperty("isMidiOut", ps.isMidiOut);
         o->setProperty("midiOutDevice", ps.midiOutDevice);
         o->setProperty("midiOutChannel", ps.midiOutChannel);
@@ -454,6 +458,7 @@ juce::var RigSerializer::songToVar(const Song& song) {
         st->setProperty("fadersLinked", s.fadersLinked);
         st->setProperty("mute", s.bypassed);
         st->setProperty("inputIndex", s.inputChannelIndex);
+        st->setProperty("inputStereo", s.inputStereo);
         st->setProperty("aux1", (double)s.aux1Send);
         st->setProperty("aux2", (double)s.aux2Send);
         st->setProperty("iemOffset", (double)s.iemOffset);
@@ -724,6 +729,8 @@ juce::String RigSerializer::serializeStrip(const SongSlot& slot) {
         o->setProperty("highNote", ps.highNote);
         o->setProperty("level", (double)ps.level);
         o->setProperty("enabled", ps.enabled);
+        if (ps.midiChannel != 0)
+            o->setProperty("midiChannel", ps.midiChannel);
         o->setProperty("isMidiOut", ps.isMidiOut);
         o->setProperty("midiOutDevice", ps.midiOutDevice);
         o->setProperty("midiOutChannel", ps.midiOutChannel);
@@ -750,6 +757,7 @@ juce::String RigSerializer::serializeStrip(const SongSlot& slot) {
     st->setProperty("fadersLinked", slot.fadersLinked);
     st->setProperty("mute", slot.bypassed);
     st->setProperty("inputIndex", slot.inputChannelIndex);
+    st->setProperty("inputStereo", slot.inputStereo);
     st->setProperty("aux1", (double)slot.aux1Send);
     st->setProperty("aux2", (double)slot.aux2Send);
     st->setProperty("iemOffset", (double)slot.iemOffset);
@@ -926,6 +934,7 @@ bool RigSerializer::readStripFromFile(const juce::File& file, SongSlot& outSlot)
     outSlot.fadersLinked = cv.getProperty("fadersLinked", true);
     outSlot.bypassed = cv.getProperty("mute", false);
     outSlot.inputChannelIndex = cv.getProperty("inputIndex", -1);
+    outSlot.inputStereo = (bool)cv.getProperty("inputStereo", true);
     outSlot.aux1Send = (float)cv.getProperty("aux1", 0.0);
     outSlot.aux2Send = (float)cv.getProperty("aux2", 0.0);
     outSlot.iemOffset = (float)cv.getProperty("iemOffset", 1.0);

@@ -545,6 +545,94 @@ void MainComponent::ensureStripVisibleInRack(RackSlotComponent *target) {
     setRackScrollX(stripLeft);
 }
 
+void MainComponent::setFocusedStrip(int slotIdx) {
+  if (slotIdx < -1 || slotIdx >= rackSlotComponents.size())
+    slotIdx = -1;
+  focusedStripIndex = slotIdx;
+  for (int i = 0; i < rackSlotComponents.size(); ++i) {
+    auto *c = rackSlotComponents[i];
+    if (i == focusedStripIndex && c->getIsCollapsed())
+      c->setCollapsed(false);
+    c->setFocused(i == focusedStripIndex);
+  }
+  resized();
+  if (focusedStripIndex >= 0 && focusedStripIndex < rackSlotComponents.size())
+    ensureStripVisibleInRack(rackSlotComponents[focusedStripIndex]);
+  stripRulerBar.repaint();
+}
+
+void MainComponent::StripRulerBar::paint(juce::Graphics &g) {
+  if (owner == nullptr)
+    return;
+  const auto &t = ThemeManager::getInstance().active();
+  g.fillAll(t.panel);
+  g.setColour(t.border);
+  g.drawHorizontalLine(0, 0.0f, (float)getWidth());
+
+  const int viewX = owner->rackViewport.getViewPositionX();
+  const int viewRight = viewX + owner->rackViewport.getWidth();
+  int x = 8;
+
+  auto drawChip = [&](RackSlotComponent *c, int idx, const juce::String &label) {
+    if (c == nullptr || !c->isVisible())
+      return;
+    const int cw = 26;
+    auto box = juce::Rectangle<int>(x, 3, cw, getHeight() - 6);
+    const bool isCur = (idx == owner->focusedStripIndex);
+    const bool isVis = (c->getRight() > viewX && c->getX() < viewRight);
+
+    if (isCur) {
+      g.setColour(t.accent);
+      g.fillRoundedRectangle(box.toFloat(), 3.0f);
+      g.setColour(juce::Colour(0xFF1C1409));
+      g.setFont(BoutiqueLookAndFeel::monoFont(10.5f, true));
+    } else {
+      if (isVis) {
+        g.setColour(t.panelAlt);
+        g.fillRoundedRectangle(box.toFloat(), 3.0f);
+        g.setColour(t.borderStrong);
+        g.drawRoundedRectangle(box.toFloat(), 3.0f, 1.0f);
+      }
+      g.setColour(isVis ? t.text : t.textFaint);
+      g.setFont(BoutiqueLookAndFeel::monoFont(10.5f, false));
+    }
+    g.drawText(label, box, juce::Justification::centred, false);
+    x += cw + 3;
+  };
+
+  for (int i = 1; i < owner->rackSlotComponents.size(); ++i)
+    drawChip(owner->rackSlotComponents[i], i, juce::String(i + 1));
+  if (owner->rackSlotComponents.size() > 0)
+    drawChip(owner->rackSlotComponents[0], 0, "M");
+}
+
+void MainComponent::StripRulerBar::mouseDown(const juce::MouseEvent &e) {
+  if (owner == nullptr)
+    return;
+  int x = 8;
+  auto hitChip = [&](RackSlotComponent *c, int idx) -> bool {
+    if (c == nullptr || !c->isVisible())
+      return false;
+    const int cw = 26;
+    auto box = juce::Rectangle<int>(x, 0, cw, getHeight());
+    x += cw + 3;
+    if (box.contains(e.getPosition())) {
+      owner->setFocusedStrip((owner->focusedStripIndex == idx) ? -1 : idx);
+      if (owner->focusedStripIndex >= 0)
+        owner->ensureStripVisibleInRack(c);
+      return true;
+    }
+    return false;
+  };
+
+  for (int i = 1; i < owner->rackSlotComponents.size(); ++i) {
+    if (hitChip(owner->rackSlotComponents[i], i))
+      return;
+  }
+  if (owner->rackSlotComponents.size() > 0)
+    hitChip(owner->rackSlotComponents[0], 0);
+}
+
 void MainComponent::logAudioGlitch(double actualMs, double expectedMs,
                                    double cbDurationMs) {
   juce::String timeStr = juce::Time::getCurrentTime().formatted("%H:%M:%S.");
@@ -1306,8 +1394,10 @@ void MainComponent::loadEngineTuningSettings() {
   if (!f.existsAsFile())
     return;
   auto v = juce::JSON::parse(f.loadFileAsString());
-  if (v.hasProperty("pCoresOnly"))
+  if (v.hasProperty("pCoresOnly")) {
     engineTuningSettings.pCoresOnly = (bool)v["pCoresOnly"];
+    hasExplicitPCoresSetting = true;
+  }
   if (v.hasProperty("shelterCpu0"))
     engineTuningSettings.shelterCpu0 = (bool)v["shelterCpu0"];
   if (v.hasProperty("preventPowerThrottling"))
@@ -1372,6 +1462,10 @@ void MainComponent::suppressGlitchDetectionForMs(int durationMs) noexcept {
 void MainComponent::applyEngineTuningSettings() {
 #ifdef _WIN32
   const CpuTopologyMasks topo = queryCpuTopology();
+  if (!hasExplicitPCoresSetting &&
+      (topo.eCoreMask == 0 || topo.physicalCoreMasks.size() <= 4)) {
+    engineTuningSettings.pCoresOnly = false;
+  }
   const DWORD_PTR fullSysMask =
       (topo.sysMask != 0) ? topo.sysMask : ~(DWORD_PTR)0;
 
@@ -1413,8 +1507,17 @@ void MainComponent::applyEngineTuningSettings() {
   juce::Array<DWORD_PTR> pCoreSlices;
   for (DWORD_PTR coreMask : topo.physicalCoreMasks) {
     const DWORD_PTR slice = coreMask & rtDspMask;
-    if (slice != 0)
+    // Never pin real-time DSP workers onto a partial physical core whose
+    // sibling HT was masked out by shelterCpu0 (e.g. CPU 0's sibling 0x02).
+    if (slice != 0 && slice == coreMask)
       pCoreSlices.add(slice);
+  }
+  if (pCoreSlices.isEmpty()) {
+    for (DWORD_PTR coreMask : topo.physicalCoreMasks) {
+      const DWORD_PTR slice = coreMask & rtDspMask;
+      if (slice != 0)
+        pCoreSlices.add(slice);
+    }
   }
   int dspPhysicalCores = pCoreSlices.size();
   if (dspPhysicalCores <= 0)
@@ -1988,6 +2091,7 @@ void MainComponent::resized() {
       }
     }
 
+    const int focusedWidth = juce::jmax(176, expandedWidth);
     int totalStripsWidth = 0;
     for (int i = 1; i < rackSlotComponents.size(); ++i) {
       auto *comp = rackSlotComponents[i];
@@ -1999,18 +2103,25 @@ void MainComponent::resized() {
       if (!hideExtraEmpty) {
         const int cw =
             isEmptyCollapsed ? emptyCollapsedWidth : mutedCollapsedWidth;
-        totalStripsWidth += comp->getIsCollapsed() ? cw : expandedWidth;
+        const int ew = comp->getIsFocused() ? focusedWidth : expandedWidth;
+        totalStripsWidth += comp->getIsCollapsed() ? cw : ew;
       }
     }
     if (rackSlotComponents.size() > 0) {
       auto *comp = rackSlotComponents[0];
       comp->setVisible(true);
+      const int ew = comp->getIsFocused() ? focusedWidth : expandedWidth;
       totalStripsWidth +=
-          comp->getIsCollapsed() ? mutedCollapsedWidth : expandedWidth;
+          comp->getIsCollapsed() ? mutedCollapsedWidth : ew;
     }
 
-    // 3. Dedicated high-contrast bottom navigation bar [ < ] [===] [ > ] when
-    // needed
+    // 3. Studio Strip Ruler (24px) + bottom navigation bar [ < ] [===] [ > ] when needed
+    const bool showRuler = ThemeManager::isStudio();
+    stripRulerBar.setVisible(showRuler);
+    if (showRuler) {
+      stripRulerBar.setBounds(r.removeFromBottom(24));
+    }
+
     const bool needsHScroll = totalStripsWidth > r.getWidth();
     if (needsHScroll) {
       auto navRow = r.removeFromBottom(20).reduced(1, 2);
@@ -2038,7 +2149,8 @@ void MainComponent::resized() {
           comp->getIsCollapsed() && comp->isUnusedEmptyStrip();
       const int cw =
           isEmptyCollapsed ? emptyCollapsedWidth : mutedCollapsedWidth;
-      const int w = comp->getIsCollapsed() ? cw : expandedWidth;
+      const int ew = comp->getIsFocused() ? focusedWidth : expandedWidth;
+      const int w = comp->getIsCollapsed() ? cw : ew;
       comp->setBounds(
           juce::Rectangle<int>(xPos, 0, w, stripAreaH).reduced(1, 0));
       xPos += w;
@@ -2048,8 +2160,9 @@ void MainComponent::resized() {
     // Returns
     if (rackSlotComponents.size() > 0) {
       auto *comp = rackSlotComponents[0];
+      const int ew = comp->getIsFocused() ? focusedWidth : expandedWidth;
       const int w =
-          comp->getIsCollapsed() ? mutedCollapsedWidth : expandedWidth;
+          comp->getIsCollapsed() ? mutedCollapsedWidth : ew;
       comp->setBounds(
           juce::Rectangle<int>(xPos, 0, w, stripAreaH).reduced(1, 0));
       xPos += w;

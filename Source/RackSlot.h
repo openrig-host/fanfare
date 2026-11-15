@@ -90,12 +90,13 @@ public:
     return chainB3s[juce::jlimit(0, 2, chainIdx)];
   }
 
-  // Per-plugin-chain-slot settings for instrument stacking (note range, level, enable)
+  // Per-plugin-chain-slot settings for instrument stacking (note range, level, enable, MIDI channel)
   struct ChainSlotSettings {
     std::atomic<int> lowNote{0};
     std::atomic<int> highNote{127};
     std::atomic<float> level{1.0f};
     std::atomic<bool> enabled{true};
+    std::atomic<int> midiChannel{0}; // 0 = Strip (inherit), 1..16 = specific MIDI channel
   };
 
   // A chain slot can alternatively act as a MIDI OUT destination (forwarding
@@ -569,21 +570,8 @@ public:
               scratchBuffer.setSize(numCh, numSamp, false, false, true);
             scratchBuffer.clear(0, numSamp);
 
-            filteredMidiScratch.clear();
-            int low = chainSettings[i].lowNote.load();
-            int high = chainSettings[i].highNote.load();
+            filterMidiForLayer(i, midiMessages, filteredMidiScratch);
             float instGain = chainSettings[i].level.load();
-
-            for (const auto metadata : midiMessages) {
-              auto msg = metadata.getMessage();
-              if (msg.isNoteOnOrOff()) {
-                int note = msg.getNoteNumber();
-                if (note >= low && note <= high)
-                  filteredMidiScratch.addEvent(msg, metadata.samplePosition);
-              } else {
-                filteredMidiScratch.addEvent(msg, metadata.samplePosition);
-              }
-            }
 
             if (i == enablePanicSlot.load()) {
               enablePanicSlot.store(-1);
@@ -642,21 +630,8 @@ public:
               scratchBuffer.setSize(numCh, numSamp, false, false, true);
             scratchBuffer.clear(0, numSamp);
 
-            filteredMidiScratch.clear();
-            int low = chainSettings[i].lowNote.load();
-            int high = chainSettings[i].highNote.load();
+            filterMidiForLayer(i, midiMessages, filteredMidiScratch);
             float instGain = chainSettings[i].level.load();
-
-            for (const auto metadata : midiMessages) {
-              auto msg = metadata.getMessage();
-              if (msg.isNoteOnOrOff()) {
-                int note = msg.getNoteNumber();
-                if (note >= low && note <= high)
-                  filteredMidiScratch.addEvent(msg, metadata.samplePosition);
-              } else {
-                filteredMidiScratch.addEvent(msg, metadata.samplePosition);
-              }
-            }
 
             if (i == enablePanicSlot.load()) {
               enablePanicSlot.store(-1);
@@ -715,21 +690,8 @@ public:
               scratchBuffer.setSize(numCh, numSamp, false, false, true);
             scratchBuffer.clear(0, numSamp);
 
-            filteredMidiScratch.clear();
-            int low = chainSettings[i].lowNote.load();
-            int high = chainSettings[i].highNote.load();
+            filterMidiForLayer(i, midiMessages, filteredMidiScratch);
             float instGain = chainSettings[i].level.load();
-
-            for (const auto metadata : midiMessages) {
-              auto msg = metadata.getMessage();
-              if (msg.isNoteOnOrOff()) {
-                int note = msg.getNoteNumber();
-                if (note >= low && note <= high)
-                  filteredMidiScratch.addEvent(msg, metadata.samplePosition);
-              } else {
-                filteredMidiScratch.addEvent(msg, metadata.samplePosition);
-              }
-            }
 
             if (i == enablePanicSlot.load()) {
               enablePanicSlot.store(-1);
@@ -802,21 +764,8 @@ public:
                 scratchBuffer.setSize(numCh, numSamp, false, false, true);
               scratchBuffer.clear(0, numSamp);
 
-                filteredMidiScratch.clear();
-                int low = (i < 3) ? chainSettings[i].lowNote.load() : 0;
-                int high = (i < 3) ? chainSettings[i].highNote.load() : 127;
+                filterMidiForLayer(i, midiMessages, filteredMidiScratch);
                 float instGain = (i < 3) ? chainSettings[i].level.load() : 1.0f;
-
-                for (const auto metadata : midiMessages) {
-                  auto msg = metadata.getMessage();
-                  if (msg.isNoteOnOrOff()) {
-                    int note = msg.getNoteNumber();
-                    if (note >= low && note <= high)
-                      filteredMidiScratch.addEvent(msg, metadata.samplePosition);
-                  } else {
-                    filteredMidiScratch.addEvent(msg, metadata.samplePosition);
-                  }
-                }
 
                 // One-shot panic right after enabling (clears anything stale)
                 // and once at drain start (releases held voices of the side
@@ -927,8 +876,16 @@ public:
       rightPeak.store(leftPeak.load());
 
     // MIDI flash logic
-    if (!midiMessages.isEmpty())
+    if (!midiMessages.isEmpty()) {
       midiActivity.store(true);
+      for (const auto metadata : midiMessages) {
+        auto m = metadata.getMessage();
+        if (m.isNoteOn()) {
+          lastMidiNote.store(m.getNoteNumber(), std::memory_order_relaxed);
+          break;
+        }
+      }
+    }
 
     // Calculate DSP CPU percentage (ratio of process time to block time)
     auto elapsed = juce::Time::getHighResolutionTicks() - startTime;
@@ -963,6 +920,9 @@ public:
   }
   bool getAndClearMidiActivity() {
     return midiActivity.exchange(false);
+  }
+  int getAndClearLastMidiNote() {
+    return lastMidiNote.exchange(-1, std::memory_order_relaxed);
   }
 
   // --- Summing ---
@@ -1228,6 +1188,8 @@ public:
 
   void setInputChannelIndex(int index) { inputChannelIndex.store(index); }
   int getInputChannelIndex() const { return inputChannelIndex.load(); }
+  void setInputStereo(bool stereo) { inputStereo.store(stereo); }
+  bool isInputStereo() const { return inputStereo.load(); }
 
   juce::String getName() const {
     juce::SpinLock::ScopedLockType sl(nameLock);
@@ -1898,6 +1860,7 @@ private:
   juce::MidiBuffer midiOutChain[3];       // per-chain-slot outgoing MIDI (audio thread)
   juce::AudioBuffer<float> scratchBuffer;
   std::atomic<int> inputChannelIndex{-1}; // -1 means no hardware input (MIDI only)
+  std::atomic<bool> inputStereo{false}; // true = stereo pair (inputChannelIndex, inputChannelIndex+1)
 
   std::atomic<float> fohLevel{0.8f}; // FOH (house) level
   std::atomic<float> iemLevel{0.8f}; // IEM (monitor) level
@@ -1953,6 +1916,28 @@ private:
   std::atomic<float> leftPeak{0.0f};
   std::atomic<float> rightPeak{0.0f};
   std::atomic<bool> midiActivity{false};
+  std::atomic<int> lastMidiNote{-1};
+
+  void filterMidiForLayer(int chainIdx, const juce::MidiBuffer &src,
+                          juce::MidiBuffer &dst) const {
+    dst.clear();
+    const int low = (chainIdx >= 0 && chainIdx < 3) ? chainSettings[chainIdx].lowNote.load() : 0;
+    const int high = (chainIdx >= 0 && chainIdx < 3) ? chainSettings[chainIdx].highNote.load() : 127;
+    const int chOverride = (chainIdx >= 0 && chainIdx < 3) ? chainSettings[chainIdx].midiChannel.load() : 0;
+
+    for (const auto metadata : src) {
+      const auto msg = metadata.getMessage();
+      if (chOverride > 0 && msg.getChannel() > 0 && msg.getChannel() != chOverride)
+        continue;
+      if (msg.isNoteOnOrOff()) {
+        const int note = msg.getNoteNumber();
+        if (note >= low && note <= high)
+          dst.addEvent(msg, metadata.samplePosition);
+      } else {
+        dst.addEvent(msg, metadata.samplePosition);
+      }
+    }
+  }
   std::atomic<bool> inputActive{false};
   std::atomic<int> consecutivePluginErrors{0};
 

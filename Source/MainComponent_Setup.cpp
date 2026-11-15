@@ -32,15 +32,21 @@
 #include "MainComponentInternal.h"
 
 void MainComponent::setupSlotComponents() {
-  // Build input selector data
+  // Build input selector data: No Input (-1 -> id 1), Stereo pairs (1002 + hw), Mono (2 + hw)
   std::vector<std::pair<juce::String, int>> inputItems;
-  inputItems.push_back({"No Input", -1});
+  inputItems.push_back({"No Input", 1});
   auto *device = deviceManager.getCurrentAudioDevice();
   if (device != nullptr) {
     auto inputs = device->getInputChannelNames();
+    for (int hw = 0; hw + 1 < inputs.size(); hw += 2) {
+      inputItems.push_back(
+          {"In " + juce::String(hw + 1) + "+" + juce::String(hw + 2) + " (Stereo)",
+           1002 + hw});
+    }
     for (int hw = 0; hw < inputs.size(); ++hw) {
       inputItems.push_back(
-          {"In " + juce::String(hw + 1) + ": " + inputs[hw], hw});
+          {"In " + juce::String(hw + 1) + ": " + inputs[hw] + " (Mono)",
+           2 + hw});
     }
   }
 
@@ -50,8 +56,13 @@ void MainComponent::setupSlotComponents() {
   rackViewport.onVisibleAreaChanged = [this](const juce::Rectangle<int> &vis) {
     rackHScrollBar.setCurrentRange((double)vis.getX(), (double)vis.getWidth(),
                                    juce::dontSendNotification);
+    if (stripRulerBar.isVisible())
+      stripRulerBar.repaint();
   };
   addAndMakeVisible(rackViewport);
+
+  stripRulerBar.owner = this;
+  addChildComponent(stripRulerBar);
 
   rackScrollListener.owner = this;
   rackHScrollBar.setAutoHide(false);
@@ -97,10 +108,11 @@ void MainComponent::setupSlotComponents() {
     auto &selector = comp->getInputSelector();
     selector.clear();
     for (const auto &item : inputItems) {
-      selector.addItem(item.first, item.second + 2);
+      selector.addItem(item.first, item.second);
     }
-    selector.setSelectedId(slot->getInputChannelIndex() + 2,
-                           juce::dontSendNotification);
+    const int hwIdx = slot->getInputChannelIndex();
+    const int initId = (hwIdx < 0) ? 1 : (slot->isInputStereo() ? (1002 + hwIdx) : (2 + hwIdx));
+    selector.setSelectedId(initId, juce::dontSendNotification);
 
     // Specialized modes
     bool isMonitorIn = (i == 0); // First slot is Monitor In
@@ -980,6 +992,10 @@ void MainComponent::setupSlotComponents() {
       resized();
       stripWidthSavePending = true;
       stripWidthSaveTicks = 0;
+    };
+
+    comp->onFocusRequested = [this, i]() {
+      setFocusedStrip((focusedStripIndex == i) ? -1 : i);
     };
 
     rackSlotComponents.add(comp);

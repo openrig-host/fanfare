@@ -533,10 +533,7 @@ void FanfareEngine::deleteScene(int index)
         if (const float *l = rawInput[inputIdx])
           scratch.addFrom(0, 0, l, numSamples);
 
-        if (slotIdx == 0) {
-          if (const float *l = rawInput[inputIdx])
-            scratch.addFrom(1, 0, l, numSamples);
-        } else if (inputIdx + 1 < numInputChannels) {
+        if (slot->isInputStereo() && inputIdx + 1 < numInputChannels) {
           if (const float *r = rawInput[inputIdx + 1])
             scratch.addFrom(1, 0, r, numSamples);
         } else if (const float *l = rawInput[inputIdx]) {
@@ -837,6 +834,7 @@ void FanfareEngine::loadPluginList()
       st->setProperty("fadersLinked", s->areFadersLinked());
       st->setProperty("mute", s->isBypassed());
       st->setProperty("inputIndex", s->getInputChannelIndex());
+      st->setProperty("inputStereo", s->isInputStereo());
       st->setProperty("aux1", (double)s->getAux1Send());
       st->setProperty("aux2", (double)s->getAux2Send());
       st->setProperty("iemOffset", (double)s->getIemOffset());
@@ -1292,6 +1290,7 @@ void FanfareEngine::applyRig(const juce::var &rig)
         s->setFadersLinked(v.getProperty("fadersLinked", true));
         s->setBypass(v.getProperty("mute", false));
         s->setInputChannelIndex(v.getProperty("inputIndex", -1));
+        s->setInputStereo((bool)v.getProperty("inputStereo", i > 0));
         s->setAux1Send((float)v.getProperty("aux1", 0.0));
         s->setAux2Send((float)v.getProperty("aux2", 0.0));
         s->setIemOffset((float)v.getProperty("iemOffset", 1.0));
@@ -1930,6 +1929,7 @@ Fanfare::SongSlot FanfareEngine::exportSlot(int slotIdx)
     songSlot.fadersLinked = s->areFadersLinked();
     songSlot.bypassed = s->isBypassed();
     songSlot.inputChannelIndex = s->getInputChannelIndex();
+    songSlot.inputStereo = s->isInputStereo();
     songSlot.aux1Send = s->getAux1Send();
     songSlot.aux2Send = s->getAux2Send();
     songSlot.iemOffset = s->getIemOffset();
@@ -2116,6 +2116,7 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
     s->setFadersLinked(songSlot.fadersLinked);
     s->setBypass(songSlot.bypassed);
     s->setInputChannelIndex(songSlot.inputChannelIndex);
+    s->setInputStereo(songSlot.inputStereo);
     s->setAux1Send(songSlot.aux1Send);
     s->setAux2Send(songSlot.aux2Send);
     s->setIemOffset(songSlot.iemOffset);

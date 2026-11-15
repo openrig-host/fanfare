@@ -268,6 +268,227 @@ private:
     repaint();
   }
 };
+
+// Channel Setup Drawer (gear icon on Studio nameplate):
+// Source, Output Target, and per-layer level / MIDI channel / enable controls.
+class ChannelSetupDrawerComp : public juce::Component {
+public:
+  ChannelSetupDrawerComp(RackSlot &s, int slotIdx, juce::ComboBox &inSel,
+                         juce::ComboBox &outSel, bool isReturnStrip,
+                         std::function<void()> onOpenDyn,
+                         std::function<void()> onChanged)
+      : slot(s), inputSel(inSel), outputSel(outSel), isReturn(isReturnStrip),
+        openDynCb(std::move(onOpenDyn)), changedCb(std::move(onChanged)) {
+    const auto &t = ThemeManager::getInstance().active();
+
+    titleLbl.setText("CHANNEL SETUP - STRIP " + juce::String(slotIdx + 1),
+                     juce::dontSendNotification);
+    titleLbl.setFont(BoutiqueLookAndFeel::condensedFont(12.0f, 0.08f));
+    titleLbl.setColour(juce::Label::textColourId, t.textDim);
+    addAndMakeVisible(titleLbl);
+
+    sourceLbl.setText("SOURCE", juce::dontSendNotification);
+    sourceLbl.setFont(BoutiqueLookAndFeel::condensedFont(10.0f, 0.08f));
+    sourceLbl.setColour(juce::Label::textColourId, t.textFaint);
+    addAndMakeVisible(sourceLbl);
+
+    for (int i = 0; i < inputSel.getNumItems(); ++i)
+      sourceCombo.addItem(inputSel.getItemText(i), inputSel.getItemId(i));
+    sourceCombo.setSelectedId(inputSel.getSelectedId(), juce::dontSendNotification);
+    sourceCombo.onChange = [this] {
+      inputSel.setSelectedId(sourceCombo.getSelectedId(), juce::sendNotification);
+      if (changedCb) changedCb();
+    };
+    addAndMakeVisible(sourceCombo);
+
+    if (!isReturn) {
+      outputLbl.setText("OUTPUT TARGET", juce::dontSendNotification);
+      outputLbl.setFont(BoutiqueLookAndFeel::condensedFont(10.0f, 0.08f));
+      outputLbl.setColour(juce::Label::textColourId, t.textFaint);
+      addAndMakeVisible(outputLbl);
+
+      for (int i = 0; i < outputSel.getNumItems(); ++i)
+        outputCombo.addItem(outputSel.getItemText(i), outputSel.getItemId(i));
+      outputCombo.setSelectedId(outputSel.getSelectedId(), juce::dontSendNotification);
+      outputCombo.onChange = [this] {
+        outputSel.setSelectedId(outputCombo.getSelectedId(), juce::sendNotification);
+        if (changedCb) changedCb();
+      };
+      addAndMakeVisible(outputCombo);
+    }
+
+    layersLbl.setText("LAYERS · MIDI CHANNEL (DEFAULT \"STRIP\")",
+                      juce::dontSendNotification);
+    layersLbl.setFont(BoutiqueLookAndFeel::condensedFont(10.0f, 0.08f));
+    layersLbl.setColour(juce::Label::textColourId, t.textFaint);
+    addAndMakeVisible(layersLbl);
+
+    const juce::Colour layerCols[3] = { t.catKeyboard, t.accent, t.foh };
+    for (int i = 0; i < 3; ++i) {
+      auto &r = rows[i];
+      auto &cs = slot.getChainSlotSettings(i);
+      juce::String nm = slot.getPluginName(i);
+      if (nm.isEmpty() && slot.isChainSlotMidiOut(i))
+        nm = "MIDI: " + slot.getChainSlotMidiOutName(i);
+
+      r.color = layerCols[i];
+      r.nameLbl.setText(nm.isEmpty() ? juce::String::fromUTF8("\xe2\x80\x94 empty \xe2\x80\x94") : nm,
+                        juce::dontSendNotification);
+      r.nameLbl.setFont(BoutiqueLookAndFeel::uiFont(11.0f, nm.isNotEmpty()));
+      r.nameLbl.setColour(juce::Label::textColourId, nm.isNotEmpty() ? t.text : t.textFaint);
+      addAndMakeVisible(r.nameLbl);
+
+      juce::String rng = nm.isEmpty()
+          ? ""
+          : (midiNoteName(cs.lowNote.load()) + "-" + midiNoteName(cs.highNote.load()));
+      r.rangeLbl.setText(rng, juce::dontSendNotification);
+      r.rangeLbl.setFont(BoutiqueLookAndFeel::monoFont(9.5f, false));
+      r.rangeLbl.setColour(juce::Label::textColourId, t.textDim);
+      addAndMakeVisible(r.rangeLbl);
+
+      r.lvlSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+      r.lvlSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+      r.lvlSlider.setRange(0.0, 1.5, 0.01);
+      r.lvlSlider.setValue(cs.level.load(), juce::dontSendNotification);
+      r.lvlSlider.onValueChange = [this, i] {
+        slot.getChainSlotSettings(i).level.store((float)rows[i].lvlSlider.getValue());
+        if (changedCb) changedCb();
+      };
+      addAndMakeVisible(r.lvlSlider);
+
+      r.chCombo.addItem("Strip", 1);
+      for (int ch = 1; ch <= 16; ++ch)
+        r.chCombo.addItem(juce::String(ch), ch + 1);
+      int curCh = juce::jlimit(0, 16, cs.midiChannel.load());
+      r.chCombo.setSelectedId(curCh + 1, juce::dontSendNotification);
+      r.chCombo.setTooltip("MIDI channel: Strip or 1-16");
+      r.chCombo.onChange = [this, i] {
+        int sel = rows[i].chCombo.getSelectedId() - 1;
+        slot.getChainSlotSettings(i).midiChannel.store(juce::jlimit(0, 16, sel));
+        if (changedCb) changedCb();
+      };
+      addAndMakeVisible(r.chCombo);
+
+      r.enableBtn.setButtonText(cs.enabled.load() ? "ON" : "OFF");
+      r.enableBtn.setClickingTogglesState(true);
+      r.enableBtn.setToggleState(cs.enabled.load(), juce::dontSendNotification);
+      Fanfare::setButtonRole(r.enableBtn, cs.enabled.load() ? Fanfare::ButtonRole::Primary
+                                                            : Fanfare::ButtonRole::Subtle);
+      r.enableBtn.onClick = [this, i] {
+        bool on = rows[i].enableBtn.getToggleState();
+        slot.getChainSlotSettings(i).enabled.store(on);
+        rows[i].enableBtn.setButtonText(on ? "ON" : "OFF");
+        Fanfare::setButtonRole(rows[i].enableBtn, on ? Fanfare::ButtonRole::Primary
+                                                     : Fanfare::ButtonRole::Subtle);
+        if (changedCb) changedCb();
+      };
+      addAndMakeVisible(r.enableBtn);
+    }
+
+    if (!isReturn) {
+      dynBtn.setButtonText("Open DYN");
+      Fanfare::setButtonRole(dynBtn, Fanfare::ButtonRole::Standard);
+      dynBtn.onClick = [this] {
+        auto cb = openDynCb;
+        if (auto *co = findParentComponentOfClass<juce::CallOutBox>())
+          co->dismiss();
+        if (cb) cb();
+      };
+      addAndMakeVisible(dynBtn);
+    }
+
+    doneBtn.setButtonText("Done");
+    Fanfare::setButtonRole(doneBtn, Fanfare::ButtonRole::Primary);
+    doneBtn.onClick = [this] {
+      if (auto *co = findParentComponentOfClass<juce::CallOutBox>())
+        co->dismiss();
+    };
+    addAndMakeVisible(doneBtn);
+
+    setSize(336, isReturn ? 270 : 320);
+  }
+
+  void paint(juce::Graphics &g) override {
+    const auto &t = ThemeManager::getInstance().active();
+    g.fillAll(t.raised);
+    for (int i = 0; i < 3; ++i) {
+      if (!rowBounds[i].isEmpty()) {
+        g.setColour(t.panelAlt);
+        g.fillRoundedRectangle(rowBounds[i].toFloat(), 3.0f);
+        g.setColour(t.border);
+        g.drawRoundedRectangle(rowBounds[i].toFloat(), 3.0f, 1.0f);
+        g.setColour(rows[i].color);
+        g.fillEllipse((float)rowBounds[i].getX() + 6.0f,
+                      (float)rowBounds[i].getCentreY() - 4.0f, 8.0f, 8.0f);
+      }
+    }
+  }
+
+  void resized() override {
+    auto b = getLocalBounds().reduced(10);
+    titleLbl.setBounds(b.removeFromTop(18));
+    b.removeFromTop(6);
+
+    sourceLbl.setBounds(b.removeFromTop(14));
+    sourceCombo.setBounds(b.removeFromTop(24));
+    b.removeFromTop(6);
+
+    if (!isReturn) {
+      outputLbl.setBounds(b.removeFromTop(14));
+      outputCombo.setBounds(b.removeFromTop(24));
+      b.removeFromTop(8);
+    }
+
+    layersLbl.setBounds(b.removeFromTop(14));
+    b.removeFromTop(4);
+
+    auto btnRow = b.removeFromBottom(28);
+    if (!isReturn) {
+      int half = btnRow.getWidth() / 2;
+      dynBtn.setBounds(btnRow.removeFromLeft(half).reduced(2, 0));
+      doneBtn.setBounds(btnRow.reduced(2, 0));
+    } else {
+      doneBtn.setBounds(btnRow);
+    }
+    b.removeFromBottom(8);
+
+    for (int i = 0; i < 3; ++i) {
+      auto row = b.removeFromTop(28);
+      rowBounds[i] = row;
+      auto inner = row.reduced(4, 3);
+      inner.removeFromLeft(14); // color dot
+      rows[i].enableBtn.setBounds(inner.removeFromRight(32));
+      inner.removeFromRight(4);
+      rows[i].chCombo.setBounds(inner.removeFromRight(56));
+      inner.removeFromRight(4);
+      rows[i].lvlSlider.setBounds(inner.removeFromRight(58));
+      inner.removeFromRight(4);
+      rows[i].rangeLbl.setBounds(inner.removeFromRight(50));
+      rows[i].nameLbl.setBounds(inner);
+      b.removeFromTop(4);
+    }
+  }
+
+private:
+  RackSlot &slot;
+  juce::ComboBox &inputSel;
+  juce::ComboBox &outputSel;
+  bool isReturn = false;
+  std::function<void()> openDynCb;
+  std::function<void()> changedCb;
+
+  juce::Label titleLbl, sourceLbl, outputLbl, layersLbl;
+  juce::ComboBox sourceCombo, outputCombo;
+  struct LayerRow {
+    juce::Colour color;
+    juce::Label nameLbl, rangeLbl;
+    juce::Slider lvlSlider;
+    juce::ComboBox chCombo;
+    juce::TextButton enableBtn;
+  } rows[3];
+  juce::Rectangle<int> rowBounds[3];
+  juce::TextButton dynBtn, doneBtn;
+};
 } // namespace
 
 RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &laf)
@@ -283,10 +504,16 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   channelSlider.setRange(0.0, 1.0);
   channelSlider.onValueChange = [this]() {
     float val = (float)channelSlider.getValue();
-    slot.setFohLevel(val);
-    if (slot.areFadersLinked()) {
+    if (faderTarget == FaderTarget::Iem) {
       slot.setIemLevel(val);
-      iemSlider.setValue(val, juce::dontSendNotification);
+    } else if (faderTarget == FaderTarget::Foh) {
+      slot.setFohLevel(val);
+    } else {
+      slot.setFohLevel(val);
+      if (slot.areFadersLinked()) {
+        slot.setIemLevel(val);
+        iemSlider.setValue(val, juce::dontSendNotification);
+      }
     }
   };
 
@@ -333,7 +560,18 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
   inputSelector.addItem("---", 1);
   inputSelector.setSelectedId(1, juce::dontSendNotification);
   inputSelector.onChange = [this]() {
-    slot.setInputChannelIndex(inputSelector.getSelectedId() - 2);
+    int id = inputSelector.getSelectedId();
+    if (id >= 1002) {
+      slot.setInputStereo(true);
+      slot.setInputChannelIndex(id - 1002);
+    } else if (id >= 2) {
+      slot.setInputStereo(false);
+      slot.setInputChannelIndex(id - 2);
+    } else {
+      slot.setInputStereo(false);
+      slot.setInputChannelIndex(-1);
+    }
+    repaint();
   };
 
   addAndMakeVisible(outputSelector);
@@ -573,6 +811,61 @@ RackSlotComponent::RackSlotComponent(RackSlot &s, int index, juce::LookAndFeel &
                   &saveStripBtn, &loadStripBtn})
     b->addMouseListener(this, false);
 
+  // Studio focused-layer inline controls (visible only when focused in Studio mode)
+  addChildComponent(layerTrimSlider);
+  layerTrimSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+  layerTrimSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+  layerTrimSlider.setRange(0.0, 1.5, 0.01);
+  layerTrimSlider.setTooltip("Layer trim (pre-fader)");
+  layerTrimSlider.onValueChange = [this] {
+    slot.getChainSlotSettings(selectedLayer).level.store((float)layerTrimSlider.getValue());
+  };
+
+  for (auto *b : {&layerChangeLinkBtn, &keyboardRangeBtn,
+                  &changeInstBtn, &editLayerGuiBtn}) {
+    addChildComponent(*b);
+    Fanfare::setButtonRole(*b, Fanfare::ButtonRole::Subtle);
+  }
+  layerChangeLinkBtn.onClick = [this] {
+    if (onShowPluginMenu) onShowPluginMenu(selectedLayer);
+  };
+  changeInstBtn.onClick = [this] {
+    if (onShowPluginMenu) onShowPluginMenu(selectedLayer);
+  };
+  keyboardRangeBtn.onClick = [this] { showPluginConfigMenu(selectedLayer); };
+  editLayerGuiBtn.onClick = [this] {
+    if (onOpenEditor) onOpenEditor(selectedLayer);
+  };
+
+  addChildComponent(faderTargetBtn);
+  Fanfare::setButtonRole(faderTargetBtn, Fanfare::ButtonRole::Subtle);
+  faderTargetBtn.setTooltip("Fader target: click to cycle BOTH -> FOH -> IEM");
+  faderTargetBtn.onClick = [this] {
+    faderTarget = (faderTarget == FaderTarget::Both) ? FaderTarget::Foh
+                : (faderTarget == FaderTarget::Foh)  ? FaderTarget::Iem
+                                                     : FaderTarget::Both;
+    if (faderTarget == FaderTarget::Both) {
+      slot.setFadersLinked(true);
+      faderTargetBtn.setButtonText("BOTH");
+      Fanfare::setButtonRole(faderTargetBtn, Fanfare::ButtonRole::Subtle);
+      channelSlider.setComponentID("foh");
+      channelSlider.setValue(slot.getFohLevel(), juce::dontSendNotification);
+    } else if (faderTarget == FaderTarget::Foh) {
+      slot.setFadersLinked(false);
+      faderTargetBtn.setButtonText("FOH");
+      Fanfare::setButtonRole(faderTargetBtn, Fanfare::ButtonRole::Primary);
+      channelSlider.setComponentID("foh");
+      channelSlider.setValue(slot.getFohLevel(), juce::dontSendNotification);
+    } else {
+      slot.setFadersLinked(false);
+      faderTargetBtn.setButtonText("IEM");
+      Fanfare::setButtonRole(faderTargetBtn, Fanfare::ButtonRole::Standard);
+      channelSlider.setComponentID("iem");
+      channelSlider.setValue(slot.getIemLevel(), juce::dontSendNotification);
+    }
+    channelSlider.repaint();
+  };
+
   prevUnusedEmpty = isUnusedEmptyStrip();
   startTimer(50);
 }
@@ -698,8 +991,31 @@ void RackSlotComponent::timerCallback() {
   curLeft = std::max(peakL, curLeft * decay);
   curRight = std::max(peakR, curRight * decay);
 
-  if (slot.getAndClearMidiActivity())
+  const int lastNote = slot.getAndClearLastMidiNote();
+  const bool hadMidi = slot.getAndClearMidiActivity();
+  if (hadMidi || lastNote >= 0) {
     midiLed.flash();
+    for (int i = 0; i < 3; ++i) {
+      if (getLayerDisplayName(i).isNotEmpty()) {
+        const auto &cs = slot.getChainSlotSettings(i);
+        if (cs.enabled.load()) {
+          if (lastNote < 0 || (lastNote >= cs.lowNote.load() && lastNote <= cs.highNote.load()))
+            layerFlashAlpha[i] = 1.0f;
+        }
+      }
+    }
+  }
+  bool flashActive = false;
+  for (int i = 0; i < 3; ++i) {
+    if (layerFlashAlpha[i] > 0.02f) {
+      layerFlashAlpha[i] *= 0.70f;
+      flashActive = true;
+    } else {
+      layerFlashAlpha[i] = 0.0f;
+    }
+  }
+  if (flashActive && ThemeManager::isStudio() && !isCollapsed && !studioRangeBarBounds.isEmpty())
+    repaint(studioRangeBarBounds);
 
   // MP3 strip badge/button: visible whenever MP3 tracks/playlists are loaded on this strip
   if (kMp3DecksEnabled && !isReturn && !isMonitorIn) {
@@ -887,8 +1203,9 @@ void RackSlotComponent::timerCallback() {
     stateChanged = true;
   }
 
-  if (std::abs(channelSlider.getValue() - slot.getFohLevel()) > 0.001f)
-    channelSlider.setValue(slot.getFohLevel(), juce::dontSendNotification);
+  const float targetLvl = (faderTarget == FaderTarget::Iem) ? slot.getIemLevel() : slot.getFohLevel();
+  if (std::abs(channelSlider.getValue() - targetLvl) > 0.001f)
+    channelSlider.setValue(targetLvl, juce::dontSendNotification);
   if (isAccordion) {
     if (std::abs(iemOffsetKnob.getValue() - slot.getIemOffset()) > 0.001f)
       iemOffsetKnob.setValue(slot.getIemOffset(), juce::dontSendNotification);
@@ -1040,47 +1357,322 @@ void RackSlotComponent::paint(juce::Graphics &g) {
     g.drawHorizontalLine((int)bounds.getY() + 5, bounds.getX() + 2.0f, bounds.getRight() - 2.0f);
   }
 
-  // Strip border (tinted when a strip colour is active)
-  juce::Colour stripBorder = t.border;
-  if (borderTintAmt > 0.0f)
+  // Strip border (accent when focused in Studio, otherwise tinted when a strip colour is active)
+  juce::Colour stripBorder = (t.isStudio() && isFocused) ? t.accent : t.border;
+  if (!(t.isStudio() && isFocused) && borderTintAmt > 0.0f)
     stripBorder = stripBorder.interpolatedWith(categoryCol, borderTintAmt);
   g.setColour(stripBorder);
-  g.drawRoundedRectangle(bounds, 3.0f, 1.0f);
+  g.drawRoundedRectangle(bounds, 3.0f, (t.isStudio() && isFocused) ? 1.5f : 1.0f);
 
-  // Strip Nameplate well (y = 107..139)
-  auto nameplateRect = juce::Rectangle<float>(3.0f, 107.0f, bounds.getWidth() - 5.0f, 32.0f);
-  Fanfare::ModalFrame::paintRecessedWell(g, nameplateRect, 2.5f);
+  if (t.isStudio()) {
+    // --- STUDIO "AFTER" LAYOUT ---
+    // 1. Stack Head: summary badge + layer count
+    if (!studioStackHeadBounds.isEmpty()) {
+      auto sh = studioStackHeadBounds;
+      // Leave room for collapseBtn + midiLed on the right (already positioned in resized)
+      auto badgeArea = sh.withTrimmedRight(34);
+      juce::StringArray activeNames;
+      for (int i = 0; i < 3; ++i) {
+        juce::String nm = getLayerDisplayName(i);
+        if (nm.isNotEmpty())
+          activeNames.add(nm);
+      }
+      const int nLayers = activeNames.size();
+      const juce::String summaryText = nLayers > 0 ? activeNames.joinIntoString(" + ")
+                                                   : (isReturn ? "Aux Return" : "Empty");
 
-  if (hasDistinctColor) {
-    if (isCustomColor) {
-      g.setColour(categoryCol.withAlpha(slot.isBypassed() ? 0.06f : 0.16f));
-      g.fillRoundedRectangle(nameplateRect.reduced(1.0f), 2.0f);
+      auto countArea = badgeArea.removeFromRight(42);
+      g.setColour(t.panelAlt);
+      g.fillRoundedRectangle(badgeArea.toFloat(), 3.0f);
+      g.setColour(t.border);
+      g.drawRoundedRectangle(badgeArea.toFloat(), 3.0f, 1.0f);
+      g.setColour(nLayers > 0 ? t.text : t.textFaint);
+      g.setFont(BoutiqueLookAndFeel::uiFont(9.5f, false));
+      g.drawFittedText(summaryText, badgeArea.reduced(4, 0),
+                       juce::Justification::centredLeft, 1, 0.8f);
+
+      if (!isReturn) {
+        g.setColour(t.accent);
+        g.setFont(BoutiqueLookAndFeel::uiFont(9.0f, true));
+        g.drawText(juce::String(nLayers) + (nLayers == 1 ? " lyr" : " lyrs"),
+                   countArea, juce::Justification::centredRight, false);
+      }
     }
-    g.setColour(slot.isBypassed() ? categoryCol.withAlpha(0.35f) : categoryCol);
-    g.fillRect(nameplateRect.getX() + 1.0f, nameplateRect.getY() + 2.0f,
-               3.0f, nameplateRect.getHeight() - 4.0f);
-  }
 
-  g.setColour(slot.isBypassed() ? t.textDim : t.text);
-  g.setFont(t.isStudio() ? BoutiqueLookAndFeel::uiFont(12.5f, true)
-                         : BoutiqueLookAndFeel::condensedFont(12.5f, 0.03f));
-  juce::String plateTitle = slot.getName();
-  if (!isReturn && !isMonitorIn)
-    plateTitle = juce::String(slotIndex + 1) + (t.isStudio() ? "  " : " ") + plateTitle;
-  g.drawFittedText(t.isStudio() ? plateTitle : plateTitle.toUpperCase(),
-                   (int)nameplateRect.getX() + 4, (int)nameplateRect.getY() + 2,
-                   (int)nameplateRect.getWidth() - 8, 16,
-                   juce::Justification::centred, 1, 0.78f);
+    // 2. I/O Chips: IN <x> | OUT <y>
+    if (!studioInChipBounds.isEmpty()) {
+      g.setColour(t.sunken);
+      g.fillRoundedRectangle(studioInChipBounds.toFloat(), 3.0f);
+      g.setColour(t.border);
+      g.drawRoundedRectangle(studioInChipBounds.toFloat(), 3.0f, 1.0f);
+      juce::String inTxt = "-";
+      const int hwIdx = slot.getInputChannelIndex();
+      if (hwIdx >= 0) {
+        inTxt = slot.isInputStereo()
+                    ? (juce::String(hwIdx + 1) + "+" + juce::String(hwIdx + 2))
+                    : juce::String(hwIdx + 1);
+      }
+      g.setColour(t.textDim);
+      g.setFont(BoutiqueLookAndFeel::uiFont(9.0f, false));
+      g.drawFittedText("IN " + inTxt, studioInChipBounds.reduced(3, 0),
+                       juce::Justification::centred, 1, 0.8f);
+    }
+    if (!studioOutChipBounds.isEmpty()) {
+      g.setColour(t.sunken);
+      g.fillRoundedRectangle(studioOutChipBounds.toFloat(), 3.0f);
+      g.setColour(t.border);
+      g.drawRoundedRectangle(studioOutChipBounds.toFloat(), 3.0f, 1.0f);
+      juce::String outTxt = outputSelector.getText();
+      if (outTxt.isEmpty()) outTxt = "FOH";
+      if (outTxt.containsIgnoreCase("Main")) outTxt = "FOH";
+      g.setColour(t.foh);
+      g.setFont(BoutiqueLookAndFeel::uiFont(9.0f, true));
+      g.drawFittedText("OUT " + outTxt, studioOutChipBounds.reduced(3, 0),
+                       juce::Justification::centred, 1, 0.8f);
+    }
 
-  // Return strip static label in slot 3 area
-  if (isReturn) {
-    g.setColour(t.engrave);
-    g.setFont(t.isStudio() ? BoutiqueLookAndFeel::uiFont(11.0f, false)
-                           : BoutiqueLookAndFeel::condensedFont(10.5f, 0.06f));
-    auto vacantArea = slotBtns[2].getBounds();
-    if (!vacantArea.isEmpty())
-      g.drawFittedText(t.isStudio() ? "Aux return" : "AUX RETURN",
-                       vacantArea, juce::Justification::centred, 1, 0.80f);
+    // 3. Nameplate: Strip # badge, title, gear icon, key-range bar
+    if (!studioPlateBounds.isEmpty()) {
+      auto plateF = studioPlateBounds.toFloat();
+      Fanfare::ModalFrame::paintRecessedWell(g, plateF, 3.0f);
+      if (hasDistinctColor) {
+        if (isCustomColor) {
+          g.setColour(categoryCol.withAlpha(slot.isBypassed() ? 0.06f : 0.14f));
+          g.fillRoundedRectangle(plateF.reduced(1.0f), 2.5f);
+        }
+        g.setColour(slot.isBypassed() ? categoryCol.withAlpha(0.35f) : categoryCol);
+        g.fillRect(plateF.getX() + 1.0f, plateF.getY() + 2.0f, 2.5f, plateF.getHeight() - 4.0f);
+      }
+
+      // Strip number badge (click = focus)
+      if (!studioStripNumBounds.isEmpty()) {
+        g.setColour(isFocused ? t.accent.withAlpha(0.18f) : t.panelAlt);
+        g.fillRoundedRectangle(studioStripNumBounds.toFloat(), 3.0f);
+        g.setColour(isFocused ? t.accent : t.borderStrong);
+        g.drawRoundedRectangle(studioStripNumBounds.toFloat(), 3.0f, 1.0f);
+        g.setColour(isFocused ? t.accent : t.text);
+        g.setFont(BoutiqueLookAndFeel::monoFont(11.0f, true));
+        juce::String numStr = isReturn ? ("R" + juce::String(slotIndex - 99))
+                                       : (isMonitorIn ? "M" : juce::String(slotIndex + 1));
+        g.drawText(numStr, studioStripNumBounds, juce::Justification::centred, false);
+      }
+
+      // Gear setup button
+      if (!studioSetupBtnBounds.isEmpty()) {
+        g.setColour(t.panelAlt);
+        g.fillRoundedRectangle(studioSetupBtnBounds.toFloat(), 3.0f);
+        g.setColour(t.border);
+        g.drawRoundedRectangle(studioSetupBtnBounds.toFloat(), 3.0f, 1.0f);
+        g.setColour(t.textDim);
+        g.setFont(BoutiqueLookAndFeel::uiFont(11.0f, false));
+        g.drawText(juce::String::fromUTF8("\xe2\x9a\x99"), studioSetupBtnBounds,
+                   juce::Justification::centred, false);
+      }
+
+      // Strip title
+      juce::String title = slot.getName();
+      if (title.isEmpty()) title = "Slot " + juce::String(slotIndex + 1);
+      int titleLeft = studioStripNumBounds.isEmpty() ? (int)plateF.getX() + 5 : studioStripNumBounds.getRight() + 3;
+      int titleRight = studioSetupBtnBounds.isEmpty() ? (int)plateF.getRight() - 4 : studioSetupBtnBounds.getX() - 2;
+      g.setColour(slot.isBypassed() ? t.textDim : t.text);
+      g.setFont(BoutiqueLookAndFeel::uiFont(11.0f, true));
+      g.drawFittedText(title, titleLeft, (int)plateF.getY() + 3,
+                       juce::jmax(10, titleRight - titleLeft), 15,
+                       juce::Justification::centred, 1, 0.78f);
+
+      // Key-range bar with octave ticks + colored bands
+      if (!studioRangeBarBounds.isEmpty()) {
+        auto rb = studioRangeBarBounds.toFloat();
+        g.setColour(juce::Colour(0xFF101114));
+        g.fillRoundedRectangle(rb, 2.0f);
+        g.setColour(juce::Colour(0xFF2C2D31));
+        for (int n = 12; n < 127; n += 12) {
+          float tx = rb.getX() + (n / 127.0f) * rb.getWidth();
+          g.fillRect(tx, rb.getY(), 1.0f, rb.getHeight());
+        }
+        for (int i = 0; i < 3; ++i) {
+          if (getLayerDisplayName(i).isEmpty()) continue;
+          const auto &cs = slot.getChainSlotSettings(i);
+          if (!cs.enabled.load()) continue;
+          float l = (cs.lowNote.load() / 127.0f) * rb.getWidth();
+          float r = (cs.highNote.load() / 127.0f) * rb.getWidth();
+          float bw = juce::jmax(2.0f, r - l);
+          juce::Colour lc = getLayerColor(i);
+          float alpha = 0.50f + 0.50f * layerFlashAlpha[i];
+          g.setColour(lc.withAlpha(alpha));
+          g.fillRect(rb.getX() + l, rb.getY(), bw, rb.getHeight());
+          g.setColour(lc);
+          g.fillRect(rb.getX() + l, rb.getY(), 1.0f, rb.getHeight());
+          g.fillRect(rb.getX() + l + bw - 1.0f, rb.getY(), 1.0f, rb.getHeight());
+        }
+      }
+    }
+
+    // 4. Inline Layers Stack (LAYERS · 1–3) + selDetail when focused
+    if (!studioStackBounds.isEmpty()) {
+      auto sb = studioStackBounds.toFloat();
+      g.setColour(t.sunken);
+      g.fillRoundedRectangle(sb, 4.0f);
+      g.setColour(t.border);
+      g.drawRoundedRectangle(sb, 4.0f, 1.0f);
+
+      g.setColour(t.textFaint);
+      g.setFont(BoutiqueLookAndFeel::condensedFont(9.0f, 0.08f));
+      g.drawText(juce::String::fromUTF8("LAYERS \xc2\xb7 1\xe2\x80\x93" "3"),
+                 (int)sb.getX() + 5, (int)sb.getY() + 3, (int)sb.getWidth() - 10, 12,
+                 juce::Justification::centredLeft, false);
+
+      const bool showRangeCol = getWidth() >= 126;
+      for (int i = 0; i < 3; ++i) {
+        auto row = studioLayerRowBounds[i];
+        if (row.isEmpty()) continue;
+        const juce::String lName = getLayerDisplayName(i);
+        const bool empty = lName.isEmpty();
+        const auto &cs = slot.getChainSlotSettings(i);
+        const bool enabled = cs.enabled.load();
+        const bool isSel = (i == selectedLayer);
+
+        if (isSel && isFocused) {
+          g.setColour(t.panelAlt);
+          g.fillRoundedRectangle(row.toFloat(), 2.5f);
+          g.setColour(t.borderStrong);
+          g.drawRoundedRectangle(row.toFloat(), 2.5f, 1.0f);
+        }
+
+        // Layer index badge (1..3)
+        auto idBox = row.withWidth(14).reduced(0, 3);
+        g.setColour(t.panelAlt);
+        g.fillRoundedRectangle(idBox.toFloat(), 2.0f);
+        g.setColour(t.textFaint);
+        g.setFont(BoutiqueLookAndFeel::monoFont(8.5f, false));
+        g.drawText(juce::String(i + 1), idBox, juce::Justification::centred, false);
+
+        // Color dot
+        g.setColour(empty ? juce::Colour(0xFF3A3B3F) : getLayerColor(i));
+        g.fillEllipse((float)idBox.getRight() + 3.0f, (float)row.getCentreY() - 3.5f, 7.0f, 7.0f);
+
+        // Enable check box on far right
+        auto enBox = studioLayerEnableBounds[i];
+        if (!enBox.isEmpty()) {
+          g.setColour(t.panelAlt);
+          g.fillRoundedRectangle(enBox.toFloat(), 2.0f);
+          g.setColour(t.border);
+          g.drawRoundedRectangle(enBox.toFloat(), 2.0f, 1.0f);
+          if (!empty && enabled) {
+            g.setColour(t.foh);
+            g.setFont(BoutiqueLookAndFeel::uiFont(10.0f, true));
+            g.drawText(juce::String::fromUTF8("\xe2\x9c\x93"), enBox, juce::Justification::centred, false);
+          }
+        }
+
+        // E button (edit GUI)
+        auto edBox = studioLayerEditBounds[i];
+        if (!empty && !edBox.isEmpty()) {
+          g.setColour(t.panelAlt);
+          g.fillRoundedRectangle(edBox.toFloat(), 2.0f);
+          g.setColour(t.border);
+          g.drawRoundedRectangle(edBox.toFloat(), 2.0f, 1.0f);
+          g.setColour(t.textDim);
+          g.setFont(BoutiqueLookAndFeel::uiFont(9.0f, true));
+          g.drawText("E", edBox, juce::Justification::centred, false);
+        }
+
+        int nameLeft = idBox.getRight() + 13;
+        int nameRight = (!edBox.isEmpty() && !empty) ? edBox.getX() - 2
+                                                     : (!enBox.isEmpty() ? enBox.getX() - 2 : row.getRight() - 2);
+        if (showRangeCol && !empty) {
+          int rngW = 38;
+          auto rngRect = juce::Rectangle<int>(nameRight - rngW, row.getY(), rngW, row.getHeight());
+          g.setColour(t.textFaint);
+          g.setFont(BoutiqueLookAndFeel::monoFont(8.0f, false));
+          g.drawText(midiNoteName(cs.lowNote.load()) + "-" + midiNoteName(cs.highNote.load()),
+                     rngRect, juce::Justification::centredRight, false);
+          nameRight -= (rngW + 2);
+        }
+
+        auto nameRect = juce::Rectangle<int>(nameLeft, row.getY() + 2,
+                                             juce::jmax(10, nameRight - nameLeft), row.getHeight() - 4);
+        if (empty) {
+          g.setColour(t.borderStrong);
+          g.drawRoundedRectangle(nameRect.toFloat(), 2.0f, 0.8f);
+          g.setColour(t.accent);
+          g.setFont(BoutiqueLookAndFeel::uiFont(9.0f, false));
+          g.drawFittedText("+ Load instrument", nameRect.reduced(2, 0),
+                           juce::Justification::centredLeft, 1, 0.8f);
+        } else {
+          g.setColour(enabled ? t.textDim : t.textFaint);
+          g.setFont(BoutiqueLookAndFeel::uiFont(9.5f, false));
+          g.drawFittedText(lName, nameRect, juce::Justification::centredLeft, 1, 0.8f);
+        }
+      }
+
+      // Focused detail section (selDetail)
+      if (isFocused && !studioSelRangeBounds.isEmpty()) {
+        int divY = studioSelRangeBounds.getY() - 18;
+        g.setColour(t.border);
+        g.drawHorizontalLine(divY, sb.getX() + 4.0f, sb.getRight() - 4.0f);
+
+        const juce::String selName = getLayerDisplayName(selectedLayer);
+        juce::String hdr = "SEL L" + juce::String(selectedLayer + 1) +
+                           (selName.isNotEmpty() ? (" - " + selName) : " - EMPTY");
+        g.setColour(t.textFaint);
+        g.setFont(BoutiqueLookAndFeel::condensedFont(8.5f, 0.08f));
+        g.drawFittedText(hdr, (int)sb.getX() + 5, divY + 2, (int)sb.getWidth() - 56, 14,
+                         juce::Justification::centredLeft, 1, 0.8f);
+
+        // Interactive key-range bar with draggable handles
+        auto sr = studioSelRangeBounds.toFloat();
+        g.setColour(juce::Colour(0xFF101114));
+        g.fillRoundedRectangle(sr, 2.0f);
+        const auto &scs = slot.getChainSlotSettings(selectedLayer);
+        float l = (scs.lowNote.load() / 127.0f) * sr.getWidth();
+        float r = (scs.highNote.load() / 127.0f) * sr.getWidth();
+        float bw = juce::jmax(2.0f, r - l);
+        juce::Colour lc = getLayerColor(selectedLayer);
+        g.setColour(lc.withAlpha(0.45f));
+        g.fillRect(sr.getX() + l, sr.getY(), bw, sr.getHeight());
+        g.setColour(juce::Colour(0xFFE6E6E6).withAlpha(0.9f));
+        g.fillRoundedRectangle(sr.getX() + l - 2.0f, sr.getY() + 1.0f, 5.0f, sr.getHeight() - 2.0f, 1.0f);
+        g.fillRoundedRectangle(sr.getX() + r - 3.0f, sr.getY() + 1.0f, 5.0f, sr.getHeight() - 2.0f, 1.0f);
+
+        g.setColour(t.textFaint);
+        g.setFont(BoutiqueLookAndFeel::condensedFont(8.0f, 0.06f));
+        g.drawText("TRIM", (int)sb.getX() + 5, studioSelRangeBounds.getBottom() + 4, 28, 14,
+                   juce::Justification::centredLeft, false);
+      }
+    }
+  } else {
+    // --- FRONT PANEL (ORIGINAL) NAMEPLATE ---
+    auto nameplateRect = juce::Rectangle<float>(3.0f, 107.0f, bounds.getWidth() - 5.0f, 32.0f);
+    Fanfare::ModalFrame::paintRecessedWell(g, nameplateRect, 2.5f);
+
+    if (hasDistinctColor) {
+      if (isCustomColor) {
+        g.setColour(categoryCol.withAlpha(slot.isBypassed() ? 0.06f : 0.16f));
+        g.fillRoundedRectangle(nameplateRect.reduced(1.0f), 2.0f);
+      }
+      g.setColour(slot.isBypassed() ? categoryCol.withAlpha(0.35f) : categoryCol);
+      g.fillRect(nameplateRect.getX() + 1.0f, nameplateRect.getY() + 2.0f,
+                 3.0f, nameplateRect.getHeight() - 4.0f);
+    }
+
+    g.setColour(slot.isBypassed() ? t.textDim : t.text);
+    g.setFont(BoutiqueLookAndFeel::condensedFont(12.5f, 0.03f));
+    juce::String plateTitle = slot.getName();
+    if (!isReturn && !isMonitorIn)
+      plateTitle = juce::String(slotIndex + 1) + " " + plateTitle;
+    g.drawFittedText(plateTitle.toUpperCase(),
+                     (int)nameplateRect.getX() + 4, (int)nameplateRect.getY() + 2,
+                     (int)nameplateRect.getWidth() - 8, 16,
+                     juce::Justification::centred, 1, 0.78f);
+
+    if (isReturn) {
+      g.setColour(t.engrave);
+      g.setFont(BoutiqueLookAndFeel::condensedFont(10.5f, 0.06f));
+      auto vacantArea = slotBtns[2].getBounds();
+      if (!vacantArea.isEmpty())
+        g.drawFittedText("AUX RETURN", vacantArea, juce::Justification::centred, 1, 0.80f);
+    }
   }
 
   // Dedicated stereo segmented LED meter beside the fader
@@ -1138,6 +1730,18 @@ void RackSlotComponent::resized() {
     iemOffsetKnob.setVisible(false);
     noteRangeLabel.setVisible(false);
     collapseBtn.setVisible(false);
+    layerTrimSlider.setVisible(false);
+    layerChangeLinkBtn.setVisible(false);
+    keyboardRangeBtn.setVisible(false);
+    changeInstBtn.setVisible(false);
+    editLayerGuiBtn.setVisible(false);
+    faderTargetBtn.setVisible(false);
+    studioStackHeadBounds = {};
+    studioInChipBounds = {};
+    studioOutChipBounds = {};
+    studioPlateBounds = {};
+    studioStackBounds = {};
+    studioSelRangeBounds = {};
 
     if (isUnusedEmptyStrip()) {
       expandBtn.setVisible(false);
@@ -1180,15 +1784,15 @@ void RackSlotComponent::resized() {
   expandBtn.setVisible(false);
   collapsedMuteBtn.setVisible(false);
 
-  for (int i = 0; i < (isReturn ? 2 : 3); ++i) {
-    slotBtns[i].setVisible(true);
-    editGuiBtns[i].setVisible(true);
-  }
   const bool studio = ThemeManager::isStudio();
-  inputSelector.setVisible(true);
-  outputSelector.setVisible(!isReturn);
+  for (int i = 0; i < (isReturn ? 2 : 3); ++i) {
+    slotBtns[i].setVisible(!studio);
+    editGuiBtns[i].setVisible(!studio);
+  }
+  inputSelector.setVisible(!studio);
+  outputSelector.setVisible(!studio && !isReturn);
   bypassButton.setVisible(true);
-  fohRoutingBtn.setVisible(!isMonitorIn);
+  fohRoutingBtn.setVisible(true);
   iemRoutingBtn.setVisible(true);
   channelSlider.setVisible(true);
   ccButton.setVisible(!isReturn);
@@ -1206,6 +1810,14 @@ void RackSlotComponent::resized() {
   iemSlider.setVisible(false);
   midiLed.setVisible(true);
 
+  const bool showFocusDetail = studio && isFocused && !isReturn && !isMonitorIn;
+  layerTrimSlider.setVisible(showFocusDetail);
+  layerChangeLinkBtn.setVisible(showFocusDetail);
+  keyboardRangeBtn.setVisible(showFocusDetail);
+  changeInstBtn.setVisible(showFocusDetail);
+  editLayerGuiBtn.setVisible(showFocusDetail);
+  faderTargetBtn.setVisible(studio);
+
   const bool showMp3Badge =
       kMp3DecksEnabled && !isReturn && !isMonitorIn && slot.getMp3Player().hasAnyTracks();
   mp3BadgeBtn.setCompact(false);
@@ -1214,6 +1826,158 @@ void RackSlotComponent::resized() {
   auto bounds = getLocalBounds();
   bounds.removeFromTop(5); // clear 3px top tape + bevel
 
+  if (studio) {
+    auto inner = bounds.reduced(4, 0);
+
+    // 1. Stack Head (22px)
+    studioStackHeadBounds = inner.removeFromTop(20);
+    collapseBtn.setVisible(!isReturn);
+    if (!isReturn) {
+      collapseBtn.setBounds(studioStackHeadBounds.getRight() - 18,
+                            studioStackHeadBounds.getY() + 1, 18, 18);
+      collapseBtn.toFront(true);
+      midiLed.setBounds(collapseBtn.getX() - 12,
+                        studioStackHeadBounds.getCentreY() - 4, 8, 8);
+    } else {
+      midiLed.setBounds(studioStackHeadBounds.getRight() - 10,
+                        studioStackHeadBounds.getCentreY() - 4, 8, 8);
+    }
+    inner.removeFromTop(2);
+
+    // 2. I/O Chips (20px)
+    auto ioRow = inner.removeFromTop(18);
+    if (!isReturn) {
+      int half = (ioRow.getWidth() - 3) / 2;
+      studioInChipBounds = ioRow.removeFromLeft(half);
+      ioRow.removeFromLeft(3);
+      studioOutChipBounds = ioRow;
+    } else {
+      studioInChipBounds = ioRow;
+      studioOutChipBounds = {};
+    }
+    inner.removeFromTop(4);
+
+    // 3. Nameplate (52px for normal strips, 36px for return)
+    studioPlateBounds = inner.removeFromTop(isReturn ? 36 : 52);
+    int numSz = (getWidth() < 120) ? 18 : 22;
+    studioStripNumBounds = juce::Rectangle<int>(
+        studioPlateBounds.getX() + 4, studioPlateBounds.getY() + 4, numSz, numSz);
+    studioSetupBtnBounds = juce::Rectangle<int>(
+        studioPlateBounds.getRight() - 20, studioPlateBounds.getY() + 3, 17, 17);
+    if (!isReturn) {
+      int rbLeft = studioStripNumBounds.getRight() + 4;
+      int rbRight = studioPlateBounds.getRight() - 4;
+      studioRangeBarBounds = juce::Rectangle<int>(
+          rbLeft, studioPlateBounds.getY() + 21,
+          juce::jmax(16, rbRight - rbLeft), 11);
+      noteRangeLabel.setBounds(rbLeft, studioPlateBounds.getY() + 34,
+                               juce::jmax(16, rbRight - rbLeft), 14);
+    } else {
+      studioRangeBarBounds = {};
+    }
+    inner.removeFromTop(4);
+
+    // 4. Bottom MUTE / FOH / IEM (64px) + ctrlRow (20px)
+    auto buttonArea = bounds.removeFromBottom(64);
+    const int btnHeight = 21;
+    bypassButton.setBounds(buttonArea.removeFromTop(btnHeight).reduced(3, 1));
+    fohRoutingBtn.setBounds(buttonArea.removeFromTop(btnHeight).reduced(3, 1));
+    iemRoutingBtn.setBounds(buttonArea.removeFromTop(btnHeight).reduced(3, 1));
+
+    auto ctrlRow = bounds.removeFromBottom(20);
+    if (!isReturn) {
+      if (isMonitorIn) {
+        int colWidth = ctrlRow.getWidth() / 3;
+        ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(2, 1));
+        noteRangeButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
+        stripMenuBtn.setBounds(ctrlRow.reduced(2, 1));
+      } else {
+        int colWidth = ctrlRow.getWidth() / 4;
+        ccButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(2, 1));
+        customizeButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
+        noteRangeButton.setBounds(ctrlRow.removeFromLeft(colWidth).reduced(1, 1));
+        stripMenuBtn.setBounds(ctrlRow.reduced(2, 1));
+      }
+    }
+    bounds.removeFromBottom(3);
+
+    // Synchronize inner bounds bottom with bounds bottom
+    inner = inner.withBottom(bounds.getBottom());
+
+    // 5. Inline Layers Stack (LAYERS · 1–3)
+    if (!isReturn && !isMonitorIn) {
+      const int stackH = isFocused ? 228 : 88;
+      studioStackBounds = inner.removeFromBottom(juce::jmin(stackH, juce::jmax(88, inner.getHeight() - 80)));
+      auto sb = studioStackBounds.reduced(4, 3);
+      sb.removeFromTop(14); // "LAYERS · 1–3" header
+      for (int i = 0; i < 3; ++i) {
+        studioLayerRowBounds[i] = sb.removeFromTop(22);
+        auto r = studioLayerRowBounds[i];
+        studioLayerEnableBounds[i] = r.removeFromRight(16).reduced(0, 3);
+        r.removeFromRight(2);
+        studioLayerEditBounds[i] = r.removeFromRight(18).reduced(0, 3);
+      }
+      if (isFocused) {
+        sb.removeFromTop(4);
+        auto hdrRow = sb.removeFromTop(14);
+        layerChangeLinkBtn.setBounds(hdrRow.removeFromRight(52));
+        sb.removeFromTop(2);
+        studioSelRangeBounds = sb.removeFromTop(20);
+        sb.removeFromTop(3);
+        auto trimRow = sb.removeFromTop(18);
+        trimRow.removeFromLeft(30); // "TRIM" label
+        layerTrimSlider.setBounds(trimRow);
+        sb.removeFromTop(3);
+        auto row1 = sb.removeFromTop(22);
+        keyboardRangeBtn.setBounds(row1);
+        int half = (row1.getWidth() - 4) / 2;
+        sb.removeFromTop(3);
+        auto row2 = sb.removeFromTop(22);
+        changeInstBtn.setBounds(row2.removeFromLeft(half));
+        row2.removeFromLeft(4);
+        editLayerGuiBtn.setBounds(row2);
+        syncFocusedLayerControls();
+      } else {
+        studioSelRangeBounds = {};
+      }
+      inner.removeFromBottom(4);
+    } else {
+      studioStackBounds = {};
+      studioSelRangeBounds = {};
+      for (int i = 0; i < 3; ++i) {
+        studioLayerRowBounds[i] = {};
+        studioLayerEditBounds[i] = {};
+        studioLayerEnableBounds[i] = {};
+      }
+    }
+
+    // 6. Fader & Meter in remaining middle area
+    auto faderArea = inner.reduced(2, 2);
+    if (showMp3Badge) {
+      mp3BadgeBtn.setBounds(faderArea.removeFromTop(21).reduced(2, 0));
+      faderArea.removeFromTop(3);
+    }
+    if (isAccordion) {
+      int knobSize = 38;
+      iemOffsetKnob.setBounds(faderArea.getCentreX() - knobSize / 2, faderArea.getY(),
+                              knobSize, knobSize);
+      faderArea.removeFromTop(knobSize + 4);
+    }
+    auto targetRow = faderArea.removeFromTop(17);
+    faderTargetBtn.setBounds(targetRow.withSizeKeepingCentre(44, 16));
+    faderArea.removeFromTop(2);
+    auto faderBox = faderArea.reduced(0, 4);
+    int meterW = 10;
+    int faderW = 26;
+    int pairW = faderW + 6 + meterW;
+    int pairX = faderBox.getCentreX() - pairW / 2;
+    channelSlider.setBounds(pairX, faderBox.getY(), faderW, faderBox.getHeight());
+    cachedMeterArea = juce::Rectangle<int>(pairX + faderW + 6, faderBox.getY() + 2,
+                                           meterW, juce::jmax(16, faderBox.getHeight() - 4));
+    return;
+  }
+
+  // --- FRONT PANEL (ORIGINAL) LAYOUT ---
   // Top area: 3 plugin rows + input selector + output selector (y = 5..105)
   auto topArea = bounds.removeFromTop(100);
   for (int i = 0; i < 3; ++i) {
@@ -1384,7 +2148,8 @@ juce::Rectangle<int> RackSlotComponent::getNoteRangeButtonBounds() {
 }
 
 void RackSlotComponent::mouseDoubleClick(const juce::MouseEvent &e) {
-  if (!isCollapsed && e.y >= 105 && e.y <= 140) {
+  if (!isCollapsed && (studioPlateBounds.contains(e.getPosition()) ||
+                       (!ThemeManager::isStudio() && e.y >= 105 && e.y <= 140))) {
     showRenameDialog();
     return;
   }
@@ -1468,6 +2233,55 @@ void RackSlotComponent::mouseDown(const juce::MouseEvent &e) {
   }
   if (e.eventComponent == this && e.y <= 8) {
     showColorPalette();
+    return;
+  }
+
+  if (ThemeManager::isStudio() && e.eventComponent == this) {
+    const auto pos = e.getPosition();
+    if (studioStripNumBounds.contains(pos)) {
+      if (onFocusRequested) onFocusRequested();
+      return;
+    }
+    if (studioSetupBtnBounds.contains(pos)) {
+      showChannelSetupDrawer(this);
+      return;
+    }
+    if (studioInChipBounds.contains(pos)) {
+      inputSelector.showPopup();
+      return;
+    }
+    if (!isReturn && studioOutChipBounds.contains(pos)) {
+      outputSelector.showPopup();
+      return;
+    }
+    if (isFocused && !studioSelRangeBounds.isEmpty() &&
+        studioSelRangeBounds.expanded(4, 2).contains(pos)) {
+      const auto &cs = slot.getChainSlotSettings(selectedLayer);
+      float w = (float)studioSelRangeBounds.getWidth();
+      float lx = studioSelRangeBounds.getX() + (cs.lowNote.load() / 127.0f) * w;
+      float hx = studioSelRangeBounds.getX() + (cs.highNote.load() / 127.0f) * w;
+      draggingRangeHandle = (std::abs(pos.x - lx) <= std::abs(pos.x - hx)) ? 1 : 2;
+      return;
+    }
+    for (int i = 0; i < 3; ++i) {
+      if (!studioLayerRowBounds[i].contains(pos)) continue;
+      const bool empty = getLayerDisplayName(i).isEmpty();
+      if (!empty && studioLayerEditBounds[i].contains(pos)) {
+        if (onOpenEditor) onOpenEditor(i);
+        return;
+      }
+      if (!empty && studioLayerEnableBounds[i].contains(pos)) {
+        auto &cs = slot.getChainSlotSettings(i);
+        cs.enabled.store(!cs.enabled.load());
+        repaint();
+        return;
+      }
+      selectedLayer = i;
+      syncFocusedLayerControls();
+      if (onFocusRequested) onFocusRequested();
+      if (empty && onShowPluginMenu) onShowPluginMenu(i);
+      return;
+    }
   }
 }
 
@@ -1475,13 +2289,25 @@ void RackSlotComponent::mouseDrag(const juce::MouseEvent &e) {
   if (isDraggingRightEdge) {
     if (onDragWidth)
       onDragWidth(e.getDistanceFromDragStartX());
+    return;
+  }
+  if (draggingRangeHandle != 0 && !studioSelRangeBounds.isEmpty()) {
+    float norm = juce::jlimit(0.0f, 1.0f,
+        (float)(e.x - studioSelRangeBounds.getX()) / (float)studioSelRangeBounds.getWidth());
+    int note = juce::jlimit(0, 127, (int)std::round(norm * 127.0f));
+    auto &cs = slot.getChainSlotSettings(selectedLayer);
+    if (draggingRangeHandle == 1)
+      cs.lowNote.store(juce::jmin(note, cs.highNote.load()));
+    else
+      cs.highNote.store(juce::jmax(note, cs.lowNote.load()));
+    repaint();
   }
 }
 
 void RackSlotComponent::mouseUp(const juce::MouseEvent &) {
-  if (isDraggingRightEdge) {
+  if (isDraggingRightEdge)
     isDraggingRightEdge = false;
-  }
+  draggingRangeHandle = 0;
 }
 
 void RackSlotComponent::showButtonHelpPopup(juce::Component *src) {
@@ -1900,4 +2726,69 @@ void RackSlotComponent::updateOutputSelector() {
 
   int target = slot.getOutputTarget();
   outputSelector.setSelectedId(target + 2, juce::dontSendNotification);
+}
+
+void RackSlotComponent::setFocused(bool shouldFocus) {
+  if (isFocused == shouldFocus)
+    return;
+  isFocused = shouldFocus;
+  if (isFocused)
+    syncFocusedLayerControls();
+  resized();
+  repaint();
+}
+
+void RackSlotComponent::setSelectedLayer(int layerIdx) {
+  selectedLayer = juce::jlimit(0, 2, layerIdx);
+  syncFocusedLayerControls();
+  repaint();
+}
+
+void RackSlotComponent::syncFocusedLayerControls() {
+  const auto &cs = slot.getChainSlotSettings(selectedLayer);
+  layerTrimSlider.setValue(cs.level.load(), juce::dontSendNotification);
+  const bool empty = getLayerDisplayName(selectedLayer).isEmpty();
+  layerChangeLinkBtn.setButtonText(empty ? "LOAD" : "CHANGE");
+  changeInstBtn.setButtonText(empty ? "Load..." : "Change...");
+  editLayerGuiBtn.setButtonText("Edit L" + juce::String(selectedLayer + 1) + " GUI");
+  editLayerGuiBtn.setEnabled(!empty);
+}
+
+juce::Colour RackSlotComponent::getLayerColor(int layerIdx) const {
+  const auto &t = ThemeManager::getInstance().active();
+  switch (juce::jlimit(0, 2, layerIdx)) {
+    case 0: return t.catKeyboard;
+    case 1: return t.accent;
+    default: return t.foh;
+  }
+}
+
+juce::String RackSlotComponent::getLayerDisplayName(int layerIdx) const {
+  if (layerIdx < 0 || layerIdx >= 3)
+    return {};
+  juce::String nm = slot.getPluginName(layerIdx);
+  if (nm.isEmpty() && slot.isChainSlotMidiOut(layerIdx))
+    nm = "MIDI: " + slot.getChainSlotMidiOutName(layerIdx);
+  return nm;
+}
+
+void RackSlotComponent::showChannelSetupDrawer(juce::Component *anchor) {
+  juce::Component::SafePointer<RackSlotComponent> safeThis(this);
+  auto comp = std::make_unique<ChannelSetupDrawerComp>(
+      slot, slotIndex, inputSelector, outputSelector, isReturn,
+      [safeThis] {
+        if (safeThis && safeThis->onShowChannelStrip)
+          safeThis->onShowChannelStrip();
+      },
+      [safeThis] {
+        if (safeThis) {
+          safeThis->syncFocusedLayerControls();
+          safeThis->repaint();
+        }
+      });
+  auto anchorRect = studioSetupBtnBounds.isEmpty()
+                        ? getScreenBounds()
+                        : localAreaToGlobal(studioSetupBtnBounds);
+  juce::CallOutBox::launchAsynchronously(std::move(comp), anchorRect,
+                                         anchor ? anchor->getTopLevelComponent() : nullptr);
 }
