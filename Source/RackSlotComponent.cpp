@@ -281,7 +281,8 @@ public:
         openDynCb(std::move(onOpenDyn)), changedCb(std::move(onChanged)) {
     const auto &t = ThemeManager::getInstance().active();
 
-    titleLbl.setText("CHANNEL SETUP - STRIP " + juce::String(slotIdx + 1),
+    titleLbl.setText("CHANNEL SETUP - STRIP " +
+                         (slotIdx == 0 ? juce::String("M") : juce::String(slotIdx)),
                      juce::dontSendNotification);
     titleLbl.setFont(BoutiqueLookAndFeel::condensedFont(12.0f, 0.08f));
     titleLbl.setColour(juce::Label::textColourId, t.textDim);
@@ -1314,7 +1315,7 @@ void RackSlotComponent::paint(juce::Graphics &g) {
       if (nameText.isEmpty()) nameText = "Slot " + juce::String(slotIndex + 1);
       juce::String label = (isReturn || isMonitorIn)
                                ? nameText
-                               : (juce::String(slotIndex + 1) + ". " + nameText);
+                               : (juce::String(slotIndex) + ". " + nameText);
       if (slot.isBypassed() && !t.isStudio()) label += " [MUTED]";
 
       g.setColour(slot.isBypassed() ? t.textDim : t.text);
@@ -1453,7 +1454,7 @@ void RackSlotComponent::paint(juce::Graphics &g) {
         g.setColour(isFocused ? t.accent : t.text);
         g.setFont(BoutiqueLookAndFeel::monoFont(11.0f, true));
         juce::String numStr = isReturn ? ("R" + juce::String(slotIndex - 99))
-                                       : (isMonitorIn ? "M" : juce::String(slotIndex + 1));
+                                       : (isMonitorIn ? "M" : juce::String(slotIndex));
         g.drawText(numStr, studioStripNumBounds, juce::Justification::centred, false);
       }
 
@@ -1660,7 +1661,7 @@ void RackSlotComponent::paint(juce::Graphics &g) {
     g.setFont(BoutiqueLookAndFeel::condensedFont(12.5f, 0.03f));
     juce::String plateTitle = slot.getName();
     if (!isReturn && !isMonitorIn)
-      plateTitle = juce::String(slotIndex + 1) + " " + plateTitle;
+      plateTitle = juce::String(slotIndex) + " " + plateTitle;
     g.drawFittedText(plateTitle.toUpperCase(),
                      (int)nameplateRect.getX() + 4, (int)nameplateRect.getY() + 2,
                      (int)nameplateRect.getWidth() - 8, 16,

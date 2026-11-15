@@ -601,7 +601,7 @@ void MainComponent::StripRulerBar::paint(juce::Graphics &g) {
   };
 
   for (int i = 1; i < owner->rackSlotComponents.size(); ++i)
-    drawChip(owner->rackSlotComponents[i], i, juce::String(i + 1));
+    drawChip(owner->rackSlotComponents[i], i, juce::String(i));
   if (owner->rackSlotComponents.size() > 0)
     drawChip(owner->rackSlotComponents[0], 0, "M");
 }
