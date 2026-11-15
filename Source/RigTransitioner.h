@@ -200,8 +200,10 @@ public:
         logToFile("TRACE: RigTransitioner dispatching applyRig to main thread.");
         auto sharedRig = std::make_shared<juce::var>(std::move(loaded.rig));
         auto doneEvent = std::make_shared<juce::WaitableEvent>();
-        juce::MessageManager::getInstance()->callAsync([st, sharedRig, doneEvent]() {
-            if (st->alive->load(std::memory_order_acquire) &&
+        auto cancelledFlag = std::make_shared<std::atomic<bool>>(false);
+        juce::MessageManager::getInstance()->callAsync([st, sharedRig, doneEvent, cancelledFlag]() {
+            if (!cancelledFlag->load(std::memory_order_acquire) &&
+                st->alive->load(std::memory_order_acquire) &&
                 (!st->engineAlive || st->engineAlive->load(std::memory_order_acquire))) {
                 logToFile("TRACE: RigTransitioner applying rig on main thread.");
                 st->engine->applyRig(*sharedRig);
@@ -211,13 +213,20 @@ public:
         bool applied = false;
         for (int w = 0; w < 600; ++w) {
             if (doneEvent->wait(200)) { applied = true; break; }
-            if (threadShouldExit() || !st->alive->load(std::memory_order_acquire)) break;
+            if (threadShouldExit() || !st->alive->load(std::memory_order_acquire)) {
+                cancelledFlag->store(true, std::memory_order_release);
+                break;
+            }
         }
         if (!applied) {
-            if (threadShouldExit() || !st->alive->load(std::memory_order_acquire))
-                return;
-            logToFile("ERROR: applyRig timed out (120s)");
+            cancelledFlag->store(true, std::memory_order_release);
             eng.clearStagingCache();
+            if (threadShouldExit() || !st->alive->load(std::memory_order_acquire)) {
+                logToFile("TRACE: RigTransitioner apply cancelled.");
+                postComplete(st, false, "Cancelled", 0, {});
+                return;
+            }
+            logToFile("ERROR: applyRig timed out (120s)");
             postComplete(st, false, "Apply timed out (120s) - possible plugin hang", 0, {});
             return;
         }

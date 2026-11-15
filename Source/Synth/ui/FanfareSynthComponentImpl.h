@@ -709,8 +709,10 @@ private:
   }
 
   void promptSaveUserPreset() {
-    if (compareActive)
+    if (compareActive) {
+      header.compareBtn.setToggleState(false, juce::dontSendNotification);
       toggleCompareMode();
+    }
 
     juce::Component::SafePointer<FanfareSynthComponent> safeThis(this);
     auto *w = new juce::AlertWindow(

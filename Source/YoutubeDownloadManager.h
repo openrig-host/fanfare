@@ -45,6 +45,33 @@ public:
       if (ch <= 0x20 || ch == 0x7f)
         return false;
     }
+
+    // SSRF protection: reject localhost, loopback, link-local, private RFC1918, and cloud metadata addresses
+    juce::URL parsed(u);
+    juce::String host = parsed.getDomain().toLowerCase();
+    if (host.isEmpty())
+      return false;
+    if (host == "localhost" || host.endsWith(".localhost") || host == "127.0.0.1" ||
+        host.startsWith("127.") || host == "::1" || host == "[::1]" || host.contains("::"))
+      return false;
+    if (host.startsWith("10.") || host.startsWith("192.168.") ||
+        host.startsWith("169.254.") || host.startsWith("0."))
+      return false;
+    if (host.startsWith("172.")) {
+      int secondDot = host.indexOfChar(4, '.');
+      if (secondDot > 4) {
+        int octet2 = host.substring(4, secondDot).getIntValue();
+        if (octet2 >= 16 && octet2 <= 31)
+          return false;
+      }
+    }
+    juce::IPAddress ip(host);
+    if (!ip.isNull()) {
+      const uint8_t a = ip.address[0];
+      const uint8_t b = ip.address[1];
+      if (a == 0 || a == 127 || a == 10 || (a == 169 && b == 254) || (a == 192 && b == 168) || (a == 172 && b >= 16 && b <= 31))
+        return false;
+    }
     return true;
   }
 
@@ -524,7 +551,7 @@ private:
       }
     }
     juce::File newestFile =
-        newestNewFile.existsAsFile() ? newestNewFile : newestAnyFile;
+        newestNewFile.existsAsFile() ? newestNewFile : juce::File();
 
     bool success = (!cancelled && exitCode == 0 && newestFile.existsAsFile());
     if (success) {

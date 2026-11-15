@@ -945,7 +945,7 @@ public:
     panicBtn.setTooltip("Silence all held organ notes");
     panicBtn.onClick = [this] {
       releaseAll();
-      proc.allNotesOff();
+      proc.requestPanic();
       repaint();
     };
     addAndMakeVisible(panicBtn);

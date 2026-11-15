@@ -110,7 +110,7 @@ public:
     wheels.panic();
   }
 
-  void allNotesOff() { panicNow(); }
+  void allNotesOff() { requestPanic(); }
   void requestPanic() { panicPending.store(true, std::memory_order_release); }
   void allNotesOffPendingFlag() { allNotesOffPending.store(true, std::memory_order_release); }
 
@@ -263,6 +263,7 @@ public:
   void setLeslieMode(int v)   {
     const int m = juce::jlimit(0, 2, v);
     leslieMode.store(m);
+    uiLeslieModePending.store(m, std::memory_order_release);
     uiModWheelPending.store(m == 2 ? 127 : (m == 1 ? 64 : 0), std::memory_order_release);
     presetDirty.store(true);
     paramsDirty.store(true);
@@ -585,6 +586,7 @@ private:
   std::atomic<bool> paramsDirty{false};
   std::atomic<bool> panicPending{false};
   std::atomic<bool> allNotesOffPending{false};
+  std::atomic<int> uiLeslieModePending{-1};
   std::atomic<int> uiModWheelPending{-1};
   std::atomic<int> uiPitchBendPending{-1};
   std::atomic<float> peakL{0.0f}, peakR{0.0f};
@@ -961,9 +963,16 @@ inline void B3OrganProcessor::processBlock(juce::AudioBuffer<float> &buffer,
   if (!midiMessages.isEmpty())
     mergedMidi.addEvents(midiMessages, 0, -1, 0);
 
+  // Consume explicit UI Leslie mode selection (Slow=0, Brake=1, Fast=2)
+  const int plm = uiLeslieModePending.exchange(-1, std::memory_order_acq_rel);
+  if (plm >= 0) {
+    leslieMode.store(plm, std::memory_order_relaxed);
+    leslie.setMode(plm);
+  }
+
   // Consume UI mod wheel pending
   const int pmw = uiModWheelPending.exchange(-1, std::memory_order_acq_rel);
-  if (pmw >= 0) {
+  if (pmw >= 0 && plm < 0) {
     const int mode = pmw >= 64 ? B3::Leslie122::Fast : B3::Leslie122::Slow;
     leslieMode.store(mode, std::memory_order_relaxed);
     leslie.setMode(mode);

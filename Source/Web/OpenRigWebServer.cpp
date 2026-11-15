@@ -397,8 +397,15 @@ WebServer::WebServer(FanfareEngine& eng, MainComponent* mc)
     // nobody is watching.
     mirrorCapture = std::make_unique<PluginMirrorCapture>();
     mirrorStreamer = std::make_unique<PluginMirrorStreamer>(*mirrorCapture);
-    mirrorStreamer->setAudienceProbe([this]() { return hasMirrorSubscribers(); });
-    mirrorStreamer->setFrameSink([this](const std::vector<uint8_t>& jpeg) {
+    auto life = lifetime;
+    mirrorStreamer->setAudienceProbe([this, life]() {
+        if (!life || !life->alive.load(std::memory_order_acquire))
+            return false;
+        return hasMirrorSubscribers();
+    });
+    mirrorStreamer->setFrameSink([this, life](const std::vector<uint8_t>& jpeg) {
+        if (!life || !life->alive.load(std::memory_order_acquire))
+            return;
         broadcastBinaryToMirrorSubscribers(jpeg.data(), jpeg.size());
     });
 }
@@ -862,13 +869,12 @@ void WebServer::handleWebSocketSession(void* socketHandle) {
                 break;
             } else if (opcode == 0x9) { // Ping -> echo Pong with payload (capped <= 125 per RFC 6455)
                 const size_t pongLen = std::min<size_t>(payload.size(), 125);
-                uint8_t pongFrame[127];
-                pongFrame[0] = 0x8A;
-                pongFrame[1] = static_cast<uint8_t>(pongLen);
+                std::vector<uint8_t> pongVec(2 + pongLen);
+                pongVec[0] = 0x8A;
+                pongVec[1] = static_cast<uint8_t>(pongLen);
                 if (pongLen > 0)
-                    std::memcpy(pongFrame + 2, payload.data(), pongLen);
-                if (!sendAll(sock, pongFrame, 2 + pongLen))
-                    break;
+                    std::memcpy(pongVec.data() + 2, payload.data(), pongLen);
+                enqueueWsFrame(std::move(pongVec), socketHandle, false, false);
                 continue;
             } else if (opcode == 0x1) { // Text frame
                 juce::String textMsg = juce::String::fromUTF8((const char*)payload.data(), (int)payload.size());
@@ -951,18 +957,24 @@ void WebServer::wsOutboundLoop() {
         if (item.frame.empty())
             continue;
 
-        std::lock_guard<std::mutex> lock(clientSocketsMutex);
-        if (item.singleClient != nullptr) {
-            if (activeWsClients.count(item.singleClient) != 0) {
-                SocketType cs = (SocketType)(uintptr_t)item.singleClient;
-                sendAll(cs, item.frame.data(), item.frame.size());
+        std::vector<SocketType> targetsToSend;
+        {
+            std::lock_guard<std::mutex> lock(clientSocketsMutex);
+            if (item.singleClient != nullptr) {
+                if (activeWsClients.count(item.singleClient) != 0) {
+                    targetsToSend.push_back((SocketType)(uintptr_t)item.singleClient);
+                }
+            } else {
+                const auto& targets = item.mirrorOnly ? mirrorSubscribers : activeWsClients;
+                targetsToSend.reserve(targets.size());
+                for (void* client : targets) {
+                    targetsToSend.push_back((SocketType)(uintptr_t)client);
+                }
             }
-        } else {
-            const auto& targets = item.mirrorOnly ? mirrorSubscribers : activeWsClients;
-            for (void* client : targets) {
-                SocketType cs = (SocketType)(uintptr_t)client;
-                sendAll(cs, item.frame.data(), item.frame.size());
-            }
+        }
+
+        for (SocketType cs : targetsToSend) {
+            sendAll(cs, item.frame.data(), item.frame.size());
         }
     }
 }
@@ -1349,8 +1361,11 @@ bool WebServer::startPluginMirror(int targetFps, float jpegQuality) {
 }
 
 void WebServer::stopPluginMirror() {
-    if (mirrorStreamer != nullptr)
+    if (mirrorStreamer != nullptr) {
+        mirrorStreamer->setFrameSink(nullptr);
+        mirrorStreamer->setAudienceProbe(nullptr);
         mirrorStreamer->stop();
+    }
     std::lock_guard<std::mutex> lock(clientSocketsMutex);
     mirrorSubscribers.clear();
     mirrorSubscriberCount.store(0, std::memory_order_release);
@@ -1955,11 +1970,13 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
         }
     }
 
-    // Strict traversal & absolute-path rejection (C1 + M6)
+    // Strict traversal & absolute-path rejection (C1 + M6 + CRLF guard)
     if (cleanPath.contains("..")
         || cleanPath.containsChar(':')
         || cleanPath.containsChar('\\')
         || cleanPath.containsChar('\0')
+        || cleanPath.containsChar('\r')
+        || cleanPath.containsChar('\n')
         || cleanPath.startsWith("//")
         || !cleanPath.startsWithChar('/')) {
         sendHttpResponse(socketHandle, 404, "text/plain", "404 Not Found");

@@ -867,8 +867,6 @@ void importRigFromJson(const juce::String &json) {
     toReap.swap(pendingReapPlugins);
     for (auto &p : toReap) {
       if (p) {
-        if (onBeforePluginDestroyed)
-          onBeforePluginDestroyed(p.get());
         FanfareLog::safeExecutePluginCall([&]() {
           p->releaseResources();
           p.reset();

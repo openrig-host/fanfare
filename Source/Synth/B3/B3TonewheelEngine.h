@@ -543,13 +543,8 @@ private:
     int w = note + kDrawbarSemitones[drawbarIdx] - 24;
     while (w >= kNumWheels)
       w -= 12;
-    if (note >= 36) {
-      while (w < 12)
-        w += 12;
-    } else {
-      while (w < 0)
-        w += 12;
-    }
+    while (w < 0)
+      w += 12;
     return (w >= 0 && w < kNumWheels) ? w : -1;
   }
 

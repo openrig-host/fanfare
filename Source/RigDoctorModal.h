@@ -85,6 +85,7 @@ public:
         bool base64Valid = true;
         bool enabledInRig = true;
         bool fileExists = false;
+        bool isBuiltin = false;
         bool requiresMessageThread = false;
         bool sessionPoisoned = false;
         juce::String diffTag; // e.g. "+NEW vs .bak", "REPLACED vs .bak", "PATCH EDITED vs .bak"
@@ -331,9 +332,20 @@ public:
                 // Check sampler & strip IR external files
                 auto samplerObj = ch.getProperty("sampler", juce::var());
                 if (samplerObj.isObject()) {
-                    juce::String wavPath = samplerObj.getProperty("filePath", "").toString();
-                    if (wavPath.isNotEmpty() && !juce::File(wavPath).existsAsFile())
-                        missingMediaSummary.add("Strip " + juce::String(i + 1) + " Sampler WAV missing: " + wavPath);
+                    if (auto* slots = samplerObj.getProperty("slots", juce::var()).getArray()) {
+                        for (int sIdx = 0; sIdx < slots->size(); ++sIdx) {
+                            const auto& slo = slots->getReference(sIdx);
+                            if (slo.isObject()) {
+                                juce::String wavPath = slo.getProperty("wavPath", "").toString();
+                                if (wavPath.isNotEmpty() && !juce::File(wavPath).existsAsFile())
+                                    missingMediaSummary.add("Strip " + juce::String(i + 1) + " Sampler Slot " + juce::String(sIdx + 1) + " WAV missing: " + wavPath);
+                            }
+                        }
+                    } else {
+                        juce::String wavPath = samplerObj.getProperty("filePath", "").toString();
+                        if (wavPath.isNotEmpty() && !juce::File(wavPath).existsAsFile())
+                            missingMediaSummary.add("Strip " + juce::String(i + 1) + " Sampler WAV missing: " + wavPath);
+                    }
                 }
                 auto stripObj = ch.getProperty("strip", juce::var());
                 if (stripObj.isObject()) {
@@ -362,7 +374,8 @@ public:
             }
         }
 
-        if (auto* foh = rig.getProperty("fohChain", juce::var()).getArray()) {
+        auto fohVar = rig.hasProperty("fohFx") ? rig.getProperty("fohFx", juce::var()) : rig.getProperty("fohChain", juce::var());
+        if (auto* foh = fohVar.getArray()) {
             for (int c = 0; c < foh->size(); ++c) {
                 const auto& pv = foh->getReference(c);
                 if (!pv.isObject())
@@ -374,7 +387,8 @@ public:
             }
         }
 
-        if (auto* iem = rig.getProperty("iemChain", juce::var()).getArray()) {
+        auto iemVar = rig.hasProperty("iemFx") ? rig.getProperty("iemFx", juce::var()) : rig.getProperty("iemChain", juce::var());
+        if (auto* iem = iemVar.getArray()) {
             for (int c = 0; c < iem->size(); ++c) {
                 const auto& pv = iem->getReference(c);
                 if (!pv.isObject())
@@ -404,9 +418,11 @@ public:
 
         auto mp3Obj = rig.getProperty("mp3Player", juce::var());
         if (mp3Obj.isObject()) {
-            if (auto* playlist = mp3Obj.getProperty("playlist", juce::var()).getArray()) {
+            auto tracksVar = mp3Obj.hasProperty("tracks") ? mp3Obj.getProperty("tracks", juce::var()) : mp3Obj.getProperty("playlist", juce::var());
+            if (auto* playlist = tracksVar.getArray()) {
                 for (int k = 0; k < playlist->size(); ++k) {
-                    juce::String p = playlist->getReference(k).getProperty("path", "").toString();
+                    const auto& item = playlist->getReference(k);
+                    juce::String p = item.isObject() ? item.getProperty("path", "").toString() : item.toString();
                     if (p.isNotEmpty() && !juce::File(p).existsAsFile())
                         missingMediaSummary.add("MP3 Playlist track missing: " + p);
                 }
@@ -581,6 +597,9 @@ public:
                     default:
                         break;
                 }
+            } else if (r.isBuiltin) {
+                statusText = "Built-in Instrument";
+                statusCol = t.ok;
             } else if (!r.fileExists) {
                 statusText = "MISSING VST3 ON DISK";
                 statusCol = t.danger;
@@ -794,8 +813,8 @@ private:
                              auxes->getReference(a).getProperty("chain", juce::var()));
             }
         }
-        addFromChain("F:", "Master FOH", rig.getProperty("fohChain", juce::var()));
-        addFromChain("I:", "Master IEM", rig.getProperty("iemChain", juce::var()));
+        addFromChain("F:", "Master FOH", rig.hasProperty("fohFx") ? rig.getProperty("fohFx", juce::var()) : rig.getProperty("fohChain", juce::var()));
+        addFromChain("I:", "Master IEM", rig.hasProperty("iemFx") ? rig.getProperty("iemFx", juce::var()) : rig.getProperty("iemChain", juce::var()));
     }
 
     void addPluginRow(ContainerKind kind, int ownerIdx, int chainIdx,
@@ -817,8 +836,25 @@ private:
         if (row.pluginName.isEmpty())
             row.pluginName = "Unknown Plugin";
 
+        const bool isBuiltin = (bool)pv.getProperty("isSynth", false) ||
+                               (bool)pv.getProperty("isFm", false) ||
+                               (bool)pv.getProperty("isB3", false) ||
+                               (bool)pv.getProperty("isMidiOut", false);
+        row.isBuiltin = isBuiltin;
+        if (isBuiltin) {
+            row.fileExists = true;
+            row.base64Valid = true;
+            if (row.pluginName.isEmpty() || row.pluginName == "Unknown Plugin") {
+                if ((bool)pv.getProperty("isB3", false)) row.pluginName = "Fanfare B3 Organ";
+                else if ((bool)pv.getProperty("isFm", false)) row.pluginName = "CoplanDX FM Synth";
+                else if ((bool)pv.getProperty("isSynth", false)) row.pluginName = "BLEEP-216 Synth";
+                else if ((bool)pv.getProperty("isMidiOut", false)) row.pluginName = "MIDI Output";
+            }
+        } else {
+            row.fileExists = row.pluginPath.isNotEmpty() && juce::File(row.pluginPath).existsAsFile();
+        }
+
         row.enabledInRig = (bool)pv.getProperty("enabled", true);
-        row.fileExists = row.pluginPath.isNotEmpty() && juce::File(row.pluginPath).existsAsFile();
         row.requiresMessageThread = pluginRequiresMessageThread(row.pluginPath);
         row.sessionPoisoned = isPathPoisoned(row.pluginPath);
 
@@ -1001,9 +1037,9 @@ private:
                     }
                 }
             } else if (r.container == ContainerKind::MasterFoh) {
-                targetChain = root->getProperty("fohChain").getArray();
+                targetChain = root->hasProperty("fohFx") ? root->getProperty("fohFx").getArray() : root->getProperty("fohChain").getArray();
             } else if (r.container == ContainerKind::MasterIem) {
-                targetChain = root->getProperty("iemChain").getArray();
+                targetChain = root->hasProperty("iemFx") ? root->getProperty("iemFx").getArray() : root->getProperty("iemChain").getArray();
             }
 
             if (targetChain == nullptr || r.chainIndex < 0 || r.chainIndex >= targetChain->size())
@@ -1025,6 +1061,15 @@ private:
                 for (int i = 0; i < chans->size(); ++i) {
                     if (auto* chObj = chans->getReference(i).getDynamicObject()) {
                         if (auto* samp = chObj->getProperty("sampler").getDynamicObject()) {
+                            if (auto* slots = samp->getProperty("slots").getArray()) {
+                                for (int sIdx = 0; sIdx < slots->size(); ++sIdx) {
+                                    if (auto* slo = slots->getReference(sIdx).getDynamicObject()) {
+                                        juce::String p = slo->getProperty("wavPath").toString();
+                                        if (p.isNotEmpty() && !juce::File(p).existsAsFile())
+                                            slo->setProperty("wavPath", "");
+                                    }
+                                }
+                            }
                             juce::String p = samp->getProperty("filePath").toString();
                             if (p.isNotEmpty() && !juce::File(p).existsAsFile()) {
                                 samp->setProperty("filePath", "");
@@ -1059,9 +1104,11 @@ private:
                 }
             }
             if (auto* mp3Obj = root->getProperty("mp3Player").getDynamicObject()) {
-                if (auto* playlist = mp3Obj->getProperty("playlist").getArray()) {
+                auto* playlist = mp3Obj->hasProperty("tracks") ? mp3Obj->getProperty("tracks").getArray() : mp3Obj->getProperty("playlist").getArray();
+                if (playlist != nullptr) {
                     for (int k = playlist->size() - 1; k >= 0; --k) {
-                        juce::String p = playlist->getReference(k).getProperty("path", "").toString();
+                        const auto& item = playlist->getReference(k);
+                        juce::String p = item.isObject() ? item.getProperty("path", "").toString() : item.toString();
                         if (p.isNotEmpty() && !juce::File(p).existsAsFile())
                             playlist->remove(k);
                     }
@@ -1251,6 +1298,7 @@ private:
             juce::String path;
             juce::var pluginVar;
             bool fileExists = false;
+            bool isBuiltin = false;
             bool requiresMsgThread = false;
             RepairAction action = RepairAction::Keep;
         };
@@ -1265,6 +1313,7 @@ private:
             j.path = r.pluginPath;
             j.pluginVar = r.pluginVar;
             j.fileExists = r.fileExists;
+            j.isBuiltin = r.isBuiltin;
             j.requiresMsgThread = r.requiresMessageThread;
             j.action = r.action;
             if (j.action == RepairAction::ResetPatch && j.pluginVar.isObject()) {
@@ -1319,6 +1368,11 @@ private:
                 if (job.action == RepairAction::Remove) {
                     postRowUpdate(job.rowIndex, ProbeState::Skipped, 0, "marked REMOVE",
                                   stepTag + " -> SKIPPED (marked REMOVE)");
+                    continue;
+                }
+                if (job.isBuiltin) {
+                    postRowUpdate(job.rowIndex, ProbeState::Passed, 0, "Built-in OK",
+                                  stepTag + " -> BUILT-IN (" + job.name + ")");
                     continue;
                 }
                 if (!job.fileExists) {

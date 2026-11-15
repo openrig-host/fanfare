@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <array>
 #include <atomic>
+#include <bitset>
 #include <cmath>
 #include <vector>
 #include "../LushReverb.h"
@@ -68,7 +69,7 @@ public:
     synthBuffer.setSize(2, safeBlock, false, false, true);
     synthBuffer.clear();
     lfoScratch.assign((size_t)safeBlock, 0.0f);
-    sustainedNotes.reserve(64);
+    sustainedNotes.reset();
     uiMidiQueue.ensureSize(2048);
 
     chorus.prepare(currentSampleRate);
@@ -330,9 +331,8 @@ public:
 
   void allNotesOff() noexcept {
     panicPending.store(true, std::memory_order_release);
-    juce::SpinLock::ScopedTryLockType sl(uiMidiLock);
-    if (sl.isLocked())
-      uiMidiQueue.clear();
+    juce::SpinLock::ScopedLockType sl(uiMidiLock);
+    uiMidiQueue.clear();
   }
 
   // ===== Real-time audio processing ==========================================
@@ -355,10 +355,12 @@ public:
 
     synthBuffer.clear(0, numSamples);
 
-    if (panicPending.exchange(false, std::memory_order_acq_rel))
+    if (panicPending.exchange(false, std::memory_order_acq_rel)) {
       panicNow();
-
-    {
+      juce::SpinLock::ScopedTryLockType sl(uiMidiLock);
+      if (sl.isLocked())
+        uiMidiQueue.clear();
+    } else {
       juce::SpinLock::ScopedTryLockType sl(uiMidiLock);
       if (sl.isLocked() && !uiMidiQueue.isEmpty()) {
         midiMessages.addEvents(uiMidiQueue, 0, -1, 0);
@@ -561,7 +563,7 @@ private:
       t.hardReset();
     monoStack.clear();
     monoUnits.clear();
-    sustainedNotes.clear();
+    sustainedNotes.reset();
     sustainOn = false;
     aftertouch.store(0.0f, std::memory_order_relaxed);
   }
@@ -658,9 +660,8 @@ private:
   void handleNoteOn(int note, float vel,
                     const FanfareSynth::ParamSnapshot &s) noexcept {
     using namespace FanfareSynth;
-    sustainedNotes.erase(
-        std::remove(sustainedNotes.begin(), sustainedNotes.end(), note),
-        sustainedNotes.end());
+    if (note >= 0 && note < 128)
+      sustainedNotes.reset((size_t)note);
     const int mode = (int)std::lround(s[ParamId::voiceMode]);
     const int uni = unisonVoiceCount(s[ParamId::unison]);
     const bool monoFamily = (mode != 0) || (uni > 1);
@@ -694,8 +695,9 @@ private:
     const bool wasHeld = !monoStack.empty();
     monoStack.erase(std::remove(monoStack.begin(), monoStack.end(), note),
                     monoStack.end());
-    if ((int)monoStack.size() < DspConfig::kMaxMonoStackDepth)
-      monoStack.push_back(note);
+    if ((int)monoStack.size() >= DspConfig::kMaxMonoStackDepth)
+      monoStack.erase(monoStack.begin());
+    monoStack.push_back(note);
 
     const bool legatoOverlap = (mode == 2) && wasHeld;
     const int glideSetting = (int)std::lround(s[ParamId::glideMode]);
@@ -810,11 +812,8 @@ private:
   void handleNoteOff(int note,
                      const FanfareSynth::ParamSnapshot &s) noexcept {
     if (sustainOn) {
-      if (std::find(sustainedNotes.begin(), sustainedNotes.end(), note) ==
-              sustainedNotes.end() &&
-          (int)sustainedNotes.size() < 64) {
-        sustainedNotes.push_back(note);
-      }
+      if (note >= 0 && note < 128)
+        sustainedNotes.set((size_t)note);
       return;
     }
     releaseNote(note, s);
@@ -889,9 +888,11 @@ private:
       const bool down = (ccVal >= 64);
       if (sustainOn && !down) {
         sustainOn = false;
-        for (int n : sustainedNotes)
-          releaseNote(n, s);
-        sustainedNotes.clear();
+        for (size_t n = 0; n < 128; ++n) {
+          if (sustainedNotes.test(n))
+            releaseNote((int)n, s);
+        }
+        sustainedNotes.reset();
       } else {
         sustainOn = down;
       }
@@ -1250,7 +1251,7 @@ private:
   bool glideStarted = false;
   std::vector<int> monoStack;
   std::vector<int> monoUnits;
-  std::vector<int> sustainedNotes;
+  std::bitset<128> sustainedNotes;
 
   std::array<FanfareSynth::SynthVoiceUnit,
              FanfareSynth::DspConfig::kMaxPlayableVoices>

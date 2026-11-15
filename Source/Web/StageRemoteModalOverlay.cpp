@@ -142,7 +142,7 @@ void StageRemoteModalOverlay::updateQrCodes() {
     juce::String ssid = ssidEditor.getText().trim();
     if (ssid.isEmpty()) ssid = "Fanfare-Stage";
     juce::String pass = passEditor.getText().trim();
-    if (pass.isEmpty()) pass = "fanfare2026";
+    if (pass.isEmpty()) pass = hotspotController.getPassword();
 
     wifiQrComponent.setPayload(QrCodeGenerator::makeWifiPayload(ssid, pass));
 

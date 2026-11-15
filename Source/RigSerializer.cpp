@@ -144,20 +144,20 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
 
             // Arpeggiator
             if (auto* av = cv.getProperty("arpeggiator", juce::var()).getDynamicObject()) {
-                slot.arpeggiator.enabled = av->getProperty("enabled");
-                slot.arpeggiator.bpm = (float)av->getProperty("bpm");
-                slot.arpeggiator.octavesUp = (int)av->getProperty("octavesUp");
-                slot.arpeggiator.octavesDown = (int)av->getProperty("octavesDown");
-                slot.arpeggiator.gate = (float)av->getProperty("gate");
-                slot.arpeggiator.patternIdx = (int)av->getProperty("patternIdx");
+                if (av->hasProperty("enabled")) slot.arpeggiator.enabled = (bool)av->getProperty("enabled");
+                if (av->hasProperty("bpm")) slot.arpeggiator.bpm = (float)av->getProperty("bpm");
+                if (av->hasProperty("octavesUp")) slot.arpeggiator.octavesUp = (int)av->getProperty("octavesUp");
+                if (av->hasProperty("octavesDown")) slot.arpeggiator.octavesDown = (int)av->getProperty("octavesDown");
+                if (av->hasProperty("gate")) slot.arpeggiator.gate = (float)av->getProperty("gate");
+                if (av->hasProperty("patternIdx")) slot.arpeggiator.patternIdx = (int)av->getProperty("patternIdx");
             }
             // Harmonizer
             if (auto* hv = cv.getProperty("harmonizer", juce::var()).getDynamicObject()) {
-                slot.harmonizer.enabled = hv->getProperty("enabled");
-                slot.harmonizer.octavesUp = (int)hv->getProperty("octavesUp");
-                slot.harmonizer.octavesDown = (int)hv->getProperty("octavesDown");
-                slot.harmonizer.africaMode = hv->hasProperty("africaMode") ? (int)hv->getProperty("africaMode") : 0;
-                slot.harmonizer.harmonyTargetSlot = hv->hasProperty("harmonyTargetSlot") ? (int)hv->getProperty("harmonyTargetSlot") : -1;
+                if (hv->hasProperty("enabled")) slot.harmonizer.enabled = (bool)hv->getProperty("enabled");
+                if (hv->hasProperty("octavesUp")) slot.harmonizer.octavesUp = (int)hv->getProperty("octavesUp");
+                if (hv->hasProperty("octavesDown")) slot.harmonizer.octavesDown = (int)hv->getProperty("octavesDown");
+                if (hv->hasProperty("africaMode")) slot.harmonizer.africaMode = (int)hv->getProperty("africaMode");
+                if (hv->hasProperty("harmonyTargetSlot")) slot.harmonizer.harmonyTargetSlot = (int)hv->getProperty("harmonyTargetSlot");
             }
             if (auto* sv = cv.getProperty("sampler", juce::var()).getDynamicObject()) {
                 slot.sampler.enabled = sv->getProperty("enabled");
@@ -206,21 +206,21 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
                 }
             }
             if (auto* so = cv.getProperty("strip", juce::var()).getDynamicObject()) {
-                slot.strip.gateEnabled = so->getProperty("gateEnabled");
-                slot.strip.gateThreshold = (float)so->getProperty("gateThreshold");
-                slot.strip.eqEnabled = so->getProperty("eqEnabled");
-                slot.strip.eqCurveMode = so->hasProperty("eqCurveMode") ? (bool)so->getProperty("eqCurveMode") : false;
-                slot.strip.hpfFreq = (float)so->getProperty("hpfFreq");
-                slot.strip.lowShelfGain = (float)so->getProperty("eqLow");
-                slot.strip.highShelfGain = (float)so->getProperty("eqHigh");
-                slot.strip.eqVolGain = so->hasProperty("eqVolGain") ? (float)so->getProperty("eqVolGain") : 0.0f;
-                slot.strip.eqMasterGain = so->hasProperty("eqMasterGain") ? (float)so->getProperty("eqMasterGain") : 0.0f;
+                if (so->hasProperty("gateEnabled")) slot.strip.gateEnabled = (bool)so->getProperty("gateEnabled");
+                if (so->hasProperty("gateThreshold")) slot.strip.gateThreshold = (float)so->getProperty("gateThreshold");
+                if (so->hasProperty("eqEnabled")) slot.strip.eqEnabled = (bool)so->getProperty("eqEnabled");
+                if (so->hasProperty("eqCurveMode")) slot.strip.eqCurveMode = (bool)so->getProperty("eqCurveMode");
+                if (so->hasProperty("hpfFreq")) slot.strip.hpfFreq = (float)so->getProperty("hpfFreq");
+                if (so->hasProperty("eqLow")) slot.strip.lowShelfGain = (float)so->getProperty("eqLow");
+                if (so->hasProperty("eqHigh")) slot.strip.highShelfGain = (float)so->getProperty("eqHigh");
+                if (so->hasProperty("eqVolGain")) slot.strip.eqVolGain = (float)so->getProperty("eqVolGain");
+                if (so->hasProperty("eqMasterGain")) slot.strip.eqMasterGain = (float)so->getProperty("eqMasterGain");
                 if (auto* bandsArr = so->getProperty("eqBands").getArray()) {
                     for (int b = 0; b < 10 && b < bandsArr->size(); ++b)
                         slot.strip.eqBands[b] = (float)bandsArr->getReference(b);
                 }
-                slot.strip.compEnabled = so->getProperty("compEnabled");
-                slot.strip.compAmount = (float)so->getProperty("compAmount");
+                if (so->hasProperty("compEnabled")) slot.strip.compEnabled = (bool)so->getProperty("compEnabled");
+                if (so->hasProperty("compAmount")) slot.strip.compAmount = (float)so->getProperty("compAmount");
                 slot.strip.chorusEnabled = so->hasProperty("chorusEnabled") ? (bool)so->getProperty("chorusEnabled") : false;
                 slot.strip.chorusRate = so->hasProperty("chorusRate") ? (float)so->getProperty("chorusRate") : 1.0f;
                 slot.strip.chorusMix = so->hasProperty("chorusMix") ? (float)so->getProperty("chorusMix") : 0.0f;
@@ -989,20 +989,20 @@ bool RigSerializer::readStripFromFile(const juce::File& file, SongSlot& outSlot)
     }
 
     if (auto* av = cv.getProperty("arpeggiator", juce::var()).getDynamicObject()) {
-        outSlot.arpeggiator.enabled = av->getProperty("enabled");
-        outSlot.arpeggiator.bpm = (float)av->getProperty("bpm");
-        outSlot.arpeggiator.octavesUp = (int)av->getProperty("octavesUp");
-        outSlot.arpeggiator.octavesDown = (int)av->getProperty("octavesDown");
-        outSlot.arpeggiator.gate = (float)av->getProperty("gate");
-        outSlot.arpeggiator.patternIdx = (int)av->getProperty("patternIdx");
+        if (av->hasProperty("enabled")) outSlot.arpeggiator.enabled = (bool)av->getProperty("enabled");
+        if (av->hasProperty("bpm")) outSlot.arpeggiator.bpm = (float)av->getProperty("bpm");
+        if (av->hasProperty("octavesUp")) outSlot.arpeggiator.octavesUp = (int)av->getProperty("octavesUp");
+        if (av->hasProperty("octavesDown")) outSlot.arpeggiator.octavesDown = (int)av->getProperty("octavesDown");
+        if (av->hasProperty("gate")) outSlot.arpeggiator.gate = (float)av->getProperty("gate");
+        if (av->hasProperty("patternIdx")) outSlot.arpeggiator.patternIdx = (int)av->getProperty("patternIdx");
     }
 
     if (auto* hv = cv.getProperty("harmonizer", juce::var()).getDynamicObject()) {
-        outSlot.harmonizer.enabled = hv->getProperty("enabled");
-        outSlot.harmonizer.octavesUp = (int)hv->getProperty("octavesUp");
-        outSlot.harmonizer.octavesDown = (int)hv->getProperty("octavesDown");
-        outSlot.harmonizer.africaMode = hv->hasProperty("africaMode") ? (int)hv->getProperty("africaMode") : 0;
-        outSlot.harmonizer.harmonyTargetSlot = hv->hasProperty("harmonyTargetSlot") ? (int)hv->getProperty("harmonyTargetSlot") : -1;
+        if (hv->hasProperty("enabled")) outSlot.harmonizer.enabled = (bool)hv->getProperty("enabled");
+        if (hv->hasProperty("octavesUp")) outSlot.harmonizer.octavesUp = (int)hv->getProperty("octavesUp");
+        if (hv->hasProperty("octavesDown")) outSlot.harmonizer.octavesDown = (int)hv->getProperty("octavesDown");
+        if (hv->hasProperty("africaMode")) outSlot.harmonizer.africaMode = (int)hv->getProperty("africaMode");
+        if (hv->hasProperty("harmonyTargetSlot")) outSlot.harmonizer.harmonyTargetSlot = (int)hv->getProperty("harmonyTargetSlot");
     }
 
     if (auto* sv = cv.getProperty("sampler", juce::var()).getDynamicObject()) {

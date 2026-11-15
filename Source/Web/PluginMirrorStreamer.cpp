@@ -14,7 +14,10 @@ PluginMirrorStreamer::PluginMirrorStreamer(PluginMirrorCapture& captureToUse)
 }
 
 PluginMirrorStreamer::~PluginMirrorStreamer() {
+    setFrameSink(nullptr);
+    setAudienceProbe(nullptr);
     stop();
+    stopThread(-1);
 }
 
 // =====================================================================
@@ -34,9 +37,6 @@ void PluginMirrorStreamer::start(int fps, float quality) {
 }
 
 void PluginMirrorStreamer::stop() {
-    if (!streaming.load())
-        return;
-
     streaming.store(false);
     stopTimer();
     signalThreadShouldExit();

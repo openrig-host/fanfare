@@ -1,9 +1,12 @@
 #pragma once
 
 #include <JuceHeader.h>
+#if JUCE_WINDOWS
 #include <winsqlite/winsqlite3.h>
-
 #pragma comment(lib, "winsqlite3.lib")
+#else
+#include <sqlite3.h>
+#endif
 
 namespace Fanfare
 {

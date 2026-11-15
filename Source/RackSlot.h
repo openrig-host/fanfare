@@ -40,7 +40,7 @@ public:
 
   void prepare(double sampleRate, int maxBlockSize = 8192) {
     lastSampleRate = sampleRate;
-    strip.prepare(sampleRate);
+    strip.prepare(sampleRate, maxBlockSize);
     arpeggiator.prepare(sampleRate);
     harmonizer.prepare(sampleRate);
     sampler.prepare(sampleRate);

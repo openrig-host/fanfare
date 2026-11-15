@@ -25,6 +25,10 @@ namespace {
 
 StageHotspotController::StageHotspotController()
     : juce::Thread("StageHotspotWorker") {
+    // Generate an 8-character unique session passphrase rather than a hardcoded default
+    activePassword = "ff-" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt(0xFFFFFF)).toLowerCase();
+    while (activePassword.length() < 8)
+        activePassword += "0";
 }
 
 StageHotspotController::~StageHotspotController() {
@@ -53,7 +57,10 @@ void StageHotspotController::startHotspot(const juce::String& ssid,
         const juce::String cleanSsid = sanitizeHotspotField(ssid, 32);
         const juce::String cleanPass = sanitizeHotspotField(password, 63);
         activeSsid = cleanSsid.isNotEmpty() ? cleanSsid : "Fanfare-Stage";
-        activePassword = cleanPass.length() >= 8 ? cleanPass : "fanfare2026";
+        if (cleanPass.length() >= 8)
+            activePassword = cleanPass;
+        else if (activePassword.length() < 8)
+            activePassword = "ff-" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt(0xFFFFFF)).toLowerCase();
         displacedCb = std::move(pendingCallback);
         pendingCallback = std::move(onFinished);
         pendingTask = TaskType::Start;

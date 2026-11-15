@@ -1315,7 +1315,10 @@ void FanfareEngine::applyRig(const juce::var &rig)
         s->setSwapPair(v.getProperty("swapCC", -1), v.getProperty("swapA", -1),
                        v.getProperty("swapB", -1));
         s->setMidiChannelOverride(v.getProperty("midiChannel", -1));
-        s->setOutputTarget(v.getProperty("outputTarget", -1));
+        int tgt = v.getProperty("outputTarget", -1);
+        if (tgt >= 0 && tgt < 100 && tgt <= i)
+          tgt = -1; // Enforce DAG: subgroup targets must be downstream slots (tgt > i)
+        s->setOutputTarget(tgt);
 
         // Load Channel Strip Settings
         if (auto *stripObj =
@@ -1379,7 +1382,7 @@ void FanfareEngine::applyRig(const juce::var &rig)
           if (stripObj->hasProperty("irMix"))
             strip.irMix.store((float)stripObj->getProperty("irMix"));
           // Re-prepare first so sample rate is set before generating any built-in IR
-          strip.prepare(currentSampleRate);
+          strip.prepare(currentSampleRate, currentBlockSize > 0 ? currentBlockSize : 8192);
           if (stripObj->hasProperty("irPath")) {
             auto irP = stripObj->getProperty("irPath").toString();
             if (irP.isNotEmpty())
@@ -1524,6 +1527,14 @@ void FanfareEngine::applyRig(const juce::var &rig)
 
         // Pass 2: Clear only non-matching plugins (deferring destruction until after quietWindow), then load
         s->clearChainPreserve(pluginsToReuse, &pendingReapPlugins);
+        for (int c = 0; c < 3; ++c) {
+          if (pluginsToReuse.find(c) == pluginsToReuse.end()) {
+            s->clearChainSlotMidiOut(c);
+            s->clearChainSlotSynth(c);
+            s->clearChainSlotFm(c);
+            s->clearChainSlotB3(c);
+          }
+        }
         bool anyChainSynthRestored = false;
         if (auto *chainArr = v.getProperty("chain", juce::var()).getArray()) {
           for (int p = 0; p < chainArr->size(); ++p) {
@@ -2117,7 +2128,10 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
     s->setMuteCC(songSlot.muteCC);
     s->setSwapPair(songSlot.swapCC, songSlot.swapA, songSlot.swapB);
     s->setMidiChannelOverride(songSlot.midiChannelOverride);
-    s->setOutputTarget(songSlot.outputTarget);
+    int tgt = songSlot.outputTarget;
+    if (tgt >= 0 && tgt < 100 && tgt <= slotIdx)
+      tgt = -1; // Enforce DAG: subgroup targets must be downstream slots (tgt > slotIdx)
+    s->setOutputTarget(tgt);
 
     auto& stripData = s->getStrip();
     stripData.gateEnabled = songSlot.strip.gateEnabled;

@@ -1313,7 +1313,7 @@ public:
   ConvolutionReverb &getIRReverb() { return irReverb; }
   const ConvolutionReverb &getIRReverb() const { return irReverb; }
 
-  void prepare(double sampleRate) {
+  void prepare(double sampleRate, int maxBlockSize = 8192) {
     gateL.prepare(sampleRate);
     gateR.prepare(sampleRate);
     eqL.prepare(sampleRate);
@@ -1324,7 +1324,7 @@ public:
     chorusR.prepare(sampleRate);
     delay.prepare(sampleRate);
     reverb.prepare(sampleRate);
-    irReverb.prepare(sampleRate, 4096);
+    irReverb.prepare(sampleRate, maxBlockSize);
     musette.prepare(sampleRate);
   }
 

@@ -55,7 +55,7 @@ private:
     juce::AudioBuffer<float>* source;
 };
 
-class Mp3PlayerProcessor {
+class Mp3PlayerProcessor : private juce::AsyncUpdater {
 public:
     enum class LoopMode { Off, RepeatTrack, RepeatAll };
 
@@ -116,6 +116,7 @@ public:
 
     ~Mp3PlayerProcessor() {
         isShuttingDown.store(true);
+        cancelPendingUpdate();
         if (aliveToken)
             aliveToken->store(false, std::memory_order_release);
         playing.store(false);
@@ -126,6 +127,15 @@ public:
         bufferingThreadA.stopThread(1000);
         bufferingThreadB.stopThread(1000);
     }
+
+private:
+    void handleAsyncUpdate() override {
+        if (deckAStopPending.exchange(false, std::memory_order_acq_rel))
+            deckA.transportSource.stop();
+        if (deckBStopPending.exchange(false, std::memory_order_acq_rel))
+            deckB.transportSource.stop();
+    }
+public:
 
     // --- Deck State Struct ---
     struct Deck {
@@ -285,10 +295,11 @@ public:
                     crossfadeProgress.store(curProg);
                     if (curProg >= 1.0f) {
                         manualCrossfadePos.store(-1.0f);
-        isCrossfading.store(false);
-                        deckA.transportSource.stop();
+                        isCrossfading.store(false);
                         deckA.isPlaying.store(false);
                         deckA.gain.store(0.0f);
+                        deckAStopPending.store(true, std::memory_order_release);
+                        triggerAsyncUpdate();
                     }
                 } else {
                     // Fading from B to A
@@ -296,10 +307,11 @@ public:
                     crossfadeProgress.store(curProg);
                     if (curProg <= 0.0f) {
                         manualCrossfadePos.store(-1.0f);
-        isCrossfading.store(false);
-                        deckB.transportSource.stop();
+                        isCrossfading.store(false);
                         deckB.isPlaying.store(false);
                         deckB.gain.store(0.0f);
+                        deckBStopPending.store(true, std::memory_order_release);
+                        triggerAsyncUpdate();
                     }
                 }
             }
@@ -1848,6 +1860,8 @@ private:
     std::atomic<bool> trackFinishLatched{false};
     std::atomic<bool> playing{false};
     std::atomic<bool> isShuttingDown{false};
+    std::atomic<bool> deckAStopPending{false};
+    std::atomic<bool> deckBStopPending{false};
     std::atomic<float> gain{1.0f};
 
     std::atomic<int> activeDeckIndex{0}; // 0 = Deck A, 1 = Deck B
