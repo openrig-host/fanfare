@@ -6,7 +6,7 @@
 -->
 <html lang="en">
 	<head>
-		<title>Fanfare v1.7: Stage Survival Manual (Windows VST3 Host)</title>
+		<title>Fanfare v1.7.1: Stage Survival Manual (Windows VST3 Host)</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="description" content="Fanfare v1.7 User's Manual & Stage Survival Guide for Windows. Built-in Fanfare B3 91-Tonewheel Organ + Dual Leslie 122, BLEEP-216 Analog + 20-Bank Wavetable Polysynth (96 Presets), CoplanDX 6-Op/4-Op FM Synthesizer (558 Presets), 11 Hybrid FM+Analog Strips, LushReverb Figure-8 Tank Reverb, Studio Workspace, Rig Doctor Setup Diagnostics & Surgical Repair, Global Controller Profiles, Version History, Songs, Scenes, Setlists, Curve-Link EQ, Built-In Synthesized IRs, Stereo/Ping-Pong/Tape Delay, Dual-Deck Break DJ, and bass-player-proof USB hotplugging." />
@@ -14,7 +14,7 @@
 		<link rel="icon" type="image/png" href="Fanfare_Icon.png" />
 		<meta property="og:site_name" content="Fanfare" />
 		<meta property="og:type" content="website" />
-		<meta property="og:title" content="Fanfare v1.7: Stage Survival Manual (Windows VST3 Host)" />
+		<meta property="og:title" content="Fanfare v1.7.1: Stage Survival Manual (Windows VST3 Host)" />
 		<meta property="og:description" content="The Fanfare user's manual and stage survival guide for Windows: 27 chapters covering Fanfare B3 Organ, BLEEP-216 Analog/Wavetable Synth, CoplanDX FM, Rig Doctor, and engine tuning." />
 		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
 		<meta name="twitter:card" content="summary_large_image" />
@@ -198,7 +198,7 @@
 			<section id="header">
 				<header>
 					<span class="image avatar"><img src="Fanfare_Icon.png" alt="Fanfare" /></span>
-					<h1 id="logo"><a href="#workflow">Fanfare v1.7</a></h1>
+					<h1 id="logo"><a href="#workflow">Fanfare v1.7.1</a></h1>
 					<p>The Windows Stage Survival Manual</p>
 					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. BLEEP-216, CoplanDX, Rig Doctor, EQ)..." />
 				</header>
@@ -476,7 +476,7 @@
 									<h3>6. Channel Strips, FOH/IEM Buses &amp; Per-Strip IEM Trim</h3>
 									<p><span class="image right"><img src="vu_meters_detail.png" alt="Dual FOH and IEM faders and VU meters" /></span>Fanfare gives you 24 main Channel Strips (plus 2 Aux Return strips docked beside the Master section):</p>
 									<ul>
-										<li><strong>Strip 1 (Monitor In):</strong> Defaults to your live audio input monitor strip at the left edge of the console for quick reach.</li>
+										<li><strong>Strip 1 (Monitor In):</strong> Dedicated live audio input monitor strip docked at the right end of the main strips (labeled <code>M</code> on the strip ruler). Supports both <strong>stereo pairs</strong> (e.g. <code>In 1+2 (Stereo)</code>) and <strong>mono</strong> inputs, with independent <code>FOH</code> and <code>IEM</code> bus buttons at the bottom.</li>
 										<li><strong>Strips 2 through 23:</strong> Full instrument/audio strips, each capable of hosting a <strong>3-slot vertical plugin chain</strong> (e.g., Piano VST in slot 1 &rarr; Vintage Philly Phaser in slot 2 &rarr; Rotary Amp in slot 3) OR forwarding filtered/transposed MIDI out to an external hardware synth.</li>
 										<li><strong>Strip 24 (MP3 / DJ Player):</strong> Dedicated dual-deck break music and backing track player.</li>
 									</ul>
@@ -488,6 +488,9 @@
 										<li><strong>Master <code>FOH</code> &amp; Master <code>IEM</code> Faders (Right Dock):</strong> Full-throw master faders, dedicated analog/LED VU meters, and independent 3-slot Master VST chains for the house feed and your ears.</li>
 										<li><strong>Output Routing Selector:</strong> Route any strip to <code>Main FOH/IEM</code>, directly out to hardware pairs (<code>Direct: Out 1+2</code> through <code>7+8</code> or mono <code>Out 1..8</code>), or <strong>Subgroup to Strip</strong> (routing audio into any higher-numbered strip so one strip acts as a submix bus).</li>
 										<li><strong><code>CC</code> &middot; <code>DYN</code> &middot; <code>KEY</code> &middot; <code>...</code> Strip Action Row (or Right-Click Strip):</strong> Gives immediate one-click access to CC mappings, Strip DSP, and the keyboard splits/note-range callout, while the <code>...</code> popup menu groups the rest: Performance tools (<code>MIDI effects (Arp / Harmonizer)...</code>, <code>8-pad sampler...</code>, <code>BLEEP-216 synth...</code>, <code>CoplanDX synth...</code>, <code>MP3 playlist deck...</code>) and Strip utilities (<code>Save strip preset...</code>, <code>Load strip preset...</code>, <code>Rename strip...</code>, <code>Strip colour...</code>). Nothing hides quietly: the <code>KEY</code> button lights amber when the strip is range-limited or transposed, and <code>...</code> lights amber when any of its tools is active on the strip.</li>
+										<li><strong><code>BOTH</code> / <code>FOH</code> / <code>IEM</code> Fader-Target Toggle (v1.7.1):</strong> A compact 3-state button right above each strip fader lets you switch whether the big fader moves <code>BOTH</code> FOH and IEM together, <code>FOH</code> only, or <code>IEM</code> only &mdash; giving you instant independent FOH vs. IEM level control on any strip without needing a second fader.</li>
+										<li><strong>Studio Strip Layout, Inline <code>LAYERS &middot; 1&ndash;3</code> &amp; Focus Expansion (v1.7.1):</strong> Each Studio strip features a top summary badge, clickable <code>IN</code> / <code>OUT</code> routing chips (with stereo pair and mono hardware input options), a nameplate with a clickable strip-number focus badge, a gear (<code>&#9881;</code>) <strong>Channel Setup</strong> drawer (Source, Output Target, per-layer level, enable, and <code>Strip</code> or <code>1&ndash;16</code> MIDI channel), and a live 0&ndash;127 key-range bar that flashes on incoming MIDI notes. Clicking a strip number or layer widens the strip and reveals inline <code>TRIM</code>, draggable low/high key-range handles, <code>Keyboard...</code> split/learn popup, <code>Change...</code> / <code>Load...</code>, and <code>Edit L&lt;N&gt; GUI</code>.</li>
+										<li><strong>Strip Ruler &amp; Keyboard Navigation (v1.7.1):</strong> A numbered ruler along the bottom of the rack highlights visible strips and the focused strip (click any number to focus and scroll). Use <code>&larr;</code>/<code>&rarr;</code> to cycle strip focus, <code>&uarr;</code>/<code>&darr;</code> to select layers <code>1&ndash;3</code>, <code>E</code> to open the selected layer editor, <code>M</code> to mute/unmute the focused strip, and <code>Escape</code> to clear focus.</li>
 									</ul>
 									<p>Inside each strip's <code>DYN</code> panel, the <strong>IEM &amp; AUX SENDS</strong> module also gives you <code>AUX 1</code> and <code>AUX 2</code> send knobs feeding the two <strong>Aux Return</strong> strips on the right of the rack. Those returns start collapsed to save horizontal space (click <code>+</code> to expand them) and act as full channel strips in their own right: load one lush hall reverb into <code>AUX 1 RETURN</code>, send a taste of every keyboard to it, and your whole rig shares one cohesive room without burning CPU on twenty separate reverb plugins.</p>
 									<p>One more strip trick: any of the three chain slots can be switched from hosting a plugin to acting as a <strong>MIDI OUT</strong> destination for a hardware synth's MIDI port. The strip's note range, transposes, and arpeggiator all still apply before the notes leave the building, so your split points and one-finger synth bubbles work identically on software and hardware voices alike.</p>
@@ -1011,7 +1014,7 @@
 					<section id="footer">
 						<div class="container">
 							<ul class="copyright">
-								<li>&copy; Fanfare v1.7</li><li><a href="index.html">Fanfare Home</a></li><li><a href="blog/">Dev Blog</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
+								<li>&copy; Fanfare v1.7.1</li><li><a href="index.html">Fanfare Home</a></li><li><a href="blog/">Dev Blog</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
 							</ul>
 						</div>
 					</section>
