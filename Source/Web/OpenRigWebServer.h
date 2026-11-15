@@ -10,6 +10,9 @@
 #include <functional>
 #include <atomic>
 #include <thread>
+#include <condition_variable>
+#include <cstdint>
+#include <deque>
 #include <mutex>
 #include <unordered_set>
 
@@ -168,6 +171,24 @@ private:
     std::mutex clientSocketsMutex;
     std::unordered_set<void*> activeHttpSockets;
     std::unordered_set<void*> activeWsClients;
+    std::atomic<int> activeWsClientCount{0};
+
+    // Non-blocking outbound WebSocket delivery (message thread / encoder never stall on TCP sendAll)
+    struct OutboundWsItem {
+        std::vector<uint8_t> frame;
+        void* singleClient = nullptr;
+        bool mirrorOnly = false;
+    };
+    static std::vector<uint8_t> buildWsFrame(uint8_t finOpcode, const void* data, size_t size);
+    void enqueueWsFrame(std::vector<uint8_t> frame, void* singleClient, bool isMeter, bool mirrorOnly);
+    void wsOutboundLoop();
+
+    std::mutex wsOutMutex;
+    std::condition_variable wsOutCv;
+    std::thread wsOutboundThread;
+    bool hasPendingMeter = false;
+    std::vector<uint8_t> pendingMeterFrame;
+    std::deque<OutboundWsItem> wsOutQueue;
 
     // Joinable per-connection threads
     std::mutex workersMutex;

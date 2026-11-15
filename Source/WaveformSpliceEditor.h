@@ -39,6 +39,9 @@ public:
     }
 
     void paint(juce::Graphics& g) override {
+        if (getWidth() <= 0 || getHeight() <= 0)
+            return;
+
         auto bounds = getLocalBounds().toFloat();
 
         // Recessed hardware well

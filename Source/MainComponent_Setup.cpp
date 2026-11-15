@@ -107,9 +107,83 @@ void MainComponent::setupSlotComponents() {
     bool isAccordion = (slot->getName() == "Accordion");
     comp->setSpecialModes(isMonitorIn, isAccordion, false);
 
+    auto wireB3Ext = [this, i, slot](int chIdx) {
+      if (b3Overlay == nullptr || slot == nullptr)
+        return;
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      b3Overlay->onPickExtPlugin = [safeThis, i, chIdx, slot](
+                                       int extSlot,
+                                       const juce::Rectangle<int> &anchor) {
+        if (safeThis == nullptr)
+          return;
+        juce::PopupMenu menu;
+        menu.addSectionHeader(extSlot == 0
+                                  ? "External Sat / Comp VST3 (Pre-Leslie)"
+                                  : "External Leslie / Rotary VST3");
+        if (safeThis->engine.getNumAvailablePlugins() == 0) {
+          menu.addItem(-3, "Scan for VST3 Plugins...");
+        } else {
+          const juce::String curPath =
+              slot->getB3Organ(chIdx).getExtPluginPath(extSlot);
+          for (int p = 0; p < safeThis->engine.getNumAvailablePlugins(); ++p) {
+            const bool isCur =
+                curPath.isNotEmpty() &&
+                curPath == safeThis->engine.getAvailablePluginPath(p);
+            menu.addItem(p + 1, safeThis->engine.getAvailablePluginName(p),
+                         true, isCur);
+          }
+        }
+        menu.addSeparator();
+        menu.addItem(-1, "(None - Use Built-In)");
+        menu.showMenuAsync(
+            juce::PopupMenu::Options().withTargetScreenArea(anchor),
+            [safeThis, i, chIdx, extSlot, slot](int result) {
+              if (safeThis == nullptr || result == 0)
+                return;
+              if (result == -3) {
+                if (safeThis->scanButton.onClick)
+                  safeThis->scanButton.onClick();
+                return;
+              }
+              if (auto *oldInst =
+                      slot->getB3Organ(chIdx).getExtPluginInstance(extSlot)) {
+                safeThis->closePluginWindowForInstance(oldInst);
+              }
+              if (result > 0) {
+                safeThis->loadingOverlay.reset(new LoadingOverlay());
+                safeThis->addAndMakeVisible(safeThis->loadingOverlay.get());
+                safeThis->loadingOverlay->setBounds(safeThis->getLocalBounds());
+              }
+              safeThis->engine.loadPluginIntoB3ExtSlot(
+                  i, chIdx, extSlot, result > 0 ? (result - 1) : -1,
+                  [safeThis](bool ok, const juce::String &err) {
+                    if (safeThis == nullptr)
+                      return;
+                    safeThis->loadingOverlay.reset();
+                    if (!ok) {
+                      juce::AlertWindow::showMessageBoxAsync(
+                          juce::MessageBoxIconType::WarningIcon,
+                          "B3 External VST3 Load Failed", err);
+                    } else if (safeThis->b3Overlay != nullptr) {
+                      safeThis->b3Overlay->refreshExtPluginLabels();
+                    }
+                  });
+            });
+      };
+
+      b3Overlay->onOpenExtEditor = [safeThis, chIdx, slot](int extSlot) {
+        if (safeThis == nullptr)
+          return;
+        if (auto *pi = slot->getB3Organ(chIdx).getExtPluginInstance(extSlot)) {
+          safeThis->openExternalPluginEditor(
+              pi, (extSlot == 0 ? "B3 Sat: " : "B3 Leslie: ") + pi->getName());
+        }
+      };
+    };
+
     // Plugin selection menu callback
     comp->onShowPluginMenu = [this, i, slot, comp,
-                              isMonitorIn](int chainIndex) {
+                              isMonitorIn, wireB3Ext](int chainIndex) {
       juce::PopupMenu menu;
       menu.addSectionHeader("Select Plugin for Chain " +
                             juce::String(chainIndex + 1));
@@ -118,6 +192,8 @@ void MainComponent::setupSlotComponents() {
                      slot != nullptr && slot->isChainSlotSynth(chainIndex));
         menu.addItem(-5, "CoplanDX (Built-in)", true,
                      slot != nullptr && slot->isChainSlotFm(chainIndex));
+        menu.addItem(-6, "Fanfare B3 Organ (Built-In)", true,
+                     slot != nullptr && slot->isChainSlotB3(chainIndex));
         menu.addSeparator();
       }
       if (engine.getNumAvailablePlugins() == 0) {
@@ -135,7 +211,7 @@ void MainComponent::setupSlotComponents() {
       juce::Component::SafePointer<RackSlotComponent> safeComp(comp);
       menu.showMenuAsync(
           juce::PopupMenu::Options(),
-          [safeThis, i, slot, safeComp, chainIndex](int result) {
+          [safeThis, i, slot, safeComp, chainIndex, wireB3Ext](int result) {
             if (safeThis == nullptr)
               return;
             if (result == -4) {
@@ -194,6 +270,66 @@ void MainComponent::setupSlotComponents() {
               }
               return;
             }
+            if (result == -6) {
+              if (slot != nullptr) {
+                if (auto *oldInstance = slot->getPluginInstance(chainIndex))
+                  safeThis->closePluginWindowForInstance(oldInstance);
+                safeThis->engine.clearSlotChainMidiOut(i, chainIndex);
+                slot->setChainSlotB3(chainIndex, true);
+                if (safeComp != nullptr) {
+                  if (safeComp->getIsCollapsed()) {
+                    safeComp->setCollapsed(false);
+                    safeThis->resized();
+                  }
+                  safeComp->repaint();
+                }
+                safeThis->b3Overlay.reset(new B3OrganComponent(
+                    *slot,
+                    [safeThis] {
+                      if (safeThis != nullptr) {
+                        safeThis->b3Overlay.reset();
+                        safeThis->resized();
+                      }
+                    },
+                    chainIndex));
+                safeThis->b3Overlay->onOpenNoteRange = [safeThis, slot, safeComp] {
+                  if (safeThis == nullptr)
+                    return;
+                  auto *nrComp = new NoteRangeComponent(*slot);
+                  nrComp->setSize(860, 358);
+                  safeThis->setActiveMidiNoteLearner(nrComp);
+                  auto targetArea = safeThis->b3Overlay != nullptr
+                                        ? safeThis->b3Overlay->getMidiButtonScreenBounds()
+                                        : (safeComp != nullptr ? safeComp->getScreenBounds()
+                                                               : safeThis->getScreenBounds());
+                  auto &box = juce::CallOutBox::launchAsynchronously(
+                      std::unique_ptr<juce::Component>(nrComp), targetArea,
+                      safeThis.getComponent());
+                  box.setDismissalMouseClicksAreAlwaysConsumed(true);
+                };
+                safeThis->b3Overlay->onOpenCCDialog = [safeThis, slot, safeComp] {
+                  if (safeThis == nullptr)
+                    return;
+                  auto *ccComp = new CCMappingComponent(*slot, 0);
+                  ccComp->setSize(660, 510);
+                  auto targetArea = safeThis->b3Overlay != nullptr
+                                        ? safeThis->b3Overlay->getMidiButtonScreenBounds()
+                                        : (safeComp != nullptr ? safeComp->getScreenBounds()
+                                                               : safeThis->getScreenBounds());
+                  auto &box = juce::CallOutBox::launchAsynchronously(
+                      std::unique_ptr<juce::Component>(ccComp), targetArea,
+                      safeThis.getComponent());
+                  box.setDismissalMouseClicksAreAlwaysConsumed(true);
+                };
+                if (safeComp != nullptr)
+                  safeThis->b3Overlay->onOpenMidiEffects = safeComp->onShowArpeggiator;
+                wireB3Ext(chainIndex);
+                safeThis->addAndMakeVisible(safeThis->b3Overlay.get());
+                safeThis->b3Overlay->updateForHostBounds(
+                    safeThis->getLocalBounds());
+              }
+              return;
+            }
             if (result == -3) {
               if (safeThis->scanButton.onClick)
                 safeThis->scanButton.onClick();
@@ -213,6 +349,7 @@ void MainComponent::setupSlotComponents() {
             if (result > 0) {
               safeThis->loadingOverlay.reset(new LoadingOverlay());
               safeThis->addAndMakeVisible(safeThis->loadingOverlay.get());
+              safeThis->loadingOverlay->setBounds(safeThis->getLocalBounds());
 
               safeThis->engine.loadPluginIntoSlot(
                   i, chainIndex, result - 1,
@@ -236,6 +373,7 @@ void MainComponent::setupSlotComponents() {
               safeThis->engine.clearSlotChainMidiOut(i, chainIndex);
               slot->clearChainSlotSynth(chainIndex);
               slot->clearChainSlotFm(chainIndex);
+              slot->clearChainSlotB3(chainIndex);
               juce::ScopedLock sl(safeThis->engine.getCallbackLock());
               slot->setPluginInChain(chainIndex, nullptr);
               if (safeComp != nullptr)
@@ -250,7 +388,7 @@ void MainComponent::setupSlotComponents() {
     };
 
     // Editor open callback
-    comp->onOpenEditor = [this, slot](int chainIndex) {
+    comp->onOpenEditor = [this, slot, comp](int chainIndex) {
       if (slot != nullptr && slot->isChainSlotSynth(chainIndex)) {
         synthOverlay.reset(new FanfareSynthComponent(
             *slot,
@@ -273,6 +411,40 @@ void MainComponent::setupSlotComponents() {
             chainIndex));
         addAndMakeVisible(fmOverlay.get());
         fmOverlay->updateForHostBounds(getLocalBounds());
+        return;
+      }
+      if (slot != nullptr && slot->isChainSlotB3(chainIndex)) {
+        b3Overlay.reset(new B3OrganComponent(
+            *slot,
+            [this] {
+              b3Overlay.reset();
+              resized();
+            },
+            chainIndex));
+        b3Overlay->onOpenNoteRange = [this, slot, comp] {
+          auto *nrComp = new NoteRangeComponent(*slot);
+          nrComp->setSize(860, 358);
+          setActiveMidiNoteLearner(nrComp);
+          auto targetArea = b3Overlay != nullptr
+                                ? b3Overlay->getMidiButtonScreenBounds()
+                                : comp->getScreenBounds();
+          auto &box = juce::CallOutBox::launchAsynchronously(
+              std::unique_ptr<juce::Component>(nrComp), targetArea, this);
+          box.setDismissalMouseClicksAreAlwaysConsumed(true);
+        };
+        b3Overlay->onOpenCCDialog = [this, slot, comp] {
+          auto *ccComp = new CCMappingComponent(*slot, 0);
+          ccComp->setSize(660, 510);
+          auto targetArea = b3Overlay != nullptr
+                                ? b3Overlay->getMidiButtonScreenBounds()
+                                : comp->getScreenBounds();
+          auto &box = juce::CallOutBox::launchAsynchronously(
+              std::unique_ptr<juce::Component>(ccComp), targetArea, this);
+          box.setDismissalMouseClicksAreAlwaysConsumed(true);
+        };
+        b3Overlay->onOpenMidiEffects = comp->onShowArpeggiator;
+        addAndMakeVisible(b3Overlay.get());
+        b3Overlay->updateForHostBounds(getLocalBounds());
         return;
       }
       auto *plugin = slot->getPluginInstance(chainIndex);
@@ -316,16 +488,31 @@ void MainComponent::setupSlotComponents() {
         if (ok && editor != nullptr) {
           auto *w =
               new PluginWindow(slot->getPluginName(chainIndex), editor, plugin);
-          w->onWindowClosed = [safeThis, w] {
-            if (safeThis == nullptr)
-              return;
-            if (safeThis->activePluginWindows.contains(w)) {
-              safeThis->activePluginWindows.removeObject(w, false);
-              w->destroyEditorNow();
-              juce::MessageManager::callAsync([w]() { delete w; });
+          juce::Component::SafePointer<PluginWindow> safeW(w);
+          w->onWindowClosed = [safeThis, safeW] {
+            if (safeThis != nullptr && safeW != nullptr &&
+                safeThis->activePluginWindows.contains(safeW.getComponent())) {
+              auto *rawW = safeW.getComponent();
+              safeThis->activePluginWindows.removeObject(rawW, false);
+              safeThis->openPluginWindowCount.store(
+                  safeThis->activePluginWindows.size(),
+                  std::memory_order_release);
+              rawW->destroyEditorNow();
+              juce::MessageManager::callAsync([safeW]() {
+                if (safeW != nullptr)
+                  delete safeW.getComponent();
+              });
+            } else if (safeW != nullptr) {
+              safeW->destroyEditorNow();
+              juce::MessageManager::callAsync([safeW]() {
+                if (safeW != nullptr)
+                  delete safeW.getComponent();
+              });
             }
           };
           safeThis->activePluginWindows.add(w);
+          safeThis->openPluginWindowCount.store(
+              safeThis->activePluginWindows.size(), std::memory_order_release);
           if (safeThis->webServer != nullptr)
             safeThis->webServer->registerPluginMirrorSource(
                 editor, w->getPeer() ? w->getPeer()->getNativeHandle() : nullptr,
@@ -347,7 +534,8 @@ void MainComponent::setupSlotComponents() {
         resized(); // Re-layout to remove gap
       }));
       addAndMakeVisible(channelStripOverlay.get());
-      channelStripOverlay->centreWithSize(980, 520);
+      channelStripOverlay->centreWithSize(juce::jmin(getWidth() - 28, 980),
+                                          juce::jmin(getHeight() - 28, 520));
     };
 
     // Arpeggiator Dialog
@@ -362,7 +550,8 @@ void MainComponent::setupSlotComponents() {
             resized();
           }));
       addAndMakeVisible(midiEffectsOverlay.get());
-      midiEffectsOverlay->centreWithSize(620, 410);
+      midiEffectsOverlay->centreWithSize(juce::jmin(getWidth() - 28, 620),
+                                         juce::jmin(getHeight() - 28, 410));
     };
 
     // Sampler Dialog
@@ -374,7 +563,8 @@ void MainComponent::setupSlotComponents() {
       }));
       samplerOverlayOpen.store(true, std::memory_order_release);
       addAndMakeVisible(samplerOverlay.get());
-      samplerOverlay->centreWithSize(720, 600);
+      samplerOverlay->centreWithSize(juce::jmin(getWidth() - 28, 720),
+                                     juce::jmin(getHeight() - 28, 600));
     };
 
     // MP3 Player Dialog
@@ -384,7 +574,8 @@ void MainComponent::setupSlotComponents() {
         resized();
       }));
       addAndMakeVisible(mp3Overlay.get());
-      mp3Overlay->centreWithSize(780, 580);
+      mp3Overlay->centreWithSize(juce::jmin(getWidth() - 28, 780),
+                                 juce::jmin(getHeight() - 28, 580));
     };
 
     // Fanfare Synth Dialog (native instrument — opens active synth slot or
@@ -397,11 +588,16 @@ void MainComponent::setupSlotComponents() {
             comp->onShowFm();
             return;
           }
+          if (slot->isChainSlotB3(c) && comp->onShowB3) {
+            comp->onShowB3();
+            return;
+          }
         }
         targetChain = 0;
         for (int c = 0; c < 3; ++c) {
           if (!slot->getPluginInstance(c) && !slot->isChainSlotMidiOut(c) &&
-              !slot->isChainSlotSynth(c) && !slot->isChainSlotFm(c)) {
+              !slot->isChainSlotSynth(c) && !slot->isChainSlotFm(c) &&
+              !slot->isChainSlotB3(c)) {
             targetChain = c;
             break;
           }
@@ -470,7 +666,8 @@ void MainComponent::setupSlotComponents() {
         targetChain = 0;
         for (int c = 0; c < 3; ++c) {
           if (!slot->getPluginInstance(c) && !slot->isChainSlotMidiOut(c) &&
-              !slot->isChainSlotSynth(c) && !slot->isChainSlotFm(c)) {
+              !slot->isChainSlotSynth(c) && !slot->isChainSlotFm(c) &&
+              !slot->isChainSlotB3(c)) {
             targetChain = c;
             break;
           }
@@ -521,6 +718,72 @@ void MainComponent::setupSlotComponents() {
       fmOverlay->updateForHostBounds(getLocalBounds());
     };
 
+    // Fanfare B3 Organ Dialog (native instrument — opens active B3 slot or binds
+    // the first free chain slot so B3 shows up in SLOT 1..3)
+    comp->onShowB3 = [this, slot, comp, wireB3Ext] {
+      int targetChain = -1;
+      for (int c = 0; c < 3; ++c)
+        if (slot->isChainSlotB3(c)) {
+          targetChain = c;
+          break;
+        }
+      if (targetChain < 0) {
+        targetChain = 0;
+        for (int c = 0; c < 3; ++c) {
+          if (!slot->getPluginInstance(c) && !slot->isChainSlotMidiOut(c) &&
+              !slot->isChainSlotSynth(c) && !slot->isChainSlotFm(c) &&
+              !slot->isChainSlotB3(c)) {
+            targetChain = c;
+            break;
+          }
+        }
+        if (auto *oldInstance = slot->getPluginInstance(targetChain))
+          closePluginWindowForInstance(oldInstance);
+        slot->setChainSlotB3(targetChain, true);
+        if (comp->getIsCollapsed()) {
+          comp->setCollapsed(false);
+          resized();
+        }
+        comp->repaint();
+      }
+      b3Overlay.reset(new B3OrganComponent(
+          *slot,
+          [this] {
+            b3Overlay.reset();
+            resized();
+          },
+          targetChain));
+
+      b3Overlay->onOpenNoteRange = [this, slot, comp] {
+        auto *nrComp = new NoteRangeComponent(*slot);
+        nrComp->setSize(860, 358);
+        setActiveMidiNoteLearner(nrComp);
+        auto targetArea = b3Overlay != nullptr
+                              ? b3Overlay->getMidiButtonScreenBounds()
+                              : comp->getScreenBounds();
+        auto &box = juce::CallOutBox::launchAsynchronously(
+            std::unique_ptr<juce::Component>(nrComp), targetArea, this);
+        box.setDismissalMouseClicksAreAlwaysConsumed(true);
+      };
+
+      b3Overlay->onOpenCCDialog = [this, slot, comp] {
+        auto *ccComp = new CCMappingComponent(*slot, 0);
+        ccComp->setSize(660, 510);
+        auto targetArea = b3Overlay != nullptr
+                              ? b3Overlay->getMidiButtonScreenBounds()
+                              : comp->getScreenBounds();
+        auto &box = juce::CallOutBox::launchAsynchronously(
+            std::unique_ptr<juce::Component>(ccComp), targetArea, this);
+        box.setDismissalMouseClicksAreAlwaysConsumed(true);
+      };
+
+      b3Overlay->onOpenMidiEffects = comp->onShowArpeggiator;
+
+      wireB3Ext(targetChain);
+      addAndMakeVisible(b3Overlay.get());
+      b3Overlay->updateForHostBounds(getLocalBounds());
+    };
+
     // Note Range Dialog (CallOutBox)
     comp->onShowNoteRangeDialog = [this, slot, comp] {
       auto *nrComp = new NoteRangeComponent(*slot);
@@ -549,14 +812,17 @@ void MainComponent::setupSlotComponents() {
           "Save Strip As...",
           FanfareConstants::getAppDirectory().getChildFile("strips"),
           "*.orstrip");
+      juce::Component::SafePointer<MainComponent> safeThis(this);
       fileChooser->launchAsync(juce::FileBrowserComponent::saveMode |
                                    juce::FileBrowserComponent::canSelectFiles,
-                               [this, i](const juce::FileChooser &fc) {
+                               [safeThis, i](const juce::FileChooser &fc) {
+                                 if (safeThis == nullptr)
+                                   return;
                                  auto file = fc.getResult();
                                  if (file == juce::File{})
                                    return;
                                  file.getParentDirectory().createDirectory();
-                                 engine.saveStripToFile(i, file);
+                                 safeThis->engine.saveStripToFile(i, file);
                                });
     };
 
@@ -564,27 +830,34 @@ void MainComponent::setupSlotComponents() {
     comp->onLoadStrip = [this, i, slot, comp] {
       juce::File selectedFile =
           libraryPanel ? libraryPanel->getSelectedPresetFile() : juce::File{};
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::Component::SafePointer<RackSlotComponent> safeComp(comp);
       if (selectedFile.existsAsFile()) {
         bool isSlotEmpty = true;
         for (int chainIdx = 0; chainIdx < 3; ++chainIdx) {
           if (slot->getPluginInstance(chainIdx) != nullptr ||
               slot->isChainSlotMidiOut(chainIdx) ||
               slot->isChainSlotSynth(chainIdx) ||
-              slot->isChainSlotFm(chainIdx)) {
+              slot->isChainSlotFm(chainIdx) ||
+              slot->isChainSlotB3(chainIdx)) {
             isSlotEmpty = false;
             break;
           }
         }
-        auto loadPreset = [this, i, slot, comp, selectedFile] {
+        auto loadPreset = [safeThis, i, slot, safeComp, selectedFile] {
+          if (safeThis == nullptr)
+            return;
           Fanfare::SongSlot loadedSlot;
           if (Fanfare::RigSerializer::readStripFromFile(selectedFile,
                                                         loadedSlot)) {
-            closePluginWindowsForSlot(slot);
-            engine.loadSlotPreset(i, loadedSlot);
-            if (comp->getIsCollapsed())
-              comp->setCollapsed(false);
-            resized();
-            comp->repaint();
+            safeThis->closePluginWindowsForSlot(slot);
+            safeThis->engine.loadSlotPreset(i, loadedSlot);
+            if (safeComp != nullptr) {
+              if (safeComp->getIsCollapsed())
+                safeComp->setCollapsed(false);
+              safeComp->repaint();
+            }
+            safeThis->resized();
           }
         };
         if (isSlotEmpty) {
@@ -609,18 +882,22 @@ void MainComponent::setupSlotComponents() {
         fileChooser->launchAsync(
             juce::FileBrowserComponent::openMode |
                 juce::FileBrowserComponent::canSelectFiles,
-            [this, i, slot, comp](const juce::FileChooser &fc) {
+            [safeThis, i, slot, safeComp](const juce::FileChooser &fc) {
+              if (safeThis == nullptr)
+                return;
               auto file = fc.getResult();
               if (file == juce::File{})
                 return;
               Fanfare::SongSlot loadedSlot;
               if (Fanfare::RigSerializer::readStripFromFile(file, loadedSlot)) {
-                closePluginWindowsForSlot(slot);
-                engine.loadSlotPreset(i, loadedSlot);
-                if (comp->getIsCollapsed())
-                  comp->setCollapsed(false);
-                resized();
-                comp->repaint();
+                safeThis->closePluginWindowsForSlot(slot);
+                safeThis->engine.loadSlotPreset(i, loadedSlot);
+                if (safeComp != nullptr) {
+                  if (safeComp->getIsCollapsed())
+                    safeComp->setCollapsed(false);
+                  safeComp->repaint();
+                }
+                safeThis->resized();
               }
             });
       }
@@ -667,20 +944,25 @@ void MainComponent::setupSlotComponents() {
       }
       m.addSeparator();
       m.addItem(1000, "Expand All Unused Strips (Disable Stage Compact)");
-      m.showMenuAsync(juce::PopupMenu::Options(), [this](int res) {
-        if (res >= 1 && res < rackSlotComponents.size()) {
-          auto *sc = rackSlotComponents[res];
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::Component::SafePointer<RackSlotComponent> safeComp(comp);
+      m.showMenuAsync(juce::PopupMenu::Options(), [safeThis, safeComp](int res) {
+        if (safeThis == nullptr)
+          return;
+        if (res >= 1 && res < safeThis->rackSlotComponents.size()) {
+          auto *sc = safeThis->rackSlotComponents[res];
           if (sc != nullptr) {
             sc->setCollapsed(false);
-            resized();
-            ensureStripVisibleInRack(sc);
+            safeThis->resized();
+            safeThis->ensureStripVisibleInRack(sc);
           }
         } else if (res == 1000) {
-          autoCollapseToggle.setToggleState(false, juce::dontSendNotification);
-          for (auto *sc : rackSlotComponents)
+          safeThis->autoCollapseToggle.setToggleState(false, juce::dontSendNotification);
+          for (auto *sc : safeThis->rackSlotComponents)
             sc->setCollapsed(false);
-          resized();
+          safeThis->resized();
         }
+        juce::ignoreUnused(safeComp);
       });
     };
     comp->onBypassChanged = [this](bool) {
@@ -696,7 +978,8 @@ void MainComponent::setupSlotComponents() {
       stripWidthSlider.setValue(preferredExpandedWidth,
                                 juce::dontSendNotification);
       resized();
-      savePreferredStripWidth();
+      stripWidthSavePending = true;
+      stripWidthSaveTicks = 0;
     };
 
     rackSlotComponents.add(comp);
@@ -712,35 +995,42 @@ void MainComponent::setupSlotComponents() {
 
     comp->onShowPluginMenu = [this, i, slot, comp](int chainIndex) {
       juce::PopupMenu menu;
-      if (false) {
-        int dummy = 0;
-        (void)dummy;
-      }
       for (int p = 0; p < engine.getNumAvailablePlugins(); ++p)
         menu.addItem(p + 1, engine.getAvailablePluginName(p));
       menu.addSeparator();
       menu.addItem(-1, "(No Plugin)");
 
-      menu.showMenuAsync(juce::PopupMenu::Options(), [this, i, slot, comp,
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::Component::SafePointer<RackSlotComponent> safeComp(comp);
+      menu.showMenuAsync(juce::PopupMenu::Options(), [safeThis, safeComp, i, slot,
                                                       chainIndex](int result) {
+        if (safeThis == nullptr || safeComp == nullptr)
+          return;
         if (result > 0 || result == -1) {
           if (auto *oldInstance = slot->getPluginInstance(chainIndex))
-            closePluginWindowForInstance(oldInstance);
+            safeThis->closePluginWindowForInstance(oldInstance);
         }
         if (result > 0) {
-          loadingOverlay.reset(new LoadingOverlay());
-          addAndMakeVisible(loadingOverlay.get());
-          engine.loadPluginIntoSlot(
+          safeThis->loadingOverlay.reset(new LoadingOverlay());
+          safeThis->addAndMakeVisible(safeThis->loadingOverlay.get());
+          safeThis->loadingOverlay->setBounds(safeThis->getLocalBounds());
+          safeThis->engine.loadPluginIntoSlot(
               (100 + i), chainIndex, result - 1,
-              [this, comp](bool s, const juce::String &e) {
+              [safeThis, safeComp](bool s, const juce::String &e) {
                 juce::ignoreUnused(s, e);
-                loadingOverlay.reset();
-                comp->repaint();
+                if (safeThis == nullptr)
+                  return;
+                safeThis->loadingOverlay.reset();
+                if (safeComp != nullptr)
+                  safeComp->repaint();
               });
         } else if (result == -1) {
-          juce::ScopedLock sl(engine.getCallbackLock());
-          slot->setPluginInChain(chainIndex, nullptr);
-          comp->repaint();
+          if (slot != nullptr) {
+            juce::ScopedLock sl(safeThis->engine.getCallbackLock());
+            slot->setPluginInChain(chainIndex, nullptr);
+          }
+          if (safeComp != nullptr)
+            safeComp->repaint();
         }
       });
     };
@@ -788,16 +1078,31 @@ void MainComponent::setupSlotComponents() {
         if (ok && editor != nullptr) {
           auto *w =
               new PluginWindow(slot->getPluginName(chainIndex), editor, plugin);
-          w->onWindowClosed = [safeThis, w] {
-            if (safeThis == nullptr)
-              return;
-            if (safeThis->activePluginWindows.contains(w)) {
-              safeThis->activePluginWindows.removeObject(w, false);
-              w->destroyEditorNow();
-              juce::MessageManager::callAsync([w]() { delete w; });
+          juce::Component::SafePointer<PluginWindow> safeW(w);
+          w->onWindowClosed = [safeThis, safeW] {
+            if (safeThis != nullptr && safeW != nullptr &&
+                safeThis->activePluginWindows.contains(safeW.getComponent())) {
+              auto *rawW = safeW.getComponent();
+              safeThis->activePluginWindows.removeObject(rawW, false);
+              safeThis->openPluginWindowCount.store(
+                  safeThis->activePluginWindows.size(),
+                  std::memory_order_release);
+              rawW->destroyEditorNow();
+              juce::MessageManager::callAsync([safeW]() {
+                if (safeW != nullptr)
+                  delete safeW.getComponent();
+              });
+            } else if (safeW != nullptr) {
+              safeW->destroyEditorNow();
+              juce::MessageManager::callAsync([safeW]() {
+                if (safeW != nullptr)
+                  delete safeW.getComponent();
+              });
             }
           };
           safeThis->activePluginWindows.add(w);
+          safeThis->openPluginWindowCount.store(
+              safeThis->activePluginWindows.size(), std::memory_order_release);
           if (safeThis->webServer != nullptr)
             safeThis->webServer->registerPluginMirrorSource(
                 editor, w->getPeer() ? w->getPeer()->getNativeHandle() : nullptr,
@@ -853,8 +1158,7 @@ void MainComponent::setupHeaderButtons() {
                       "stuck MIDI notes & flushes audio buffers.");
   panicBtn.onClick = [this] {
     engine.triggerPanic();
-    LOG_INFO("PANIC: All notes killed & audio buffers flushed. Take a breath, "
-             "you've got this!");
+    LOG_INFO("PANIC: All notes silenced and audio buffers flushed.");
   };
 
   // Reset Audio button
@@ -1045,7 +1349,7 @@ void MainComponent::setupHeaderButtons() {
   quickStartBtn.onClick = [this] { showQuickStartDialog(false); };
 
   Fanfare::styleHelpButton(mainHelpBtn, "#main-mixer",
-                           "HAAALP! Open the Fanfare User's Manual");
+                           "Open the Fanfare User's Manual");
   addAndMakeVisible(mainHelpBtn);
 
   addChildComponent(updateBadgeBtn);
@@ -1062,8 +1366,10 @@ void MainComponent::setupHeaderButtons() {
   prevSetlistBtn.onClick = [this] {
     auto &sm = Fanfare::SetlistManager::getInstance();
     if (sm.hasPrev()) {
+      auto setups = sm.getSetupsSnapshot();
       int idx = sm.getActiveIndex() - 1;
-      loadRigFromFile(sm.getSetups()[idx], idx);
+      if (idx >= 0 && idx < setups.size())
+        loadRigFromFile(setups[idx], idx);
     }
   };
 
@@ -1073,8 +1379,10 @@ void MainComponent::setupHeaderButtons() {
   nextSetlistBtn.onClick = [this] {
     auto &sm = Fanfare::SetlistManager::getInstance();
     if (sm.hasNext()) {
+      auto setups = sm.getSetupsSnapshot();
       int idx = sm.getActiveIndex() + 1;
-      loadRigFromFile(sm.getSetups()[idx], idx);
+      if (idx >= 0 && idx < setups.size())
+        loadRigFromFile(setups[idx], idx);
     }
   };
 
@@ -1178,7 +1486,8 @@ void MainComponent::setupHeaderButtons() {
   stripWidthSlider.onValueChange = [this] {
     preferredExpandedWidth = (int)stripWidthSlider.getValue();
     resized();
-    savePreferredStripWidth();
+    stripWidthSavePending = true;
+    stripWidthSaveTicks = 0;
   };
 
   // Load embedded Fanfare white logo (for dark stage UI)
@@ -1327,18 +1636,21 @@ void MainComponent::setupSetupButtons() {
     alert->addTextEditor("name", engine.getSceneName(idx));
     alert->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey));
     alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    juce::Component::SafePointer<juce::AlertWindow> safeAlert(alert);
     alert->enterModalState(
         true,
-        juce::ModalCallbackFunction::create([this, idx, alert](int result) {
-          if (result == 1) {
-            juce::String newName = alert->getTextEditorContents("name");
-            if (newName.isNotEmpty()) {
-              engine.renameScene(idx, newName);
-              refreshSceneButtons();
-            }
-          }
-          delete alert;
-        }));
+        juce::ModalCallbackFunction::create(
+            [safeThis, idx, safeAlert](int result) {
+              if (safeThis != nullptr && safeAlert != nullptr && result == 1) {
+                juce::String newName = safeAlert->getTextEditorContents("name");
+                if (newName.isNotEmpty()) {
+                  safeThis->engine.renameScene(idx, newName);
+                  safeThis->refreshSceneButtons();
+                }
+              }
+            }),
+        true);
   };
 
   deleteSceneBtn.onClick = [this] {

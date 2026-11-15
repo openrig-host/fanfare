@@ -91,8 +91,16 @@ public:
 
   void prepare(double sampleRate, int maxBlockSize = 8192) {
     currentSampleRate = sampleRate;
-    maxBlock = juce::jmax(64, maxBlockSize);
+    maxBlock = juce::jmax(8192, maxBlockSize);
     engine_.prepare(sampleRate);
+    {
+      juce::SpinLock::ScopedLockType sl(patchSyncLock);
+      engine_.setMode(uiMode_);
+      engine_.setPatch(uiPatch_, true);
+      pendingToAudioModeValid = false;
+      pendingToAudioPatchValid = false;
+      pendingToAudioDirty.store(false, std::memory_order_release);
+    }
     scratchInt.assign((size_t)maxBlock, 0);
     fxBuf.assign((size_t)2 * maxBlock, 0.0f);
     uiMidiQueue.ensureSize(2048);
@@ -119,11 +127,12 @@ public:
 
   void panicNow() {
     engine_.panic();
+    heldNotes.reset();
     activeVoicesCount.store(0);
   }
 
-  void allNotesOff() { engine_.allNotesOff(); }
-  void requestPanic() { panicPending.store(true); }
+  void allNotesOff() { allNotesOffPending.store(true, std::memory_order_release); }
+  void requestPanic() { panicPending.store(true, std::memory_order_release); }
 
   int getActiveVoices() const { return activeVoicesCount.load(); }
   float getOutputPeakL() const { return peakOutL.load(); }
@@ -140,16 +149,90 @@ public:
   }
 
   void setUiPitchBend(float bipolar) {
-    engine_.setPitchBend(8192 + (int)(bipolar * 8191.0f));
+    uiPitchBendPending.store(8192 + (int)(bipolar * 8191.0f),
+                             std::memory_order_release);
   }
-  void setUiModWheel(float norm) { engine_.setModWheel((int)(norm * 127.0f)); }
+  void setUiModWheel(float norm) {
+    uiModWheelPending.store((int)(norm * 127.0f), std::memory_order_release);
+  }
 
-  FanfareFm::FmEngine &engine() { return engine_; }
-  const FanfareFm::FmEngine &engine() const { return engine_; }
+  FanfareFm::FmPatch &uiPatch() { return uiPatch_; }
+  const FanfareFm::FmPatch &uiPatch() const { return uiPatch_; }
+  FanfareFm::FmMode uiMode() const { return uiMode_; }
+  int uiPolyphony() const {
+    return FanfareFm::fmModeIsDual(uiMode_)
+               ? FanfareFm::FmEngine::kMaxVoices / 2
+               : FanfareFm::FmEngine::kMaxVoices;
+  }
+  int uiNumOps() const { return FanfareFm::fmModeNumOps(uiMode_); }
+  int uiEffectiveAlg() const {
+    const int mx = FanfareFm::fmModeMaxAlg(uiMode_);
+    const int a = uiPatch_.d[134];
+    return a >= mx ? mx - 1 : a;
+  }
 
-  int getMode() const { return (int)engine_.mode(); }
+  void commitUiPatch(bool forceResetLfo = false) {
+    juce::SpinLock::ScopedLockType sl(patchSyncLock);
+    const int mx = FanfareFm::fmModeMaxAlg(uiMode_);
+    if (uiPatch_.d[134] >= mx)
+      uiPatch_.d[134] = (uint8_t)(mx - 1);
+    const bool lfoChanged =
+        (uiPatch_.d[137] != lastUiLfoBytes_[0]) ||
+        (uiPatch_.d[138] != lastUiLfoBytes_[1]) ||
+        (uiPatch_.d[141] != lastUiLfoBytes_[4]) ||
+        (uiPatch_.d[142] != lastUiLfoBytes_[5]);
+    std::memcpy(lastUiLfoBytes_, uiPatch_.d + 137, 6);
+    pendingToAudioPatch = uiPatch_;
+    pendingToAudioPatchValid = true;
+    pendingToAudioResetLfo = pendingToAudioResetLfo || forceResetLfo || lfoChanged;
+    pendingToAudioDirty.store(true, std::memory_order_release);
+  }
+
+  void loadUiPatchRaw(const FanfareFm::FmPatch &p) {
+    {
+      juce::SpinLock::ScopedLockType sl(patchSyncLock);
+      FanfareFm::FmPatch q = p;
+      if (FanfareFm::fmModeNumOps(uiMode_) == 4)
+        q.d[134] = (uint8_t)FanfareFm::dx7AlgTo4op(q.d[134]);
+      uiPatch_ = q;
+    }
+    commitUiPatch(true);
+  }
+
+  bool syncFromAudio() {
+    if (!audioPatchDirtyFromAudio.exchange(false, std::memory_order_acq_rel))
+      return false;
+    juce::SpinLock::ScopedLockType sl(patchSyncLock);
+    if (pendingToAudioPatchValid)
+      return false;
+    uiPatch_ = audioPatchSnapshot;
+    std::memcpy(lastUiLfoBytes_, uiPatch_.d + 137, 6);
+    return true;
+  }
+
+  int getMode() const { return (int)uiMode_; }
   void setMode(int m) {
-    engine_.setMode((FanfareFm::FmMode)juce::jlimit(0, 4, m));
+    const auto nextMode = (FanfareFm::FmMode)juce::jlimit(0, 4, m);
+    {
+      juce::SpinLock::ScopedLockType sl(patchSyncLock);
+      if (FanfareFm::fmModeNumOps(nextMode) != FanfareFm::fmModeNumOps(uiMode_)) {
+        if (FanfareFm::fmModeNumOps(nextMode) == 4)
+          uiPatch_.d[134] = (uint8_t)FanfareFm::dx7AlgTo4op(uiPatch_.d[134]);
+        else
+          uiPatch_.d[134] = (uint8_t)FanfareFm::alg4opToDx7(uiPatch_.d[134]);
+      }
+      uiMode_ = nextMode;
+      const int mx = FanfareFm::fmModeMaxAlg(uiMode_);
+      if (uiPatch_.d[134] >= mx)
+        uiPatch_.d[134] = (uint8_t)(mx - 1);
+      std::memcpy(lastUiLfoBytes_, uiPatch_.d + 137, 6);
+      pendingToAudioMode = uiMode_;
+      pendingToAudioPatch = uiPatch_;
+      pendingToAudioModeValid = true;
+      pendingToAudioPatchValid = true;
+      pendingToAudioResetLfo = true;
+      pendingToAudioDirty.store(true, std::memory_order_release);
+    }
     markDirty();
   }
 
@@ -263,14 +346,13 @@ public:
 
   void loadPreset(const PresetEntry &e, int explicitIndex = -1) {
     if (!e.isUser && !e.isImported) {
-      const auto curMode = engine_.mode();
-      if (FanfareFm::fmModeNumOps(curMode) == 4) {
-        engine_.setMode(FanfareFm::fmModeIsDual(curMode)
-                            ? FanfareFm::FmMode::Dual6
-                            : FanfareFm::FmMode::Dx7);
+      if (FanfareFm::fmModeNumOps(uiMode_) == 4) {
+        setMode(FanfareFm::fmModeIsDual(uiMode_)
+                    ? (int)FanfareFm::FmMode::Dual6
+                    : (int)FanfareFm::FmMode::Dx7);
       }
     }
-    engine_.loadPatchRaw(e.patch);
+    loadUiPatchRaw(e.patch);
     if (e.hasCuratedFx) {
       for (int i = 0; i < (int)kNumFmFx; ++i)
         fx[(size_t)i].store(e.fxValues[(size_t)i], std::memory_order_relaxed);
@@ -355,6 +437,17 @@ public:
   }
 
   juce::var getState() const {
+    FanfareFm::FmPatch patchCopy;
+    FanfareFm::FmMode modeCopy;
+    {
+      juce::SpinLock::ScopedLockType sl(patchSyncLock);
+      patchCopy = (audioPatchDirtyFromAudio.load(std::memory_order_acquire) &&
+                   !pendingToAudioPatchValid)
+                      ? audioPatchSnapshot
+                      : uiPatch_;
+      modeCopy = uiMode_;
+    }
+
     auto *obj = new juce::DynamicObject();
     obj->setProperty("version", 2);
     obj->setProperty("enabled", enabled.load());
@@ -362,17 +455,20 @@ public:
     obj->setProperty("presetProvenance", presetProvenance);
     obj->setProperty("presetCategory", presetCategory);
     obj->setProperty("presetDirty", presetDirty.load());
-    obj->setProperty("mode", (int)engine_.mode());
+    obj->setProperty("mode", (int)modeCopy);
     obj->setProperty("volume", (double)volume.load());
-    const auto &p = engine_.patch();
-    obj->setProperty("patch", juce::Base64::toBase64(p.d, FanfareFm::kPatchSize));
+    obj->setProperty("patch",
+                     juce::Base64::toBase64(patchCopy.d, FanfareFm::kPatchSize));
     auto *fxObj = new juce::DynamicObject();
     for (int i = 0; i < (int)kNumFmFx; ++i)
       fxObj->setProperty(fxKeyName(i), (double)fx[(size_t)i].load());
     obj->setProperty("fx", juce::var(fxObj));
     auto *ccObj = new juce::DynamicObject();
-    for (const auto &kv : ccMap_)
-      ccObj->setProperty(kv.first, kv.second);
+    {
+      juce::SpinLock::ScopedLockType sl(ccMapLock);
+      for (const auto &kv : ccMap_)
+        ccObj->setProperty(kv.first, kv.second);
+    }
     obj->setProperty("ccMap", juce::var(ccObj));
     return juce::var(obj);
   }
@@ -394,30 +490,47 @@ public:
     presetDirty.store(obj->hasProperty("presetDirty")
                           ? (bool)obj->getProperty("presetDirty")
                           : false);
-    if (obj->hasProperty("mode"))
-      engine_.setMode((FanfareFm::FmMode)(int)obj->getProperty("mode"));
     if (obj->hasProperty("volume"))
       volume.store((float)(double)obj->getProperty("volume"));
-    FanfareFm::FmPatch p;
-    if (patchFromState(obj->getProperty("patch"), p))
-      engine_.setPatch(p);
+    {
+      juce::SpinLock::ScopedLockType sl(patchSyncLock);
+      if (obj->hasProperty("mode"))
+        uiMode_ = (FanfareFm::FmMode)juce::jlimit(
+            0, 4, (int)obj->getProperty("mode"));
+      FanfareFm::FmPatch p;
+      if (patchFromState(obj->getProperty("patch"), p))
+        uiPatch_ = p;
+      const int mx = FanfareFm::fmModeMaxAlg(uiMode_);
+      if (uiPatch_.d[134] >= mx)
+        uiPatch_.d[134] = (uint8_t)(mx - 1);
+      std::memcpy(lastUiLfoBytes_, uiPatch_.d + 137, 6);
+      pendingToAudioMode = uiMode_;
+      pendingToAudioPatch = uiPatch_;
+      pendingToAudioModeValid = true;
+      pendingToAudioPatchValid = true;
+      pendingToAudioResetLfo = true;
+      pendingToAudioDirty.store(true, std::memory_order_release);
+    }
     if (auto *fxObj = obj->getProperty("fx").getDynamicObject()) {
       for (int i = 0; i < (int)kNumFmFx; ++i) {
         if (fxObj->hasProperty(fxKeyName(i)))
           fx[(size_t)i].store((float)(double)fxObj->getProperty(fxKeyName(i)));
       }
     }
-    ccMap_.clear();
-    for (int i = 0; i < (int)kNumFmCcParams; ++i)
-      ccParamAtomics[(size_t)i].store(-1, std::memory_order_relaxed);
-    if (auto *cc = obj->getProperty("ccMap").getDynamicObject()) {
-      for (const auto &kv : cc->getProperties()) {
-        const juce::String key = kv.name.toString();
-        const int val = (int)kv.value;
-        ccMap_[key] = val;
-        const int idx = ccParamIndexForId(key);
-        if (idx >= 0)
-          ccParamAtomics[(size_t)idx].store(val, std::memory_order_relaxed);
+    {
+      juce::SpinLock::ScopedLockType sl(ccMapLock);
+      ccMap_.clear();
+      for (int i = 0; i < (int)kNumFmCcParams; ++i)
+        ccParamAtomics[(size_t)i].store(-1, std::memory_order_relaxed);
+      if (auto *cc = obj->getProperty("ccMap").getDynamicObject()) {
+        for (const auto &kv : cc->getProperties()) {
+          const juce::String key = kv.name.toString();
+          const int val = (int)kv.value;
+          ccMap_[key] = val;
+          const int idx = ccParamIndexForId(key);
+          if (idx >= 0)
+            ccParamAtomics[(size_t)idx].store(val, std::memory_order_relaxed);
+        }
       }
     }
     syncCatalogIndex();
@@ -432,6 +545,7 @@ public:
     const int idx = ccParamIndexForId(id);
     if (idx >= 0)
       return ccParamAtomics[(size_t)idx].load(std::memory_order_relaxed);
+    juce::SpinLock::ScopedLockType sl(ccMapLock);
     auto it = ccMap_.find(id);
     return it != ccMap_.end() ? it->second : -1;
   }
@@ -439,6 +553,7 @@ public:
     const int idx = ccParamIndexForId(id);
     if (idx >= 0)
       ccParamAtomics[(size_t)idx].store(cc, std::memory_order_relaxed);
+    juce::SpinLock::ScopedLockType sl(ccMapLock);
     if (cc < 0)
       ccMap_.erase(id);
     else
@@ -456,6 +571,33 @@ public:
 
     if (panicPending.exchange(false, std::memory_order_acq_rel))
       panicNow();
+    if (allNotesOffPending.exchange(false, std::memory_order_acq_rel)) {
+      engine_.allNotesOff();
+      heldNotes.reset();
+    }
+
+    if (pendingToAudioDirty.load(std::memory_order_acquire)) {
+      juce::SpinLock::ScopedTryLockType sl(patchSyncLock);
+      if (sl.isLocked()) {
+        if (pendingToAudioModeValid) {
+          engine_.setMode(pendingToAudioMode);
+          pendingToAudioModeValid = false;
+        }
+        if (pendingToAudioPatchValid) {
+          engine_.setPatch(pendingToAudioPatch, pendingToAudioResetLfo);
+          pendingToAudioPatchValid = false;
+          pendingToAudioResetLfo = false;
+        }
+        pendingToAudioDirty.store(false, std::memory_order_release);
+      }
+    }
+
+    const int pendingPb = uiPitchBendPending.exchange(-1, std::memory_order_acq_rel);
+    if (pendingPb >= 0)
+      engine_.setPitchBend(pendingPb);
+    const int pendingMw = uiModWheelPending.exchange(-1, std::memory_order_acq_rel);
+    if (pendingMw >= 0)
+      engine_.setModWheel(pendingMw);
 
     mergedMidiScratch.clear();
     {
@@ -490,6 +632,15 @@ public:
       } else if (msg.isAllNotesOff() || msg.isAllSoundOff()) {
         engine_.allNotesOff();
         heldNotes.reset();
+      }
+    }
+
+    if (audioPatchMirrorPending) {
+      juce::SpinLock::ScopedTryLockType sl(patchSyncLock);
+      if (sl.isLocked() && !pendingToAudioPatchValid) {
+        audioPatchSnapshot = engine_.patch();
+        audioPatchDirtyFromAudio.store(true, std::memory_order_release);
+        audioPatchMirrorPending = false;
       }
     }
 
@@ -595,6 +746,9 @@ private:
     FanfareFm::FmPatch p{};
     std::memcpy(p.d, list[chosen].patchBytes, FanfareFm::kPatchSize);
     engine_.loadPatchRaw(p);
+    uiPatch_ = engine_.patch();
+    uiMode_ = engine_.mode();
+    std::memcpy(lastUiLfoBytes_, uiPatch_.d + 137, 6);
     for (int k = 0; k < (int)kNumFmFx; ++k)
       fx[(size_t)k].store(list[chosen].fx[k], std::memory_order_relaxed);
     presetName = juce::String::fromUTF8(list[chosen].name);
@@ -667,6 +821,7 @@ private:
     }
     const float norm = value / 127.0f;
     bool patchModified = false;
+    bool lfoRateModified = false;
     auto &p = engine_.patch();
     for (int i = 0; i < (int)kNumFmCcParams; ++i) {
       if (ccParamAtomics[(size_t)i].load(std::memory_order_relaxed) != cc)
@@ -688,6 +843,7 @@ private:
       case ccParamLfoRate:
         p.d[137] = (uint8_t)(norm * 99.0f);
         patchModified = true;
+        lfoRateModified = true;
         break;
       case ccParamLfoPmd:
         p.d[139] = (uint8_t)(norm * 99.0f);
@@ -701,15 +857,30 @@ private:
         p.d[144] = (uint8_t)juce::jlimit(0, 48, (int)(norm * 48.0f));
         patchModified = true;
         break;
+      case ccParamBendRange:
+        engine_.setPitchBendRange(1 + (int)std::lround(norm * 23.0f));
+        break;
       default:
         break;
       }
     }
-    if (patchModified)
-      engine_.setPatch(p);
+    if (patchModified) {
+      engine_.setPatch(p, lfoRateModified);
+      audioPatchMirrorPending = true;
+    }
   }
 
   FanfareFm::FmEngine engine_;
+  FanfareFm::FmPatch uiPatch_{};
+  FanfareFm::FmMode uiMode_ = FanfareFm::FmMode::Dx7;
+  FanfareFm::FmPatch pendingToAudioPatch{};
+  FanfareFm::FmMode pendingToAudioMode = FanfareFm::FmMode::Dx7;
+  FanfareFm::FmPatch audioPatchSnapshot{};
+  uint8_t lastUiLfoBytes_[6]{};
+  bool pendingToAudioModeValid = false;
+  bool pendingToAudioPatchValid = false;
+  bool pendingToAudioResetLfo = false;
+  bool audioPatchMirrorPending = false;
   double currentSampleRate = 44100.0;
   int maxBlock = 8192;
   std::vector<int32_t> scratchInt;
@@ -723,9 +894,16 @@ private:
   std::atomic<float> peakOutL{0.0f}, peakOutR{0.0f};
   std::atomic<int> activeVoicesCount{0};
   std::atomic<bool> panicPending{false};
+  std::atomic<bool> allNotesOffPending{false};
+  std::atomic<bool> pendingToAudioDirty{false};
+  std::atomic<bool> audioPatchDirtyFromAudio{false};
+  std::atomic<int> uiPitchBendPending{-1};
+  std::atomic<int> uiModWheelPending{-1};
   std::atomic<bool> sustainOn{false};
   std::atomic<float> volume{0.8f};
   juce::SpinLock uiMidiLock;
+  mutable juce::SpinLock patchSyncLock;
+  mutable juce::SpinLock ccMapLock;
   juce::MidiBuffer uiMidiQueue;
   juce::MidiBuffer mergedMidiScratch;
   juce::String presetName{"E.PIANO 1"};

@@ -52,7 +52,7 @@ public:
         setButtonRole(moveDownBtn, ButtonRole::Standard);
         moveDownBtn.onClick = [this] {
             int sel = listBox.getSelectedRow();
-            if (sel >= 0 && sel < SetlistManager::getInstance().getSetups().size() - 1) {
+            if (sel >= 0 && sel < SetlistManager::getInstance().getSetupsSnapshot().size() - 1) {
                 SetlistManager::getInstance().moveSetupDown(sel);
                 listBox.selectRow(sel + 1);
             }
@@ -66,8 +66,11 @@ public:
                 "Save Setlist",
                 RigLibrary::getSongsDirectory(),
                 "*.orsetlist");
+            juce::Component::SafePointer<SetlistPanel> safeThis(this);
             fileChooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
-                [this](const juce::FileChooser& fc) {
+                [safeThis](const juce::FileChooser& fc) {
+                    if (safeThis == nullptr)
+                        return;
                     auto file = fc.getResult();
                     if (file != juce::File{}) {
                         if (file.getFileExtension().isEmpty())
@@ -85,8 +88,11 @@ public:
                 "Load Setlist",
                 RigLibrary::getSongsDirectory(),
                 "*.orsetlist");
+            juce::Component::SafePointer<SetlistPanel> safeThis(this);
             fileChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                [this](const juce::FileChooser& fc) {
+                [safeThis](const juce::FileChooser& fc) {
+                    if (safeThis == nullptr)
+                        return;
                     auto file = fc.getResult();
                     if (file.existsAsFile()) {
                         SetlistManager::getInstance().loadSetlist(file);
@@ -112,17 +118,31 @@ public:
     std::function<void()> onAddCurrentRequested;
     std::function<void(const juce::File&, int)> onLoadSetupRequested;
 
+    void paintOverChildren(juce::Graphics& g) override {
+        if (SetlistManager::getInstance().getSetupsSnapshot().isEmpty()) {
+            const auto& t = ThemeManager::getInstance().active();
+            auto area = listBox.getBounds().reduced(12);
+            if (!area.isEmpty()) {
+                g.setFont(BoutiqueLookAndFeel::uiFont(12.0f, false));
+                g.setColour(t.textFaint);
+                g.drawFittedText("Setlist is empty.\nClick ADD CUR or drag songs from the library here.",
+                                 area, juce::Justification::centred, 3);
+            }
+        }
+    }
+
     void changeListenerCallback(juce::ChangeBroadcaster*) override {
         listBox.updateContent();
         listBox.repaint();
+        repaint();
     }
 
     int getNumRows() override {
-        return SetlistManager::getInstance().getSetups().size();
+        return SetlistManager::getInstance().getSetupsSnapshot().size();
     }
 
     void paintListBoxItem(int row, juce::Graphics& g, int width, int height, bool isSelected) override {
-        auto setups = SetlistManager::getInstance().getSetups();
+        auto setups = SetlistManager::getInstance().getSetupsSnapshot();
         if (row < 0 || row >= setups.size())
             return;
 
@@ -163,7 +183,7 @@ public:
     }
 
     void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override {
-        auto setups = SetlistManager::getInstance().getSetups();
+        auto setups = SetlistManager::getInstance().getSetupsSnapshot();
         if (row >= 0 && row < setups.size()) {
             if (onLoadSetupRequested)
                 onLoadSetupRequested(setups[row], row);

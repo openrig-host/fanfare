@@ -100,7 +100,7 @@ public:
         closeBtn.onClick = [this] { if (actions.onClose) actions.onClose(); };
         addAndMakeVisible(closeBtn);
 
-        Fanfare::styleHelpButton(helpBtn, "#song-builder", "HAAALP! Open the Song Builder section of the User's Manual");
+        Fanfare::styleHelpButton(helpBtn, "#song-builder", "Open the Song Builder section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
         stripsDir = Fanfare::RigLibrary::getPresetsDirectory();
@@ -224,7 +224,7 @@ private:
 
     juce::Label titleLabel;
     juce::TextButton closeBtn;
-    juce::TextButton helpBtn{"HAAALP!"};
+    juce::TextButton helpBtn{"Help"};
     juce::ListBox listBox{ "StripsList", nullptr };
 
     juce::Label nameLabel;

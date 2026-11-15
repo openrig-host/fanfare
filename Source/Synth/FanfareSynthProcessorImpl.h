@@ -45,18 +45,30 @@ public:
     for (int i = 0; i < (int)stealTails.size(); ++i)
       stealTails[(size_t)i].initCardTolerance(i);
     resetAllCCsToDefault();
-    applyDefaults();
-    setPresetMetadata(FanfareSynth::StateSchema::kDefaultInitPresetName, false);
+    bool loadedDefault = false;
+    for (const auto &p : factoryPresets()) {
+      if (p.getProperty("name", "").toString() == "Jump!") {
+        applyPreset(p);
+        loadedDefault = true;
+        break;
+      }
+    }
+    if (!loadedDefault) {
+      applyDefaults();
+      setPresetMetadata(FanfareSynth::StateSchema::kDefaultInitPresetName, false);
+    }
   }
 
   void prepare(double sampleRate, int maxBlockSize = 8192) {
     using namespace FanfareSynth;
+    (void)Dsp::WavetableBank::instance();
     currentSampleRate = juce::jmax(DspConfig::kMinSampleRate, sampleRate);
     const int safeBlock = juce::jmax(maxBlockSize, DspConfig::kMinBlockSize);
 
     synthBuffer.setSize(2, safeBlock, false, false, true);
     synthBuffer.clear();
     lfoScratch.assign((size_t)safeBlock, 0.0f);
+    sustainedNotes.reserve(64);
     uiMidiQueue.ensureSize(2048);
 
     chorus.prepare(currentSampleRate);
@@ -646,6 +658,9 @@ private:
   void handleNoteOn(int note, float vel,
                     const FanfareSynth::ParamSnapshot &s) noexcept {
     using namespace FanfareSynth;
+    sustainedNotes.erase(
+        std::remove(sustainedNotes.begin(), sustainedNotes.end(), note),
+        sustainedNotes.end());
     const int mode = (int)std::lround(s[ParamId::voiceMode]);
     const int uni = unisonVoiceCount(s[ParamId::unison]);
     const bool monoFamily = (mode != 0) || (uni > 1);
@@ -724,6 +739,7 @@ private:
       u.baseFreq = targetFreq;
       u.glideTarget = targetFreq;
       u.velocity = juce::jmax(vel, (float)DspConfig::kMinNoteVelocity);
+      u.velocityCurveGain = std::pow((double)u.velocity, 1.35);
       u.startedTick = globalTick;
 
       if (!wasSounding) {
@@ -771,6 +787,7 @@ private:
     u.midiNote = note;
     u.velocity =
         juce::jmax(vel, (float)FanfareSynth::DspConfig::kMinNoteVelocity);
+    u.velocityCurveGain = std::pow((double)u.velocity, 1.35);
     u.baseFreq = midiNoteToFreq(note);
     u.detuneCents = 0.0f;
     u.panL = 0.70710678f;
@@ -793,8 +810,11 @@ private:
   void handleNoteOff(int note,
                      const FanfareSynth::ParamSnapshot &s) noexcept {
     if (sustainOn) {
-      if ((int)sustainedNotes.size() < 64)
+      if (std::find(sustainedNotes.begin(), sustainedNotes.end(), note) ==
+              sustainedNotes.end() &&
+          (int)sustainedNotes.size() < 64) {
         sustainedNotes.push_back(note);
+      }
       return;
     }
     releaseNote(note, s);
@@ -806,30 +826,40 @@ private:
     const int uni = unisonVoiceCount(s[ParamId::unison]);
     const bool monoFamily = (mode != 0) || (uni > 1);
 
+    const bool wasTopMonoNote =
+        (!monoStack.empty() && monoStack.back() == note);
+    monoStack.erase(std::remove(monoStack.begin(), monoStack.end(), note),
+                    monoStack.end());
+
     if (monoFamily) {
-      for (int i = (int)monoStack.size() - 1; i >= 0; --i) {
-        if (monoStack[(size_t)i] == note) {
-          monoStack.erase(monoStack.begin() + i);
-          break;
+      if (wasTopMonoNote) {
+        if (!monoStack.empty()) {
+          const int fallbackNote = monoStack.back();
+          const double targetFreq = midiNoteToFreq(fallbackNote);
+          const bool glideEnabled =
+              ((int)std::lround(s[ParamId::glideMode]) > 0);
+          for (int ui : monoUnits) {
+            auto &u = units[(size_t)ui];
+            u.midiNote = fallbackNote;
+            u.baseFreq = targetFreq;
+            u.glideTarget = targetFreq;
+            if (glideEnabled)
+              u.gliding = true;
+            else
+              u.glideFreq = targetFreq;
+          }
+        } else {
+          for (int ui : monoUnits) {
+            auto &u = units[(size_t)ui];
+            u.ampEnv.noteOff();
+            u.filtEnv.noteOff();
+            u.gateEnv.noteOff();
+            u.midiNote = -1;
+          }
         }
       }
-      if (!monoStack.empty()) {
-        const int fallbackNote = monoStack.back();
-        const double targetFreq = midiNoteToFreq(fallbackNote);
-        const bool glideEnabled = ((int)std::lround(s[ParamId::glideMode]) > 0);
-        for (int ui : monoUnits) {
-          auto &u = units[(size_t)ui];
-          u.midiNote = fallbackNote;
-          u.baseFreq = targetFreq;
-          u.glideTarget = targetFreq;
-          if (glideEnabled)
-            u.gliding = true;
-          else
-            u.glideFreq = targetFreq;
-        }
-      } else {
-        for (int ui : monoUnits) {
-          auto &u = units[(size_t)ui];
+      for (auto &u : units) {
+        if (u.active && !u.reservedMono && u.midiNote == note) {
           u.ampEnv.noteOff();
           u.filtEnv.noteOff();
           u.gateEnv.noteOff();
@@ -1057,11 +1087,21 @@ private:
                                          (double)pwManual);
       pulseWidth = center + (double)s[ParamId::pwmDepth] *
                                 DspConfig::kPwmMaxModSpan * pwmVal;
+    } else if (pwmSrc == 3) {
+      const double envVal = envSrcIsAmp ? u.ampEnv.level : u.filtEnv.level;
+      const double span =
+          envPolSign * (double)s[ParamId::pwmDepth] *
+          (DspConfig::kMaxPulseWidth - DspConfig::kMinPulseWidth) * envVal;
+      pulseWidth = (double)pwManual + span;
     }
     pulseWidth = juce::jlimit(DspConfig::kMinPulseWidth,
                               DspConfig::kMaxPulseWidth, pulseWidth);
+    const double wtPos = juce::jlimit(
+        0.0, 1.0,
+        (pulseWidth - DspConfig::kMinPulseWidth) /
+            (DspConfig::kMaxPulseWidth - DspConfig::kMinPulseWidth));
 
-    const double velCurve = std::pow((double)u.velocity, 1.35);
+    const double velCurve = u.velocityCurveGain;
     const double ampVelGain =
         (1.0 - (double)s[ParamId::velToAmp]) +
         (double)s[ParamId::velToAmp] * velCurve;
@@ -1118,13 +1158,14 @@ private:
       curG += gStep;
       u.ladder.setG(curG);
 
-      const auto dco1 =
-          u.osc1.nextWithSub(dt1, w1, pulseWidth, subMode, computeSub);
+      const auto dco1 = u.osc1.nextWithSub(dt1, w1, pulseWidth, subMode,
+                                           computeSub, wtPos);
       double mix = dco1.mainSample * (double)o1Gain +
                    dco1.subSample * (double)subGain;
 
       if (computeO2)
-        mix += u.osc2.nextMainOnly(dt2, w2, pulseWidth) * (double)o2Gain;
+        mix +=
+            u.osc2.nextMainOnly(dt2, w2, pulseWidth, wtPos) * (double)o2Gain;
       if (computeNoise)
         mix += u.noiseGen.next() * (double)noiseGain * 0.55;
 

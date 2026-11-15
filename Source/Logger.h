@@ -58,7 +58,7 @@ inline uint32_t getCurrentThreadId() noexcept {
 
 enum class Level { Debug, Info, Warning, Error };
 
-inline Level currentMinLevel = Level::Info;
+inline std::atomic<Level> currentMinLevel{Level::Info};
 
 inline juce::File getLogFile() {
   static const juce::File f =
@@ -68,7 +68,9 @@ inline juce::File getLogFile() {
   return f;
 }
 
-inline void setMinLevel(Level level) { currentMinLevel = level; }
+inline void setMinLevel(Level level) {
+  currentMinLevel.store(level, std::memory_order_relaxed);
+}
 
 // --- Thread-safe queue: log() pushes, flushLog() drains + writes ---
 // IMPORTANT: logQueueLock ONLY guards the in-memory StringArray swap (< 1 us)
@@ -88,6 +90,7 @@ inline void writeDirectlyToFile(const juce::String &fullMsg) {
 
   const juce::ScopedLock fl(logFileWriteLock);
   auto file = getLogFile();
+  file.getParentDirectory().createDirectory();
 
   // Simple rotation: if > 10 MB, archive to .bak and start fresh
   if (file.existsAsFile() && file.getSize() > 10 * 1024 * 1024) {
@@ -104,7 +107,7 @@ inline void writeDirectlyToFile(const juce::String &fullMsg) {
 }
 
 inline void log(Level level, const juce::String &msg) {
-  if (level < currentMinLevel)
+  if (level < currentMinLevel.load(std::memory_order_relaxed))
     return;
 
   const char *prefix = "[INFO]  ";
@@ -167,6 +170,7 @@ inline void flushLog() {
 
   const juce::ScopedLock fl(logFileWriteLock);
   auto file = getLogFile();
+  file.getParentDirectory().createDirectory();
 
   // Simple rotation: if > 10 MB, archive to .bak and start fresh
   if (file.existsAsFile() && file.getSize() > 10 * 1024 * 1024) {
@@ -380,9 +384,12 @@ inline void crashHandler(void *exceptionInfo) {
   // STEP 1: Determine AppData Crash Folder & Timestamped File Paths (Heap-Free)
   wchar_t appData[MAX_PATH] = {0};
   GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
+  wchar_t fanfareDir[MAX_PATH] = {0};
   wchar_t crashDir[MAX_PATH] = {0};
+  wsprintfW(fanfareDir, L"%s\\Fanfare", appData);
   wsprintfW(crashDir, L"%s\\Fanfare\\Crashes", appData);
   CreateDirectoryW(appData, nullptr);
+  CreateDirectoryW(fanfareDir, nullptr);
   CreateDirectoryW(crashDir, nullptr);
 
   SYSTEMTIME st;
@@ -417,7 +424,7 @@ inline void crashHandler(void *exceptionInfo) {
   if (currentTid == mainTid) strcpy(threadRole, "Message/UI Thread");
   else if (currentTid == audioTid || t_isRealtimeAudioThread) strcpy(threadRole, "Real-Time Audio/DSP Thread");
 
-  char line[512];
+  char line[1024];
   wsprintfA(line, "Crash Time: %04d-%02d-%02d %02d:%02d:%02d\n", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
   appendRaw(line);
   wsprintfA(line, "Faulting Thread ID: %u (%s)\n", currentTid, threadRole);
@@ -491,7 +498,6 @@ inline void crashHandler(void *exceptionInfo) {
 
 #endif
 
-  FanfareLog::flushLog();
 #ifdef _WIN32
   TerminateProcess(GetCurrentProcess(), 1);
 #endif
@@ -517,8 +523,12 @@ inline LONG WINAPI fanfareUnhandledExceptionFilter(PEXCEPTION_POINTERS ep) {
       if (!isMain && !isAudio) {
         wchar_t appData[MAX_PATH] = {0};
         GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
+        wchar_t fanfareDir[MAX_PATH] = {0};
         wchar_t crashDir[MAX_PATH] = {0};
+        wsprintfW(fanfareDir, L"%s\\Fanfare", appData);
         wsprintfW(crashDir, L"%s\\Fanfare\\Crashes", appData);
+        CreateDirectoryW(appData, nullptr);
+        CreateDirectoryW(fanfareDir, nullptr);
         CreateDirectoryW(crashDir, nullptr);
 
         SYSTEMTIME st;
@@ -533,7 +543,7 @@ inline LONG WINAPI fanfareUnhandledExceptionFilter(PEXCEPTION_POINTERS ep) {
         wsprintfW(txtPath, L"%s\\WorkerThreadFault_%04d%02d%02d_%02d%02d%02d.txt", crashDir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
         HANDLE txtFile = CreateFileW(txtPath, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (txtFile != INVALID_HANDLE_VALUE) {
-          char buf[512];
+          char buf[1024];
           int len = wsprintfA(buf, "Worker Thread Fault Intercepted\r\nTime: %04d-%02d-%02d %02d:%02d:%02d\r\nThread ID: %u\r\nException Code: 0x%08X (%s)\r\n",
                               st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, currentTid, code, getExceptionCodeDescription(code));
           DWORD written = 0;

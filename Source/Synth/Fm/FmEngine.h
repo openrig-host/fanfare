@@ -73,11 +73,13 @@ public:
     ctrls_.wheel.pitch = true;
     ctrls_.wheel.amp = true;
     ctrls_.wheel.eg = false;
+    renderRemPos_ = N;
     for (auto &v : voices_)
       v = FmVoice();
   }
 
   void reset() {
+    renderRemPos_ = N;
     for (auto &v : voices_)
       v = FmVoice();
     lfo_.reset(patch_.d + 137);
@@ -100,11 +102,12 @@ public:
   int polyphony() const { return fmModeIsDual(mode_) ? kMaxVoices / 2 : kMaxVoices; }
   int numOps() const { return fmModeNumOps(mode_); }
 
-  void setPatch(const FmPatch &p) {
+  void setPatch(const FmPatch &p, bool resetLfo = true) {
     patch_ = p;
     if (patch_.d[134] >= fmModeMaxAlg(mode_))
       patch_.d[134] = (uint8_t)(fmModeMaxAlg(mode_) - 1);
-    lfo_.reset(patch_.d + 137);
+    if (resetLfo)
+      lfo_.reset(patch_.d + 137);
     // live-update playing voices without retriggering envelopes
     const int nOps = numOps();
     const int alg = effectiveAlg();
@@ -181,6 +184,7 @@ public:
   }
 
   void panic() {
+    renderRemPos_ = N;
     for (auto &v : voices_)
       v = FmVoice();
   }
@@ -195,6 +199,12 @@ public:
   }
 
   void setPitchBend(int value14bit) { ctrls_.pitch_cc = value14bit; }
+
+  void setPitchBendRange(int semitones) {
+    const int clamped = semitones < 1 ? 1 : (semitones > 24 ? 24 : semitones);
+    ctrls_.pitch_range_up = clamped;
+    ctrls_.pitch_range_dn = clamped;
+  }
 
   // MPE configuration switch (msfa controllers.h FIXME: "make this
   // switchable"). The vendored msfa has no per-channel MIDI decode layer, so
@@ -216,11 +226,19 @@ public:
   }
 
   // Render numSamples into out (interleaved stereo handled by caller; this
-  // fills a mono int32 buffer of numSamples). Call with multiples of N=64.
+  // fills a mono int32 buffer of numSamples), carrying partial N=64 remainders
+  // seamlessly across arbitrary host block sizes.
   void render(int32_t *out, int numSamples) {
     const int nOps = numOps();
     ctrls_.refresh();
     int done = 0;
+    if (renderRemPos_ < N) {
+      const int avail = std::min(N - renderRemPos_, numSamples);
+      for (int i = 0; i < avail; ++i)
+        out[done + i] = renderBuf_[renderRemPos_ + i];
+      renderRemPos_ += avail;
+      done += avail;
+    }
     while (done < numSamples) {
       const int32_t lfoVal = lfo_.getsample();
       const int32_t lfoDelay = lfo_.getdelay();
@@ -242,6 +260,7 @@ public:
       for (int i = 0; i < n; ++i)
         out[done + i] = renderBuf_[i];
       done += n;
+      renderRemPos_ = (n < N) ? n : N;
     }
   }
 
@@ -270,10 +289,10 @@ private:
         v = FmVoice();
         return &v;
       }
-    // 3) steal the oldest released voice
+    // 3) steal the oldest released voice (larger ageSamples_ = older)
     FmVoice *oldest = nullptr;
     for (auto &v : voices_)
-      if (v.released_ && (oldest == nullptr || v.ageSamples_ < oldest->ageSamples_))
+      if (v.released_ && (oldest == nullptr || v.ageSamples_ > oldest->ageSamples_))
         oldest = &v;
     if (oldest) {
       *oldest = FmVoice();
@@ -281,7 +300,7 @@ private:
     }
     // 4) steal oldest playing voice
     for (auto &v : voices_)
-      if (oldest == nullptr || v.ageSamples_ < oldest->ageSamples_)
+      if (oldest == nullptr || v.ageSamples_ > oldest->ageSamples_)
         oldest = &v;
     if (oldest)
       *oldest = FmVoice();
@@ -297,6 +316,7 @@ private:
   Lfo lfo_;
   Controllers ctrls_;
   int32_t renderBuf_[N];
+  int renderRemPos_ = N;
 };
 
 } // namespace FanfareFm

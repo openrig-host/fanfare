@@ -6,16 +6,16 @@
 -->
 <html lang="en">
 	<head>
-		<title>Fanfare v1.60: Stage Survival Manual (Windows VST3 Host)</title>
+		<title>Fanfare v1.7: Stage Survival Manual (Windows VST3 Host)</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="description" content="Fanfare v1.60 (The 1984 Keyboard Rig Edition) User's Manual & Stage Survival Guide for Windows. Built-in BLEEP-216 16-Voice Polyphonic Synthesizer (68 Presets), CoplanDX 6-Op/4-Op FM Synthesizer (558 Presets), 11 Hybrid FM+Analog Strips, LushReverb Figure-8 Tank Reverb, Studio Workspace, Rig Doctor Setup Diagnostics & Surgical Repair, Vertical Ribbon Sidebar, Global Controller Profiles, Version History, Strips, Songs, Scenes, Setlists, Curve-Link EQ, Built-In Synthesized IRs, Stereo/Ping-Pong/Tape Delay, Dual-Deck Break DJ with Broadcast Auto-Leveler, and bass-player-proof USB hotplugging." />
+		<meta name="description" content="Fanfare v1.7 User's Manual & Stage Survival Guide for Windows. Built-in Fanfare B3 91-Tonewheel Organ + Dual Leslie 122, BLEEP-216 Analog + 20-Bank Wavetable Polysynth (96 Presets), CoplanDX 6-Op/4-Op FM Synthesizer (558 Presets), 11 Hybrid FM+Analog Strips, LushReverb Figure-8 Tank Reverb, Studio Workspace, Rig Doctor Setup Diagnostics & Surgical Repair, Global Controller Profiles, Version History, Songs, Scenes, Setlists, Curve-Link EQ, Built-In Synthesized IRs, Stereo/Ping-Pong/Tape Delay, Dual-Deck Break DJ, and bass-player-proof USB hotplugging." />
 		<link rel="canonical" href="https://openrig-host.github.io/fanfare/manual.html" />
 		<link rel="icon" type="image/png" href="Fanfare_Icon.png" />
 		<meta property="og:site_name" content="Fanfare" />
 		<meta property="og:type" content="website" />
-		<meta property="og:title" content="Fanfare v1.60: Stage Survival Manual (Windows VST3 Host)" />
-		<meta property="og:description" content="The Fanfare user's manual and stage survival guide for Windows: 26 chapters from Quick Start, BLEEP-216 Polysynth & CoplanDX FM to Rig Doctor & engine tuning." />
+		<meta property="og:title" content="Fanfare v1.7: Stage Survival Manual (Windows VST3 Host)" />
+		<meta property="og:description" content="The Fanfare user's manual and stage survival guide for Windows: 27 chapters covering Fanfare B3 Organ, BLEEP-216 Analog/Wavetable Synth, CoplanDX FM, Rig Doctor, and engine tuning." />
 		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
 		<meta name="twitter:card" content="summary_large_image" />
 		<link rel="stylesheet" href="assets-readonly/css/main.css" />
@@ -198,7 +198,7 @@
 			<section id="header">
 				<header>
 					<span class="image avatar"><img src="Fanfare_Icon.png" alt="Fanfare" /></span>
-					<h1 id="logo"><a href="#workflow">Fanfare v1.60</a></h1>
+					<h1 id="logo"><a href="#workflow">Fanfare v1.7</a></h1>
 					<p>The Windows Stage Survival Manual</p>
 					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. BLEEP-216, CoplanDX, Rig Doctor, EQ)..." />
 				</header>
@@ -216,8 +216,9 @@
 						<li><a href="#cc-assignments">10. CCs &amp; B3 Drawbars</a></li>
 						<li><a href="#midi-effects">11. Transpose, Arp &amp; Octaver</a></li>
 						<li><a href="#sampler">12. 8-Pad Sampler</a></li>
-						<li><a href="#bleep-synth">12b. BLEEP-216 Polysynth (v1.60)</a></li>
-						<li><a href="#coplan-dx">12c. CoplanDX FM &amp; 1984 Rig (v1.60)</a></li>
+						<li><a href="#bleep-synth">12b. BLEEP-216 Analog + Wavetable</a></li>
+						<li><a href="#coplan-dx">12c. CoplanDX FM &amp; 1984 Rig</a></li>
+						<li><a href="#b3-organ">12d. Fanfare B3 Organ (v1.7)</a></li>
 						<li><a href="#break-music">13. Break DJ Strip</a></li>
 						<li><a href="#song-builder">14. The Song Builder</a></li>
 						<li><a href="#scenes">15. Scenes (Snapshots)</a></li>
@@ -255,7 +256,7 @@
 								<a class="manual-card" href="#main-mixer"><h3>The Console <span class="arrow">&rarr;</span></h3><p>Main faders, FOH &amp; IEM buses, Panic, and USB hotplug survival.</p></a>
 								<a class="manual-card" href="#strips"><h3>Strips &amp; DSP <span class="arrow">&rarr;</span></h3><p>Strip chains, Curve-Link EQ, delay, IRs, musette and note splits.</p></a>
 								<a class="manual-card" href="#cc-assignments"><h3>MIDI &amp; CCs <span class="arrow">&rarr;</span></h3><p>CC assignments, B3 drawbars, transpose, arp and octaver.</p></a>
-								<a class="manual-card" href="#sampler"><h3>Synths, Sampler &amp; Breaks <span class="arrow">&rarr;</span></h3><p>BLEEP-216 analog synth (68 presets), CoplanDX FM synth (558 presets), 8-pad sampler &amp; break DJ.</p></a>
+								<a class="manual-card" href="#sampler"><h3>Synths, B3 &amp; Breaks <span class="arrow">&rarr;</span></h3><p>Fanfare B3 Organ + Leslie 122, BLEEP-216 Analog + 20-bank Wavetable (96 presets), CoplanDX FM (558 presets), sampler &amp; break DJ.</p></a>
 								<a class="manual-card" href="#song-builder"><h3>Build &amp; Perform <span class="arrow">&rarr;</span></h3><p>Song Builder, Scenes (<code>1&ndash;9</code> hotkeys), Next-Up capsule, Setlists &amp; Notepad.</p></a>
 								<a class="manual-card" href="#web-remote"><h3>Remote &amp; Settings <span class="arrow">&rarr;</span></h3><p>Tablet Stage HUD, settings, routing and the Resource Inspector.</p></a>
 								<a class="manual-card" href="#rig-doctor"><h3>Rig Doctor &amp; Engine <span class="arrow">&rarr;</span></h3><p>Diagnose &amp; repair sick setups, CPU core tuning, and roll-your-own.</p></a>
@@ -525,18 +526,18 @@
 						<!-- 6. MUSETTE -->
 							<section id="musette">
 								<div class="container">
-									<h3>8. Accordion Musette Detuner ("TEMU Mode")</h3>
+									<h3>8. Accordion Musette Detuner ("Wide Musette")</h3>
 									<p>Located at the bottom center of the Strip DSP window, the <strong>Accordion Musette Detuner</strong> uses dual pitch-shifting delay lines modulated by quadrature LFOs to turn a dry single-reed accordion, organ, or synth patch into a shimmering European musette register:</p>
 									<ul>
 										<li><strong><code>2-REED (MM)</code>:</strong> Classic two-reed wet detune (one dry reed + one sharp detuned reed).</li>
 										<li><strong><code>3-REED (MMM)</code>:</strong> Full French/Italian three-reed chorus (dry center reed + symmetrical sharp and flat detuned reeds).</li>
-										<li><strong><code>TEMU</code> (42 ct):</strong> Locks the detune depth to a glorious 42 cents of unapologetically seasick street-cafe wobble.</li>
+										<li><strong><code>WIDE</code> (42 ct):</strong> Locks the detune depth to 42 cents for maximum ensemble beat and street-cafe wobble.</li>
 									</ul>
 
 									<blockquote>
 										<span class="use-case-label">Real-World Stage Use Case</span><br />
 										<strong>From Newfoundland Fish Tunes to Baguettes:</strong> The app author got an accordion to add to some songs. Despite being the worst accordion player in his city, people liked the sound. His accordion had two reeds, slightly detuned, giving a cool "French cafe" feel. Then he got a better one, but it was just one reed. Cool for Newfoundland fish tunes, but did not evoke baguettes.<br /><br />
-										Enter <strong>TEMU Musette Mode!</strong> Adds just enough warble to a single-reed accordion tone to allow you to sniff, <em>"that is NOT how you pronounce Peugeot..."</em> to your bass player.
+										Enter <strong>Wide Musette Mode!</strong> Adds just enough warble to a single-reed accordion tone to allow you to sniff, <em>"that is NOT how you pronounce Peugeot..."</em> to your bass player.
 									</blockquote>
 								</div>
 							</section>
@@ -704,15 +705,15 @@
 						<!-- 12B. BLEEP-216 SYNTH -->
 							<section id="bleep-synth">
 								<div class="container">
-									<h3>12b. BLEEP-216: Built-In 16-Voice Polyphonic Synthesizer (v1.60)</h3>
-									<span class="image fit"><img src="bleep_216_synth.jpg" alt="BLEEP-216 16-voice polyphonic synthesizer with 68 presets" /></span>
-									<p>Every channel strip in Fanfare includes a built-in, zero-dependency 16-voice analog-modeled polyphonic synthesizer: <strong>BLEEP-216</strong>. Click the <strong><code>SYN</code></strong> button on any strip (or open the strip <strong><code>...</code></strong> menu &rarr; <strong><code>BLEEP-216 synth...</code></strong>) to open the full synth console. Because BLEEP-216 runs natively inside the real-time audio engine with zero third-party DLLs, it loads instantaneously, never fails a license check on stage, and saves its complete patch state inside your Song (<code>.json</code>), Scene, and Strip (<code>.orstrip</code>) files:</p>
+									<h3>12b. BLEEP-216: Built-In 16-Voice Analog &amp; Wavetable Synthesizer (v1.7)</h3>
+									<span class="image fit"><img src="bleep_216_synth.jpg" alt="BLEEP-216 16-voice polyphonic analog and wavetable synthesizer with 96 presets" /></span>
+									<p>Every channel strip in Fanfare includes a built-in, zero-dependency 16-voice analog + wavetable synthesizer: <strong>BLEEP-216</strong>. Click the <strong><code>SYN</code></strong> button on any strip (or open the strip <strong><code>...</code></strong> menu &rarr; <strong><code>BLEEP-216 synth...</code></strong>) to open the full synth console. Because BLEEP-216 runs natively inside the real-time audio engine with zero third-party DLLs, it loads instantaneously, never fails a license check on stage, and saves its complete patch state inside your Song (<code>.json</code>), Scene, and Strip (<code>.orstrip</code>) files:</p>
 									<ul>
-										<li><strong>Dual PolyBLEP DCOs + Sub + Pink/White Noise:</strong> Two band-limited oscillators (<code>OSC 1</code> &amp; <code>OSC 2</code>) with selectable footage (<code>32'</code>, <code>16'</code>, <code>8'</code>, <code>4'</code>, <code>2'</code>), waveform buttons (<code>SAW</code>, <code>PUL</code>, <code>TRI</code>, <code>S+P</code> saw+pulse), Osc 2 semitone offset (<code>&plusmn;24 st</code>) and fine detune (<code>&plusmn;50 ct</code>), pulse-width modulation (<code>MAN</code>, <code>LFO</code>, or dedicated <code>RATE</code>), a dedicated Sub-Oscillator (<code>-1SQ</code>, <code>-2SQ</code>, <code>-2PL</code>), and a Noise generator.</li>
+										<li><strong>Dual PolyBLEP DCOs + 20-Bank 64-Frame Wavetable Engine (v1.7):</strong> Both <code>OSC 1</code> and <code>OSC 2</code> offer classic band-limited analog shapes (<code>SAW</code>, <code>PUL</code>, <code>TRI</code>, <code>S+P</code>) alongside <strong>20 mipmapped 64-frame wavetable banks</strong> (<code>CHOIR</code>, <code>GLASS</code>, <code>VSAIR</code>, <code>SHIMR</code>, <code>CELST</code>, <code>TINE</code>, <code>DX EP</code>, <code>CLAV</code>, <code>BELL</code>, <code>STEEL</code>, <code>FMCLG</code>, <code>SYNC</code>, <code>FOLD</code>, <code>RESO</code>, <code>SUPER</code>, <code>SUBGR</code>, <code>ORGAN</code>, <code>REED</code>, <code>FLUTE</code>, <code>BRASS</code>) with 7 Nyquist-safe mip levels. When a wavetable is selected, the <code>PWM / SHAPE</code> slider sweeps smoothly across all 64 morphing frames via <code>MAN</code>, <code>LFO</code>, <code>RATE</code>, or <code>ENV</code> (Filter/Amp envelope), paired with Osc 2 semitone offset (<code>&plusmn;24 st</code>), fine detune (<code>&plusmn;50 ct</code>), Sub-Oscillator (<code>-1SQ</code>, <code>-2SQ</code>, <code>-2PL</code>), and Noise.</li>
 										<li><strong>Juno-Style High-Pass Filter &amp; 12/24 dB Cytomic SVF Filter:</strong> Pre-filter <code>HPF</code> slider for carving mud out of pads or boosting bass punch, feeding a zero-delay feedback resonant low-pass filter (<code>VCF</code>) switchable between warm <code>12 dB</code> and steep <code>24 dB</code> slopes, normal/inverted envelope polarity (<code>+</code> / <code>-</code>), dedicated Filter ADSR (<code>FENV</code>) or shared Amp ADSR (<code>AENV</code>), keyboard tracking (<code>KYBD</code>), and velocity sensitivity (<code>VEL</code>).</li>
 										<li><strong>Voice Assign, Portamento, Unison Stack &amp; Analog Drift:</strong> Switch between 16-voice <code>POLY</code>, retrigger <code>MONO</code>, or single-trigger <code>LEG</code> (legato) modes; engage <code>PORTAMENTO</code> (<code>OFF</code>, <code>I</code> constant-rate, <code>II</code> legato-only) and up to <strong>6-voice Stereo Unison Stack</strong> (<code>OFF</code>, <code>2</code>, <code>4</code>, <code>6</code>) with adjustable <code>DETUNE</code> and stereo <code>WIDTH</code>, plus per-voice analog component <code>DRIFT</code>.</li>
 										<li><strong>BBD Chorus, Stereo Delay &amp; LushReverb Tank:</strong> Classic bucket-brigade <strong>Chorus</strong> (<code>OFF</code>, <code>I</code>, <code>II</code>, <code>I+II</code>, and customizable <code>CUST</code>), tempo-friendly stereo <strong>Delay</strong> (<code>TIME</code>, <code>FDBK</code>, <code>DAMP</code>, <code>MIX</code>), and a 3-mode <strong>LushReverb</strong> figure-8 tank (<code>ROOM</code>, <code>HALL</code>, <code>PLATE</code>).</li>
-										<li><strong>68 Built-In Stage Presets + User Preset Bank (<code>synth-presets/</code>):</strong> Ships with <strong>68 stage-ready presets</strong> across 7 categories &mdash; including <strong>80s Icons</strong> (<em>Jump 1984 Brass</em>, <em>Take On Me Riff</em>, <em>Final Countdown</em>, <em>Enyaesque</em>, <em>1983 Poly</em>, <em>Jump!</em>, <em>Stranger Things Arp</em>, <em>Blade Runner CS-80</em>, <em>Sweet Dreams Riff</em>, <em>Axel F Lead</em>, <em>Separate Ways Synth</em>, <em>Save A Prayer Arp</em>, <em>Blue Monday Bass</em>, <em>Thriller Funk Bass</em>, <em>Twin Peaks Pad</em>), <strong>90s Classics</strong>, <strong>Juno Heritage</strong> (<em>Juno Pad 1</em>, <em>Polysynth</em>, <em>Juno-106 Strings A11</em>), <strong>Pads &amp; Strings</strong> (<em>Hollow Square Pad 1</em>, <em>Cathedral Pad</em>), <strong>Leads &amp; Solos</strong> (<em>Square Lead</em>, <em>Prog Rock Moog Lead</em>), <strong>Basses</strong> (<em>Dark Bass</em>, <em>Sub-Zero 808 Bass</em>, <em>Acid 303 Squelch</em>), and <strong>Arp, Keys &amp; Plucks</strong>. Click <strong><code>Compare</code></strong> to A/B your tweaks against the saved patch, <strong><code>Save</code></strong> to write your own <code>.json</code> presets to <code>synth-presets/</code>, or <strong><code>Keys</code></strong> to pop open the built-in 2-octave onscreen keyboard + Pitch/Mod strips.</li>
+										<li><strong>96 Built-In Stage Presets + User Preset Bank (<code>synth-presets/</code>):</strong> Ships with <strong>96 stage-ready presets</strong> across 8 categories &mdash; including <strong>Wavetable &amp; Hybrid</strong> (<em>PPG Ice Sweeper</em>, <em>West-Coast Rubber Bass</em>, <em>Hard Sync Solo</em>, <em>Clavinet Funk</em>, <em>Gamelan Pluck</em>, <em>FM Prog Bell Lead</em>, <em>Resonant Acid Formant</em>, <em>Hollow Clarinet Lead</em>, <em>Drawbar &amp; Strings</em>, <em>Super-Saw Anthem</em>, <em>Sub Grit Mono</em>), <strong>80s Icons</strong>, <strong>90s Classics</strong>, <strong>Juno Heritage</strong>, <strong>Pads &amp; Strings</strong>, <strong>Leads &amp; Solos</strong>, <strong>Basses</strong>, and <strong>Arp, Keys &amp; Plucks</strong>. Click <strong><code>Compare</code></strong> to A/B your tweaks against the saved patch, <strong><code>Save</code></strong> to write your own <code>.json</code> presets to <code>synth-presets/</code>, or <strong><code>Keys</code></strong> to pop open the built-in 2-octave onscreen keyboard + Pitch/Mod strips.</li>
 										<li><strong>Right-Click MIDI Learn &amp; Precision Entry:</strong> Hold <code>Shift</code> while dragging any slider or knob for <strong><code>FINE 10x</code></strong> precision, or right-click any parameter to type an exact value or bind a physical MIDI CC controller on the spot.</li>
 									</ul>
 
@@ -741,6 +742,22 @@
 										<strong>The Classic 1984 Layer (FM Mallet Attack + Warm Analog Pad Tail):</strong> In 1984, studio and touring keyboardists MIDI-chained a Yamaha DX7 to a Roland Juno-106 or Jupiter-8 because FM synthesis nails glassy, percussive bell/marimba transients while analog DCOs + BBD chorus own warm, breathing sustain.<br /><br />
 										Load <strong><code>01 FM Bell &amp; Flute Pad</code></strong> or <strong><code>04 Glocken &amp; Enya Chime</code></strong> from the <strong>Strips</strong> sidebar onto a single channel strip: every note fires a crisp DX7/TX81Z mallet chime on the attack that melts seamlessly into a lush BLEEP-216 flute or PWM pad, controlled by one fader, one mute button, and zero external VSTs.
 									</blockquote>
+								</div>
+							</section>
+
+						<!-- 12D. FANFARE B3 ORGAN -->
+							<section id="b3-organ">
+								<div class="container">
+									<h3>12d. Fanfare B3 Organ: Built-In 91-Tonewheel Organ &amp; Dual Leslie 122 (v1.7)</h3>
+									<p>Every channel strip chain slot can load <strong>Fanfare B3 Organ</strong> (choose <strong><code>Fanfare B3 Organ (Built-in)</code></strong> from any strip slot, or open it from the strip <strong><code>...</code></strong> menu). Housed in a vintage walnut and brushed-bronze console, it models the complete tonewheel-to-room signal chain with zero external plugins:</p>
+									<ul>
+										<li><strong>91-Tonewheel Generator &amp; Harmonic Percussion:</strong> Authentic synchronous gear ratios with magnetic pole-piece reluctance waveforms, 12-bin shaft micro-flutter, 9-busbar palladium contact stagger key-click, generator compartment crosstalk (<code>LEAK</code>), and classic single-trigger post-scanner Harmonic Percussion (<code>Perc ON</code>, <code>Soft</code>, <code>Fast decay</code>, <code>3RD harm</code> with automatic <code>1'</code> cancel).</li>
+										<li><strong>LC Scanner Vibrato / Chorus:</strong> 8-stage dispersive allpass ladder with inductor-core saturation (<code>OFF</code>, <code>V1</code>&ndash;<code>V3</code>, <code>C1</code>&ndash;<code>C3</code>) controlled by checkboxes or the rotary Scanner dial, plus a <strong><code>V/C WARBLE</code></strong> depth slider (defaulting to <strong><code>C1</code></strong> and <code>0.28</code> warble on the factory <strong><code>vibe coda</code></strong> preset).</li>
+										<li><strong>AO-28 Tube Preamp &amp; Swell Expression:</strong> 4x-oversampled asymmetric triode + 6550 push-pull + transformer core saturation with signal-gated 120 Hz B+ ripple and calibrated 12 o'clock defaults for <code>DRIVE</code>, <code>TONE</code>, <code>CLICK</code>, <code>LEAK</code>, <code>VOLUME</code>, and <code>SWELL</code> (CC 11).</li>
+										<li><strong>Dual Asynchronous Leslie 122 Rotary Speaker:</strong> Models two asynchronous cabinets with <code>Slow</code> / <code>Brake</code> / <code>Fast</code> modes (driven by Mod Wheel CC 1 and optional <code>CC64-&gt;FAST</code> sustain switch), <strong><code>SPREAD</code></strong> (sweeps all the way down to dead-center mono rotors with thick mono swish while keeping the room and chorus stereo), <strong><code>WARMTH</code></strong> (birch cabinet resonance + 230/560 Hz low-mid chest), <strong><code>CHORUS</code></strong>, and <strong><code>ROOM</code></strong>.</li>
+										<li><strong>Onboard Studio FX, Behind-the-Scenes Room Voicing &amp; External VST3 Inserts:</strong> Built-in 10-band studio voicing curve, <code>Studio Wood Room</code> convolution IR, 6 FX knobs (<code>EQ LOW</code>, <code>EQ MID</code>, <code>EQ HIGH</code>, <code>COMP</code>, <code>REVERB</code>, and 301 ms Ping-Pong <code>DELAY</code>), plus optional <code>SAT VST</code> (pre-Leslie) and <code>LESLIE VST</code> (replaces native Leslie with automatic Mod Wheel forwarding) insert slots.</li>
+										<li><strong>Hardware Drawbar CC Learn &amp; <code>+12</code> Octave:</strong> Click the <code>CC</code> profile dropdown to pick <code>Auto (CK88+All)</code>, <code>CK88</code>, <code>Faders</code>, <code>Sound</code>, <code>Classic</code>, or <strong><code>+ Learn / Edit Drawbar Map...</code></strong> to save named hardware drawbar maps with optional <code>INV CC</code> inversion. Includes a <code>+12</code> octave-up switch and a toggleable 61-key waterfall manual (<code>Keys</code>, OFF by default).</li>
+									</ul>
 								</div>
 							</section>
 
@@ -994,7 +1011,7 @@
 					<section id="footer">
 						<div class="container">
 							<ul class="copyright">
-								<li>&copy; Fanfare v1.60</li><li><a href="index.html">Fanfare Home</a></li><li><a href="blog/">Dev Blog</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
+								<li>&copy; Fanfare v1.7</li><li><a href="index.html">Fanfare Home</a></li><li><a href="blog/">Dev Blog</a></li><li>Design: <a href="http://html5up.net">HTML5 UP (Read Only)</a></li>
 							</ul>
 						</div>
 					</section>

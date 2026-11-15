@@ -10,6 +10,7 @@
 #include "Mp3PlayerComponent.h"
 #include "FanfareSynthComponent.h"
 #include "Synth/Fm/ui/FmSynthComponent.h"
+#include "Synth/B3/ui/B3OrganComponent.h"
 #include "ResourceInspectorModal.h"
 #include "RigDoctorModal.h"
 #include "GigNotepadWindow.h"
@@ -33,6 +34,7 @@
 #include "AnalogVuMeter.h"
 #include "ThermalMonitor.h"
 #include "UpdateChecker.h"
+#include "WlanScanGuard.h"
 #include "ToolRail.h"
 #include "QueueTilesPanel.h"
 #include "StartupWelcomeModal.h"
@@ -126,7 +128,7 @@ private:
   juce::TextButton gigNotepadBtn{"NOTEPAD"};
   juce::TextButton webRemoteBtn{"REMOTE"};
   juce::TextButton quickStartBtn{"?"};
-  juce::TextButton mainHelpBtn{"HAAALP!"};
+  juce::TextButton mainHelpBtn{"Help"};
   juce::TextButton updateBadgeBtn{"UPDATE"};
   juce::String latestReleaseUrl;
   juce::TextButton prevSetlistBtn{"<<"};
@@ -168,6 +170,7 @@ private:
   std::unique_ptr<Mp3PlayerComponent> mp3Overlay;
   std::unique_ptr<FanfareSynthComponent> synthOverlay;
   std::unique_ptr<FmSynthComponent> fmOverlay;
+  std::unique_ptr<B3OrganComponent> b3Overlay;
   std::unique_ptr<LoadingOverlay> loadingOverlay;
   std::unique_ptr<MissingPluginsToast> missingPluginsToast;
   std::unique_ptr<ConfigModalOverlay> configOverlay;
@@ -282,6 +285,7 @@ private:
   void loadRigAsync(const juce::File &file, int buttonIndexForHighlight = -1, int targetSetlistIndex = -1);
 
   // Plugin window management
+  void openExternalPluginEditor(juce::AudioPluginInstance* plugin, const juce::String& title);
   void closePluginWindowForInstance(juce::AudioPluginInstance* instance);
   void closePluginWindowsForSlot(RackSlot* slot);
   void closeOrphanedPluginWindows();
@@ -289,6 +293,7 @@ private:
 
   // Windows managed by MainComponent to prevent shutdown crashes
   juce::OwnedArray<juce::DocumentWindow> activePluginWindows;
+  std::atomic<int> openPluginWindowCount{0};
 
   // FileChooser must outlive async callbacks
   std::unique_ptr<juce::FileChooser> fileChooser;
@@ -325,6 +330,20 @@ private:
   std::atomic<double> lastCallbackDurationMs{0.0};
   std::atomic<double> pendingGlitchDurationMs{0.0};
   std::atomic<bool> hasPendingGlitchLog{false};
+
+  // Audio-thread timing telemetry (single writer: the audio callback; drained
+  // by reportAudioJitter on the message thread). Separates "driver woke us
+  // late" (late callbacks, short duration) from "our DSP ran long" (heavy).
+  std::atomic<int> lateCallbackCount{0};
+  std::atomic<int> heavyCallbackCount{0};
+  std::atomic<double> maxCallbackIntervalMs{0.0};
+  std::atomic<double> maxCallbackDurationMs{0.0};
+  juce::int64 lastJitterReportMs = 0;
+  void reportAudioJitter();
+  // Preallocated so the audio thread never touches the heap for incoming MIDI.
+  juce::MidiBuffer incomingMidiScratch;
+  juce::int64 midiProbeUntilMs = 0;
+  void reassertProcessShelter();
   void logAudioGlitch(double actualMs, double expectedMs, double cbDurationMs);
   void logAudioNanSpike(int channel, int sampleIndex, float badVal);
   // Glitch log batching: entries accumulate in memory and flush to disk at
@@ -341,6 +360,8 @@ private:
   juce::Slider stripWidthSlider;
   int preferredExpandedWidth = 120;
   int dragBaseExpandedWidth = 120;
+  bool stripWidthSavePending = false;
+  int stripWidthSaveTicks = 0;
   void savePreferredStripWidth() const;
   static constexpr int kMinExpandedWidth = 85;
   static constexpr int kMaxExpandedWidth = 260;
@@ -388,11 +409,13 @@ private:
   // if it failed for an earlier thread). Tracks the thread id, not a bool.
   DWORD mmcssThreadId = 0;
   // CPU-0 shelter mask (constructor excludes the interrupt-dump core). Some
-  // ASIO drivers re-expand the process affinity during init, so every new
-  // audio thread re-applies it — see the audio callback.
+  // ASIO drivers re-expand the process affinity during init, so the message
+  // thread re-applies it once a second - see reassertProcessShelter.
   std::atomic<DWORD_PTR> processShelterMask{0};
   std::atomic<DWORD_PTR> dspThreadAffinityMask{0};
 #ifdef _WIN32
+  std::atomic<int> rtMmcssStatus{0};
+  std::atomic<juce::uint32> rtMmcssErrorCode{0};
   HMODULE avrtModule = nullptr;
   typedef HANDLE(WINAPI * PAvSetMmThreadCharacteristicsA)(LPCSTR, LPDWORD);
   PAvSetMmThreadCharacteristicsA avSetMmThreadFn = nullptr;
@@ -401,6 +424,7 @@ private:
   bool powerPlanForcedHigh = false;
   void configureWindowsPerformanceMode();
   void restoreWindowsPowerMode();
+  Fanfare::WlanScanGuard wlanScanGuard;
 #endif
   juce::Label midiMonitorLabel{"midiMonitor", "MIDI: --"};
   juce::TextButton midiMonitorToggle{"MIDI MON"};

@@ -33,6 +33,10 @@ struct PluginState {
     // Built-in CoplanDX (FM) instance in this chain slot (0..2).
     bool isFm = false;
     juce::var fmState;
+
+    // Built-in B3 organ instance in this chain slot (0..2).
+    bool isB3 = false;
+    juce::var b3State;
 };
 
 struct CCMapping {
@@ -82,7 +86,7 @@ struct ChannelStripSettings {
     bool musetteEnabled = false;
     float musetteCents = 6.0f;
     bool musette3Reed = false;
-    int musetteMode = 0; // 0 = 2-Reed MM, 1 = 3-Reed MMM, 2 = TEMU Musette
+    int musetteMode = 0; // 0 = 2-Reed MM, 1 = 3-Reed MMM, 2 = Wide Musette
     float musetteMix = 0.25f;
     int channelMode = 0; // 0 = Stereo, 1 = Mono (L+R), 2 = Mono (Left), 3 = Mono (Right)
 };

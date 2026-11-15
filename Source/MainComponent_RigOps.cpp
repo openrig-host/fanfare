@@ -342,7 +342,7 @@ void MainComponent::loadRigAsync(const juce::File &file,
                 if (targetSetlistIndex >= 0) {
                   sm.setActiveIndex(targetSetlistIndex);
                 } else if (sm.getActiveFile() != file) {
-                  const auto &setups = sm.getSetups();
+                  const auto setups = sm.getSetupsSnapshot();
                   for (int i = 0; i < setups.size(); ++i) {
                     if (setups[i] == file) {
                       sm.setActiveIndex(i);
@@ -566,7 +566,8 @@ void MainComponent::resetToNewSong() {
     if (auto *s = engine.getSlot(i))
       for (int c = 0; c < 3; ++c)
         if (s->getPluginInstance(c) != nullptr || s->isChainSlotMidiOut(c) ||
-            s->isChainSlotSynth(c) || s->isChainSlotFm(c))
+            s->isChainSlotSynth(c) || s->isChainSlotFm(c) ||
+            s->isChainSlotB3(c))
           anyLoaded = true;
   for (int i = 0; i < 3 && !anyLoaded; ++i)
     if (!engine.getMasterPluginName(true, i).isEmpty() ||

@@ -1,0 +1,225 @@
+<!DOCTYPE HTML>
+<html lang="en">
+	<head>
+		<title>B3 Love - Fanfare Dev Blog</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="description" content="Chasing decent B3 sounds from a 1980s Kawai K1 joystick and Juno-106 chorus to building a lightweight, gig-ready B3 organ sim with hybrid VST3 inserts and a solo-jamming ping-pong delay in Fanfare 1.7." />
+		<link rel="canonical" href="https://openrig-host.github.io/fanfare/blog/2026-11-14-b3-love.html" />
+		<link rel="icon" type="image/png" href="../Fanfare_Icon.png" />
+		<meta property="og:site_name" content="Fanfare Dev Blog" />
+		<meta property="og:type" content="article" />
+		<meta property="og:title" content="B3 Love" />
+		<meta property="og:description" content="From 80s Kawai K1 joystick detune tricks to building a lightweight, gig-ready B3 organ sim (plus BLEEP-216 wavetables) in Fanfare 1.7." />
+		<meta property="og:image" content="https://openrig-host.github.io/fanfare/fanfare_v1_4_console.jpg" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<style>
+			:root {
+				--bg: #1e1e1e;
+				--panel: #252525;
+				--raised: #2f2f2f;
+				--border: #3a3a3a;
+				--border-strong: #4b4b4b;
+				--text: #f2f2f2;
+				--body: #dedede;
+				--dim: #bfbfbf;
+				--faint: #8f8f8f;
+				--accent: #ffa02f;
+				--accent-hover: #ffb964;
+			}
+			* { box-sizing: border-box; margin: 0; padding: 0; }
+			html { scroll-behavior: smooth; }
+			body {
+				background-color: var(--bg) !important;
+				color: var(--body);
+				font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+				font-size: 16px;
+				line-height: 1.75;
+			}
+			.topbar {
+				display: flex; align-items: center; gap: 18px;
+				padding: 14px 22px;
+				background: var(--panel);
+				border-bottom: 1px solid var(--border);
+			}
+			.topbar .brand {
+				color: var(--text); font-weight: 700; font-size: 17px;
+				text-decoration: none;
+			}
+			.topbar .brand span { color: var(--accent); }
+			.topbar a.nav { color: var(--dim); text-decoration: none; font-size: 14px; }
+			.topbar a.nav:hover { color: var(--accent); }
+
+			article {
+				max-width: 760px;
+				margin: 0 auto;
+				padding: 48px 24px 72px;
+			}
+			.breadcrumb {
+				font-size: 13px;
+				color: var(--faint);
+				margin-bottom: 16px;
+			}
+			.breadcrumb a {
+				color: var(--faint);
+				text-decoration: none;
+			}
+			.breadcrumb a:hover {
+				color: var(--accent);
+			}
+			h1 {
+				color: var(--text);
+				font-size: 32px;
+				line-height: 1.25;
+				margin-bottom: 8px;
+			}
+			.post-meta {
+				color: var(--faint);
+				font-size: 14px;
+				margin-bottom: 36px;
+				border-bottom: 1px solid var(--border);
+				padding-bottom: 18px;
+			}
+			h2 {
+				color: var(--text);
+				font-size: 22px;
+				margin: 36px 0 12px;
+				line-height: 1.35;
+			}
+			p {
+				margin-bottom: 20px;
+			}
+			blockquote {
+				border-left: 3px solid var(--accent);
+				background: var(--panel);
+				padding: 16px 20px;
+				margin: 24px 0;
+				color: var(--text);
+				font-style: italic;
+			}
+			.callout {
+				background: var(--panel);
+				border: 1px solid var(--border);
+				border-left: 3px solid var(--accent);
+				border-radius: 4px;
+				padding: 18px 22px;
+				margin: 28px 0;
+			}
+			.callout-title {
+				color: var(--accent);
+				font-weight: 700;
+				font-size: 15px;
+				margin-bottom: 8px;
+				text-transform: uppercase;
+				letter-spacing: 0.5px;
+			}
+			.callout p:last-child {
+				margin-bottom: 0;
+			}
+			code {
+				background: #141414;
+				color: #ffa02f;
+				padding: 2px 6px;
+				border-radius: 3px;
+				font-family: Consolas, monospace;
+				font-size: 14px;
+			}
+			.divider {
+				border: 0;
+				border-top: 1px solid var(--border);
+				margin: 40px 0;
+			}
+			footer {
+				text-align: center;
+				color: var(--faint);
+				font-size: 13px;
+				padding: 28px 0 36px;
+				border-top: 1px solid var(--border);
+			}
+			footer a {
+				color: var(--faint);
+				text-decoration: none;
+			}
+			footer a:hover {
+				color: var(--accent);
+			}
+		</style>
+	</head>
+	<body>
+		<div class="topbar">
+			<a class="brand" href="../index.html">f&amp; <span>Fanfare</span></a>
+			<a class="nav" href="index.html">Blog</a>
+			<a class="nav" href="../manual.html">Manual</a>
+			<a class="nav" href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a>
+		</div>
+
+		<article>
+			<div class="breadcrumb">
+				<a href="index.html">&larr; Back to Dev Blog</a>
+			</div>
+
+			<h1>B3 Love</h1>
+			<div class="post-meta">
+				<span>November 14, 2026</span> &middot; <span>By Dave Waugh</span> &middot; <span>Fanfare 1.7 &amp; Live Organ</span>
+			</div>
+
+			<p>
+				I've been attempting to get decent B3 sounds out of my gear since the 80s, when I'd take three simple organ tones on a Kawai K1 and detune them in such a way that the K1 joystick would move from low detune (cheapie slow Leslie) to wider detune (sorta kinda fast Leslie). My Roland Juno-106's Chorus I and II could also do sorta kinda Leslie switching. It wasn't great, but it beat straight LFO pitch warble.
+			</p>
+
+			<p>
+				It's 2026, and we've been spoiled by great VST-based B3 emulations for 25 years, ever since the awesome and bizarrely discontinued Native Instruments B4. Onboard hardware B3 emulations are now near-standard: even my modest Yamaha CK88 has 9 drawbars and a serviceable Leslie effect. VST B3s like Cherry Audio's Blue3 sound great in a mix; some can be taxing on the system&mdash;like the IK Hammond B-3X&mdash;but if your laptop can manage it, they're worth it.
+			</p>
+
+			<h2>Building a Workhorse Middle Ground</h2>
+
+			<p>
+				This weekend I wanted to make a middle ground. I have the IK B-3X and Cherry Audio on my gigging laptop, but I wanted a workhorse B3 sim built right into Fanfare that would be lightweight and would sit naturally in a band context, particularly as part of a live stack.
+			</p>
+
+			<p>
+				In live performance I'll often run piano or Wurli on one channel, B3 on a second, and ensemble strings on a third, fading them in and out as needed. When the organ is part of a multi-layer rig like that, you don't want it eating half your CPU budget just to sit behind a verse.
+			</p>
+
+			<h2>What's Inside Fanfare 1.7's B3</h2>
+
+			<p>
+				So, Fanfare 1.7 features a new, gig-ready B3 sim. The drawbars are CC-assignable, naturally, and Leslie settings, compression, drive, reverb, and delay are all adjustable right on the panel.
+			</p>
+
+			<div class="callout">
+				<div class="callout-title">Hybrid VST3 Inserts</div>
+				<p>
+					The Leslie effect I've got going is (in my opinion) decent. However, if you have a favorite rotary speaker or saturation/distortion VST around, I've provided two onboard VST3 insert slots right inside the B3 sim (<code>SAT VST</code> and <code>LESLIE VST</code>) to swap out my internal Leslie and distortion effects. Hitting <code>Byp</code> turns off your VST and brings Fanfare's internal DSP right back on.
+				</p>
+			</div>
+
+			<h2>The Ping-Pong Delay Feature</h2>
+
+			<p>
+				A ping-pong delay is also onboard. It's there because:
+			</p>
+
+			<blockquote>
+				1. It's cool.<br />
+				2. I'll be playing a series of gigs this coming week which require me to play an organ solo (<em>Chest Fever</em>), which I can sort of play, but if I crank the delay enough no one can exactly tell what I'm playing, or not.
+			</blockquote>
+
+			<p>
+				In essence, the delay knob is electronically jamming my own solo. This is a feature, not a bug.
+			</p>
+
+			<hr class="divider" />
+
+			<h2>Also in 1.7: 90s Shimmer for BLEEP-216</h2>
+
+			<p>
+				Fanfare 1.7 also brings 20-bank, 64-frame wavetables to our native BLEEP-216 analog synth, allowing deliberately 90s bell-and-pad shimmery sounds if you find yourself playing Mariah Carey ballads.
+			</p>
+		</article>
+
+		<footer>
+			<p>&copy; Fanfare &middot; <a href="../index.html">Home</a> &middot; <a href="index.html">Blog</a> &middot; <a href="../manual.html">Manual</a> &middot; <a href="https://github.com/openrig-host/fanfare" target="_blank" rel="noopener">GitHub</a></p>
+		</footer>
+	</body>
+</html>

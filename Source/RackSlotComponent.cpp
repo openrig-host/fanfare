@@ -602,7 +602,7 @@ bool RackSlotComponent::isUnusedEmptyStrip() const {
     return false;
   for (int i = 0; i < 3; ++i) {
     if (slot.getPluginInstance(i) != nullptr || slot.isChainSlotMidiOut(i) ||
-        slot.isChainSlotSynth(i) || slot.isChainSlotFm(i))
+        slot.isChainSlotSynth(i) || slot.isChainSlotFm(i) || slot.isChainSlotB3(i))
       return false;
   }
   const auto n = slot.getName().trim();
@@ -807,7 +807,7 @@ void RackSlotComponent::timerCallback() {
       slotBtns[i].setButtonText(name.isEmpty() ? ("SLOT " + juce::String(i + 1)) : name);
       stateChanged = true;
     }
-    bool isSynth = slot.isChainSlotSynth(i) || slot.isChainSlotFm(i);
+    bool isSynth = slot.isChainSlotSynth(i) || slot.isChainSlotFm(i) || slot.isChainSlotB3(i);
     bool hasPlugin = slot.getPluginInstance(i) != nullptr || isMidiOut || isSynth;
     if (hasPlugin)
       anyPlugin = true;
@@ -918,6 +918,13 @@ void RackSlotComponent::paint(juce::Graphics &g) {
   const bool hasDistinctColor =
       (categoryCol != juce::Colour(0xff2a2a2a) && categoryCol != t.catDefault);
 
+  const bool isCustomColor = (slot.getChannelColor() != juce::Colour(0xff2a2a2a));
+  const float stripTintAmt =
+      isCustomColor ? (slot.isBypassed() ? 0.10f : 0.22f)
+                    : (hasDistinctColor ? (slot.isBypassed() ? 0.04f : 0.09f) : 0.0f);
+  const float borderTintAmt =
+      hasDistinctColor ? (isCustomColor ? (slot.isBypassed() ? 0.22f : 0.50f) : 0.25f) : 0.0f;
+
   if (isCollapsed) {
     auto bounds = getLocalBounds().toFloat().reduced(0.5f);
 
@@ -958,16 +965,21 @@ void RackSlotComponent::paint(juce::Graphics &g) {
     // Collapsed populated / muted strip
     juce::Colour bg = slot.isBypassed() ? t.sunken
                     : ((slotIndex % 2 == 0) ? t.panel : t.panelAlt);
+    if (stripTintAmt > 0.0f)
+      bg = bg.interpolatedWith(categoryCol, stripTintAmt);
     g.setColour(bg);
     g.fillRoundedRectangle(bounds, 3.0f);
 
-    // Top stage-tape stripe (2px in Studio, 3px in Front Panel)
-    const float collapsedTapeH = t.isStudio() ? 2.0f : 3.0f;
+    // Top stage-tape stripe (3px in Studio, 4px in Front Panel)
+    const float collapsedTapeH = t.isStudio() ? 3.0f : 4.0f;
     g.setColour(slot.isBypassed() ? categoryCol.withAlpha(0.45f) : categoryCol);
     g.fillRect(bounds.getX() + 1.0f, bounds.getY() + 1.0f,
                bounds.getWidth() - 2.0f, collapsedTapeH);
 
-    g.setColour(t.border);
+    juce::Colour collapsedBorder = t.border;
+    if (borderTintAmt > 0.0f)
+      collapsedBorder = collapsedBorder.interpolatedWith(categoryCol, borderTintAmt);
+    g.setColour(collapsedBorder);
     g.drawRoundedRectangle(bounds, 3.0f, 1.0f);
 
     // Vertical strip title
@@ -1009,25 +1021,30 @@ void RackSlotComponent::paint(juce::Graphics &g) {
   auto bounds = getLocalBounds().toFloat().reduced(0.5f);
   juce::Colour panelFace = slot.isBypassed() ? t.sunken
                          : ((slotIndex % 2 == 0) ? t.panel : t.panelAlt);
+  if (stripTintAmt > 0.0f)
+    panelFace = panelFace.interpolatedWith(categoryCol, stripTintAmt);
 
   g.setColour(panelFace);
   g.fillRoundedRectangle(bounds, 3.0f);
 
-  // Top stage-tape category stripe (2px flat in Studio, 3px + bevel in Front Panel)
+  // Top stage-tape category stripe (3px flat in Studio, 4px + bevel in Front Panel)
   juce::Colour tapeCol = hasDistinctColor ? categoryCol : t.borderStrong;
   if (slot.isBypassed())
     tapeCol = tapeCol.withAlpha(0.45f);
   g.setColour(tapeCol);
   g.fillRect(bounds.getX() + 1.0f, bounds.getY() + 1.0f,
-             bounds.getWidth() - 2.0f, t.isStudio() ? 2.0f : 3.0f);
+             bounds.getWidth() - 2.0f, t.isStudio() ? 3.0f : 4.0f);
 
   if (!t.isStudio()) {
     g.setColour(t.bevelHi);
-    g.drawHorizontalLine((int)bounds.getY() + 4, bounds.getX() + 2.0f, bounds.getRight() - 2.0f);
+    g.drawHorizontalLine((int)bounds.getY() + 5, bounds.getX() + 2.0f, bounds.getRight() - 2.0f);
   }
 
-  // Hairline strip border
-  g.setColour(t.border);
+  // Strip border (tinted when a strip colour is active)
+  juce::Colour stripBorder = t.border;
+  if (borderTintAmt > 0.0f)
+    stripBorder = stripBorder.interpolatedWith(categoryCol, borderTintAmt);
+  g.setColour(stripBorder);
   g.drawRoundedRectangle(bounds, 3.0f, 1.0f);
 
   // Strip Nameplate well (y = 107..139)
@@ -1035,9 +1052,13 @@ void RackSlotComponent::paint(juce::Graphics &g) {
   Fanfare::ModalFrame::paintRecessedWell(g, nameplateRect, 2.5f);
 
   if (hasDistinctColor) {
+    if (isCustomColor) {
+      g.setColour(categoryCol.withAlpha(slot.isBypassed() ? 0.06f : 0.16f));
+      g.fillRoundedRectangle(nameplateRect.reduced(1.0f), 2.0f);
+    }
     g.setColour(slot.isBypassed() ? categoryCol.withAlpha(0.35f) : categoryCol);
     g.fillRect(nameplateRect.getX() + 1.0f, nameplateRect.getY() + 2.0f,
-               2.5f, nameplateRect.getHeight() - 4.0f);
+               3.0f, nameplateRect.getHeight() - 4.0f);
   }
 
   g.setColour(slot.isBypassed() ? t.textDim : t.text);
@@ -1600,6 +1621,7 @@ void RackSlotComponent::showStripActionsMenu() {
     menu.addItem(4, "8-pad sampler...");
     menu.addItem(5, "BLEEP-216 synth...");
     menu.addItem(12, "CoplanDX synth...");
+    menu.addItem(13, "Fanfare B3 organ...");
     if (kMp3DecksEnabled)
       menu.addItem(6, "MP3 playlist deck...");
     menu.addSeparator();
@@ -1630,6 +1652,7 @@ void RackSlotComponent::showStripActionsMenu() {
           case 10: safe->showRenameDialog(); break;
           case 11: safe->showColorPalette(); break;
           case 12: if (safe->onShowFm) safe->onShowFm(); break;
+          case 13: if (safe->onShowB3) safe->onShowB3(); break;
           default: break;
         }
       });
@@ -1695,7 +1718,8 @@ void RackSlotComponent::showPluginConfigMenu(int chainIndex) {
   if (!slot.getPluginInstance(chainIndex) &&
       !slot.isChainSlotMidiOut(chainIndex) &&
       !slot.isChainSlotSynth(chainIndex) &&
-      !slot.isChainSlotFm(chainIndex))
+      !slot.isChainSlotFm(chainIndex) &&
+      !slot.isChainSlotB3(chainIndex))
     return;
 
   auto *comp = new PluginStackConfigComp(slot, chainIndex);
@@ -1809,7 +1833,7 @@ juce::String RackSlotComponent::getActiveNoteRangeString() const {
 
   for (int i = 0; i < 3; ++i) {
     bool isInst = slot.isChainSlotMidiOut(i) || slot.isChainSlotSynth(i) ||
-                  slot.isChainSlotFm(i);
+                  slot.isChainSlotFm(i) || slot.isChainSlotB3(i);
     if (auto *p = slot.getPluginInstance(i))
       isInst = isInst || p->getPluginDescription().isInstrument;
     if (isInst && slot.getChainSlotSettings(i).enabled.load()) {

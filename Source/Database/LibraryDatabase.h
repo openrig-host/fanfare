@@ -78,6 +78,8 @@ public:
             return false;
         }
 
+        sqlite3_busy_timeout(db, 3000);
+
         // Enable Write-Ahead Logging (WAL) for high concurrency and crash resilience
         executeSqlInternal("PRAGMA journal_mode=WAL;");
         executeSqlInternal("PRAGMA synchronous=NORMAL;");
@@ -105,6 +107,7 @@ public:
 
     juce::File getDatabaseFile() const
     {
+        juce::ScopedLock sl(dbLock);
         return juce::File(dbPath);
     }
 
@@ -115,34 +118,12 @@ public:
         juce::ScopedLock sl(dbLock);
         if (!ensureOpen()) return false;
 
-        const char* sql = "INSERT INTO tracks (file_path, file_name, title, artist, duration, bpm, first_beat_sec, cue_in_sec, cue_out_sec, gain_trim_db, play_count, last_played, date_added) "
-                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                          "ON CONFLICT(file_path) DO UPDATE SET "
-                          "file_name=excluded.file_name, title=excluded.title, artist=excluded.artist, "
-                          "duration=excluded.duration, bpm=excluded.bpm, first_beat_sec=excluded.first_beat_sec, "
-                          "cue_in_sec=excluded.cue_in_sec, cue_out_sec=excluded.cue_out_sec, gain_trim_db=excluded.gain_trim_db, "
-                          "play_count=excluded.play_count, last_played=excluded.last_played;";
-
         sqlite3_stmt* stmt = nullptr;
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+        if (sqlite3_prepare_v2(db, getUpsertSql(), -1, &stmt, nullptr) != SQLITE_OK) return false;
 
-        sqlite3_bind_text(stmt, 1, track.filePath.toRawUTF8(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, track.fileName.toRawUTF8(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 3, track.title.toRawUTF8(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 4, track.artist.toRawUTF8(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_double(stmt, 5, track.durationSeconds);
-        sqlite3_bind_double(stmt, 6, (double)track.bpm);
-        sqlite3_bind_double(stmt, 7, track.firstBeatSeconds);
-        sqlite3_bind_double(stmt, 8, track.cueInSeconds);
-        sqlite3_bind_double(stmt, 9, track.cueOutSeconds);
-        sqlite3_bind_double(stmt, 10, (double)track.gainTrimDb);
-        sqlite3_bind_int(stmt, 11, track.playCount);
-        sqlite3_bind_int64(stmt, 12, track.lastPlayed.toMilliseconds());
-        sqlite3_bind_int64(stmt, 13, track.dateAdded.toMilliseconds() > 0 ? track.dateAdded.toMilliseconds() : juce::Time::getCurrentTime().toMilliseconds());
-
-        int res = sqlite3_step(stmt);
+        const bool ok = bindAndStepUpsert(stmt, track);
         sqlite3_finalize(stmt);
-        return (res == SQLITE_DONE);
+        return ok;
     }
 
     bool getTrack(const juce::String& filePath, TrackRecord& outRecord)
@@ -353,9 +334,18 @@ public:
         if (!ensureOpen()) return;
 
         executeSqlInternal("BEGIN TRANSACTION;");
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db, getUpsertSql(), -1, &stmt, nullptr) != SQLITE_OK)
+        {
+            executeSqlInternal("ROLLBACK;");
+            return;
+        }
+        const auto now = juce::Time::getCurrentTime();
         for (const auto& prop : obj->getProperties())
         {
             juce::String filePath = prop.name.toString();
+            if (filePath.isEmpty())
+                continue;
             if (auto* bo = prop.value.getDynamicObject())
             {
                 TrackRecord tr;
@@ -366,10 +356,11 @@ public:
                 tr.firstBeatSeconds = (double)bo->getProperty("firstBeat");
                 tr.cueInSeconds = (double)bo->getProperty("cueIn");
                 tr.cueOutSeconds = (double)bo->getProperty("cueOut");
-                tr.dateAdded = juce::Time::getCurrentTime();
-                upsertTrack(tr);
+                tr.dateAdded = now;
+                bindAndStepUpsert(stmt, tr);
             }
         }
+        sqlite3_finalize(stmt);
         executeSqlInternal("COMMIT;");
     }
 
@@ -504,12 +495,20 @@ public:
         if (!ensureOpen()) return false;
 
         executeSqlInternal("BEGIN TRANSACTION;");
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(db, getUpsertSql(), -1, &stmt, nullptr) != SQLITE_OK)
+        {
+            executeSqlInternal("ROLLBACK;");
+            return false;
+        }
+
+        const auto now = juce::Time::getCurrentTime();
         for (int i = 1; i < lines.size(); ++i)
         {
             auto line = lines[i].trim();
             if (line.isEmpty()) continue;
 
-            auto tokens = juce::StringArray::fromTokens(line, ",", "\"");
+            auto tokens = parseCsvLine(line);
             if (tokens.size() >= 5)
             {
                 TrackRecord tr;
@@ -524,20 +523,95 @@ public:
                 tr.cueOutSeconds = tokens.size() > 8 ? tokens[8].getDoubleValue() : 0.0;
                 tr.gainTrimDb = tokens.size() > 10 ? (float)tokens[10].getDoubleValue() : 0.0f;
                 tr.playCount = tokens.size() > 11 ? tokens[11].getIntValue() : 0;
-                tr.dateAdded = juce::Time::getCurrentTime();
+                tr.dateAdded = now;
 
                 if (tr.filePath.isNotEmpty())
-                {
-                    upsertTrack(tr);
-                }
+                    bindAndStepUpsert(stmt, tr);
             }
         }
-        executeSqlInternal("COMMIT;");
-        return true;
+        sqlite3_finalize(stmt);
+        return executeSqlInternal("COMMIT;");
     }
 
 private:
     LibraryDatabase() = default;
+
+    static const char* getUpsertSql()
+    {
+        return "INSERT INTO tracks (file_path, file_name, title, artist, duration, bpm, first_beat_sec, cue_in_sec, cue_out_sec, gain_trim_db, play_count, last_played, date_added) "
+               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+               "ON CONFLICT(file_path) DO UPDATE SET "
+               "file_name=excluded.file_name, title=excluded.title, artist=excluded.artist, "
+               "duration=excluded.duration, bpm=excluded.bpm, first_beat_sec=excluded.first_beat_sec, "
+               "cue_in_sec=excluded.cue_in_sec, cue_out_sec=excluded.cue_out_sec, gain_trim_db=excluded.gain_trim_db, "
+               "play_count=excluded.play_count, last_played=excluded.last_played;";
+    }
+
+    static bool bindAndStepUpsert(sqlite3_stmt* stmt, const TrackRecord& track)
+    {
+        sqlite3_reset(stmt);
+        sqlite3_clear_bindings(stmt);
+        sqlite3_bind_text(stmt, 1, track.filePath.toRawUTF8(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, track.fileName.toRawUTF8(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, track.title.toRawUTF8(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 4, track.artist.toRawUTF8(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_double(stmt, 5, track.durationSeconds);
+        sqlite3_bind_double(stmt, 6, (double)track.bpm);
+        sqlite3_bind_double(stmt, 7, track.firstBeatSeconds);
+        sqlite3_bind_double(stmt, 8, track.cueInSeconds);
+        sqlite3_bind_double(stmt, 9, track.cueOutSeconds);
+        sqlite3_bind_double(stmt, 10, (double)track.gainTrimDb);
+        sqlite3_bind_int(stmt, 11, track.playCount);
+        sqlite3_bind_int64(stmt, 12, track.lastPlayed.toMilliseconds());
+        sqlite3_bind_int64(stmt, 13, track.dateAdded.toMilliseconds() > 0 ? track.dateAdded.toMilliseconds() : juce::Time::getCurrentTime().toMilliseconds());
+        return (sqlite3_step(stmt) == SQLITE_DONE);
+    }
+
+    static juce::StringArray parseCsvLine(const juce::String& line)
+    {
+        juce::StringArray fields;
+        juce::String current;
+        bool inQuotes = false;
+        const int len = line.length();
+        for (int i = 0; i < len; ++i)
+        {
+            const juce::juce_wchar ch = line[i];
+            if (inQuotes)
+            {
+                if (ch == '"')
+                {
+                    if (i + 1 < len && line[i + 1] == '"')
+                    {
+                        current << '"';
+                        ++i;
+                    }
+                    else
+                    {
+                        inQuotes = false;
+                    }
+                }
+                else
+                {
+                    current << ch;
+                }
+            }
+            else if (ch == '"')
+            {
+                inQuotes = true;
+            }
+            else if (ch == ',')
+            {
+                fields.add(current);
+                current.clear();
+            }
+            else
+            {
+                current << ch;
+            }
+        }
+        fields.add(current);
+        return fields;
+    }
 
     bool ensureOpen()
     {

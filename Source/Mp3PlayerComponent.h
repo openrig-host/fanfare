@@ -46,7 +46,7 @@ public:
             if (closeCallback) closeCallback();
         };
         addAndMakeVisible(closeBtn);
-        Fanfare::styleHelpButton(helpBtn, "#break-music", "HAAALP! Open the Break Music & Dual-Deck DJ section of the User's Manual");
+        Fanfare::styleHelpButton(helpBtn, "#break-music", "Open the Break Music & Dual-Deck DJ section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
         // 1. Preset Playlist Banks (1..6)
@@ -520,24 +520,26 @@ public:
         m.addItem(6, "Fit Playlist to 45 Minutes");
         m.addItem(7, "Fit Playlist to 60 Minutes");
 
-        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&smartArrangeBtn), [this](int result) {
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
+        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&smartArrangeBtn), [safeThis](int result) {
+            if (safeThis == nullptr) return;
             if (result == 1) {
-                processor.sortPlaylistByBpm(true);
+                safeThis->processor.sortPlaylistByBpm(true);
             } else if (result == 2) {
-                processor.sortPlaylistByBpm(false);
+                safeThis->processor.sortPlaylistByBpm(false);
             } else if (result == 3) {
-                processor.sortPlaylistMinimalDelta(0);
+                safeThis->processor.sortPlaylistMinimalDelta(0);
             } else if (result == 4) {
-                processor.sortPlaylistEnergyWave();
+                safeThis->processor.sortPlaylistEnergyWave();
             } else if (result == 5) {
-                processor.fitPlaylistToDuration(30.0);
+                safeThis->processor.fitPlaylistToDuration(30.0);
             } else if (result == 6) {
-                processor.fitPlaylistToDuration(45.0);
+                safeThis->processor.fitPlaylistToDuration(45.0);
             } else if (result == 7) {
-                processor.fitPlaylistToDuration(60.0);
+                safeThis->processor.fitPlaylistToDuration(60.0);
             }
-            listBox.updateContent();
-            updateTrackUI();
+            safeThis->listBox.updateContent();
+            safeThis->updateTrackUI();
         });
     }
 
@@ -552,17 +554,19 @@ public:
         menu.addSectionHeader("IMPORT DATA");
         menu.addItem(5, "Import Library Metadata from CSV...");
 
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&exportBtn), [this](int result) {
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&exportBtn), [safeThis](int result) {
+            if (safeThis == nullptr) return;
             if (result == 1) {
                 // Export CSV
-                fileChooser = std::make_unique<juce::FileChooser>(
+                safeThis->fileChooser = std::make_unique<juce::FileChooser>(
                     "Export Fanfare Library to CSV...",
-                    processor.getLastFolder().getChildFile("fanfare_library_export.csv"),
+                    safeThis->processor.getLastFolder().getChildFile("fanfare_library_export.csv"),
                     "*.csv"
                 );
-                fileChooser->launchAsync(
+                safeThis->fileChooser->launchAsync(
                     juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                    [this](const juce::FileChooser& fc) {
+                    [](const juce::FileChooser& fc) {
                         auto file = fc.getResult();
                         if (file != juce::File()) {
                             if (Fanfare::LibraryDatabase::getInstance().exportToCsv(file)) {
@@ -575,14 +579,14 @@ public:
                 );
             } else if (result == 2) {
                 // Export JSON
-                fileChooser = std::make_unique<juce::FileChooser>(
+                safeThis->fileChooser = std::make_unique<juce::FileChooser>(
                     "Export Fanfare Library to JSON...",
-                    processor.getLastFolder().getChildFile("fanfare_library_export.json"),
+                    safeThis->processor.getLastFolder().getChildFile("fanfare_library_export.json"),
                     "*.json"
                 );
-                fileChooser->launchAsync(
+                safeThis->fileChooser->launchAsync(
                     juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                    [this](const juce::FileChooser& fc) {
+                    [](const juce::FileChooser& fc) {
                         auto file = fc.getResult();
                         if (file != juce::File()) {
                             if (Fanfare::LibraryDatabase::getInstance().exportToJson(file)) {
@@ -595,14 +599,14 @@ public:
                 );
             } else if (result == 3) {
                 // Export Extended M3U
-                fileChooser = std::make_unique<juce::FileChooser>(
+                safeThis->fileChooser = std::make_unique<juce::FileChooser>(
                     "Export Extended M3U Playlist...",
-                    processor.getLastFolder().getChildFile("fanfare_playlist_export.m3u"),
+                    safeThis->processor.getLastFolder().getChildFile("fanfare_playlist_export.m3u"),
                     "*.m3u"
                 );
-                fileChooser->launchAsync(
+                safeThis->fileChooser->launchAsync(
                     juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                    [this](const juce::FileChooser& fc) {
+                    [](const juce::FileChooser& fc) {
                         auto file = fc.getResult();
                         if (file != juce::File()) {
                             if (Fanfare::LibraryDatabase::getInstance().exportToM3u(file)) {
@@ -615,14 +619,14 @@ public:
                 );
             } else if (result == 4) {
                 // Backup SQLite Database
-                fileChooser = std::make_unique<juce::FileChooser>(
+                safeThis->fileChooser = std::make_unique<juce::FileChooser>(
                     "Backup SQLite Library Database...",
-                    processor.getLastFolder().getChildFile("fanfare_library_backup.db"),
+                    safeThis->processor.getLastFolder().getChildFile("fanfare_library_backup.db"),
                     "*.db"
                 );
-                fileChooser->launchAsync(
+                safeThis->fileChooser->launchAsync(
                     juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-                    [this](const juce::FileChooser& fc) {
+                    [](const juce::FileChooser& fc) {
                         auto file = fc.getResult();
                         if (file != juce::File()) {
                             if (Fanfare::LibraryDatabase::getInstance().backupDatabase(file)) {
@@ -635,20 +639,21 @@ public:
                 );
             } else if (result == 5) {
                 // Import CSV
-                fileChooser = std::make_unique<juce::FileChooser>(
+                safeThis->fileChooser = std::make_unique<juce::FileChooser>(
                     "Import Library Metadata from CSV...",
-                    processor.getLastFolder(),
+                    safeThis->processor.getLastFolder(),
                     "*.csv"
                 );
-                fileChooser->launchAsync(
+                safeThis->fileChooser->launchAsync(
                     juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                    [this](const juce::FileChooser& fc) {
+                    [safeThis](const juce::FileChooser& fc) {
+                        if (safeThis == nullptr) return;
                         auto file = fc.getResult();
                         if (file.existsAsFile()) {
                             if (Fanfare::LibraryDatabase::getInstance().importFromCsv(file)) {
-                                processor.loadBpmCache();
-                                listBox.updateContent();
-                                updateTrackUI();
+                                safeThis->processor.loadBpmCache();
+                                safeThis->listBox.updateContent();
+                                safeThis->updateTrackUI();
                                 auto* alert = new juce::AlertWindow("CSV Import Successful", "Successfully imported library metadata from:\n" + file.getFullPathName(), juce::AlertWindow::InfoIcon);
                                 alert->addButton("OK", 1);
                                 alert->enterModalState(true, nullptr, true);
@@ -775,50 +780,52 @@ public:
         m.addItem(9, "Reveal File in Windows Explorer");
         m.addItem(10, "Remove from Playlist");
 
-        m.showMenuAsync(juce::PopupMenu::Options(), [this, trackIdx, track](int result) {
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
+        m.showMenuAsync(juce::PopupMenu::Options(), [safeThis, trackIdx, track](int result) {
+            if (safeThis == nullptr) return;
             if (result == 1) {
-                processor.loadFileToDeck(0, track.file, false);
-                updateTrackUI();
-                listBox.repaint();
+                safeThis->processor.loadFileToDeck(0, track.file, false);
+                safeThis->updateTrackUI();
+                safeThis->listBox.repaint();
             } else if (result == 2) {
-                processor.loadFileToDeck(1, track.file, false);
-                updateTrackUI();
-                listBox.repaint();
+                safeThis->processor.loadFileToDeck(1, track.file, false);
+                safeThis->updateTrackUI();
+                safeThis->listBox.repaint();
             } else if (result == 3) {
-                processor.playTrack(trackIdx, true);
-                updateTrackUI();
-                listBox.repaint();
+                safeThis->processor.playTrack(trackIdx, true);
+                safeThis->updateTrackUI();
+                safeThis->listBox.repaint();
             } else if (result == 4) {
-                moveSelectedUp();
+                safeThis->moveSelectedUp();
             } else if (result == 5) {
-                moveSelectedDown();
+                safeThis->moveSelectedDown();
             } else if (result == 6) {
-                moveSelectedToTop();
+                safeThis->moveSelectedToTop();
             } else if (result == 7) {
-                moveSelectedToBottom();
+                safeThis->moveSelectedToBottom();
             } else if (result == 8) {
-                promptEditBpm(trackIdx);
+                safeThis->promptEditBpm(trackIdx);
             } else if (result == 11) {
-                processor.setTrackCueIn(trackIdx, processor.getDeckPosition(0));
-                updateTrackUI();
+                safeThis->processor.setTrackCueIn(trackIdx, safeThis->processor.getDeckPosition(0));
+                safeThis->updateTrackUI();
             } else if (result == 12) {
-                processor.setTrackCueOut(trackIdx, processor.getDeckPosition(0));
-                updateTrackUI();
+                safeThis->processor.setTrackCueOut(trackIdx, safeThis->processor.getDeckPosition(0));
+                safeThis->updateTrackUI();
             } else if (result == 13) {
-                processor.setTrackCueIn(trackIdx, processor.getDeckPosition(1));
-                updateTrackUI();
+                safeThis->processor.setTrackCueIn(trackIdx, safeThis->processor.getDeckPosition(1));
+                safeThis->updateTrackUI();
             } else if (result == 14) {
-                processor.setTrackCueOut(trackIdx, processor.getDeckPosition(1));
-                updateTrackUI();
+                safeThis->processor.setTrackCueOut(trackIdx, safeThis->processor.getDeckPosition(1));
+                safeThis->updateTrackUI();
             } else if (result == 15) {
-                processor.clearTrackCues(trackIdx);
-                updateTrackUI();
+                safeThis->processor.clearTrackCues(trackIdx);
+                safeThis->updateTrackUI();
             } else if (result == 9) {
                 YoutubeDownloadManager::openFolderInExplorer(track.file.getParentDirectory());
             } else if (result == 10) {
-                processor.removeTrack(trackIdx);
-                listBox.updateContent();
-                updateTrackUI();
+                safeThis->processor.removeTrack(trackIdx);
+                safeThis->listBox.updateContent();
+                safeThis->updateTrackUI();
             }
         });
     }
@@ -832,15 +839,16 @@ public:
         alert->addButton("Save BPM", 1, juce::KeyPress(juce::KeyPress::returnKey));
         alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
-        alert->enterModalState(true, juce::ModalCallbackFunction::create([this, alert, trackIdx](int result) {
-            if (result == 1) {
-                float bpm = (float)alert->getTextEditorContents("bpm").getDoubleValue();
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
+        juce::Component::SafePointer<juce::AlertWindow> safeAlert(alert);
+        alert->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, safeAlert, trackIdx](int result) {
+            if (safeThis != nullptr && safeAlert != nullptr && result == 1) {
+                float bpm = (float)safeAlert->getTextEditorContents("bpm").getDoubleValue();
                 if (bpm >= 40.0f && bpm <= 250.0f) {
-                    processor.setTrackBpm(trackIdx, bpm);
-                    updateTrackUI();
+                    safeThis->processor.setTrackBpm(trackIdx, bpm);
+                    safeThis->updateTrackUI();
                 }
             }
-            delete alert;
         }), true);
     }
 
@@ -870,30 +878,33 @@ public:
         m.addItem(1, "Assign Music Folder to Preset " + juce::String(bankIdx + 1) + "...");
         m.addItem(2, "Rename Preset Button (" + processor.getBanks()[bankIdx].name + ")...");
         m.addItem(3, "Open Preset Folder in Windows Explorer");
-        m.showMenuAsync(juce::PopupMenu::Options(), [this, bankIdx](int result) {
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
+        m.showMenuAsync(juce::PopupMenu::Options(), [safeThis, bankIdx](int result) {
+            if (safeThis == nullptr) return;
             if (result == 1) {
-                fileChooser = std::make_unique<juce::FileChooser>(
-                    "Select Music Folder for " + processor.getBanks()[bankIdx].name + "...",
-                    processor.getLastFolder()
+                safeThis->fileChooser = std::make_unique<juce::FileChooser>(
+                    "Select Music Folder for " + safeThis->processor.getBanks()[bankIdx].name + "...",
+                    safeThis->processor.getLastFolder()
                 );
-                fileChooser->launchAsync(
+                safeThis->fileChooser->launchAsync(
                     juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-                    [this, bankIdx](const juce::FileChooser& fc) {
+                    [safeThis, bankIdx](const juce::FileChooser& fc) {
+                        if (safeThis == nullptr) return;
                         auto dir = fc.getResult();
                         if (dir.isDirectory()) {
-                            processor.assignBankFolder(bankIdx, dir);
-                            updateBankButtonsState();
+                            safeThis->processor.assignBankFolder(bankIdx, dir);
+                            safeThis->updateBankButtonsState();
                         }
                     }
                 );
             } else if (result == 2) {
-                promptRenameBank(bankIdx);
+                safeThis->promptRenameBank(bankIdx);
             } else if (result == 3) {
-                juce::File folder(processor.getBanks()[bankIdx].folderPath);
+                juce::File folder(safeThis->processor.getBanks()[bankIdx].folderPath);
                 if (folder.isDirectory()) {
                     YoutubeDownloadManager::openFolderInExplorer(folder);
                 } else {
-                    YoutubeDownloadManager::openFolderInExplorer(processor.getLastFolder());
+                    YoutubeDownloadManager::openFolderInExplorer(safeThis->processor.getLastFolder());
                 }
             }
         });
@@ -905,16 +916,17 @@ public:
         alert->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
         alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
-        alert->enterModalState(true, juce::ModalCallbackFunction::create([this, alert, bankIdx](int result) {
-            if (result == 1) {
-                juce::String newName = alert->getTextEditorContents("name").trim();
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
+        juce::Component::SafePointer<juce::AlertWindow> safeAlert(alert);
+        alert->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, safeAlert, bankIdx](int result) {
+            if (safeThis != nullptr && safeAlert != nullptr && result == 1) {
+                juce::String newName = safeAlert->getTextEditorContents("name").trim();
                 if (newName.isNotEmpty()) {
-                    juce::File folder(processor.getBanks()[bankIdx].folderPath);
-                    processor.assignBankFolder(bankIdx, folder, newName);
-                    updateBankButtonsState();
+                    juce::File folder(safeThis->processor.getBanks()[bankIdx].folderPath);
+                    safeThis->processor.assignBankFolder(bankIdx, folder, newName);
+                    safeThis->updateBankButtonsState();
                 }
             }
-            delete alert;
         }), true);
     }
 
@@ -924,13 +936,15 @@ public:
             processor.getLastFolder(),
             "*.mp3;*.wav;*.flac;*.ogg;*.aiff;*.m4a;*.aac"
         );
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
         fileChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-            [this, deckId](const juce::FileChooser& fc) {
+            [safeThis, deckId](const juce::FileChooser& fc) {
+                if (safeThis == nullptr) return;
                 auto file = fc.getResult();
                 if (file.existsAsFile()) {
-                    processor.loadFileToDeck(deckId, file, false);
-                    updateTrackUI();
-                    listBox.repaint();
+                    safeThis->processor.loadFileToDeck(deckId, file, false);
+                    safeThis->updateTrackUI();
+                    safeThis->listBox.repaint();
                 }
             }
         );
@@ -1242,15 +1256,17 @@ public:
             processor.getLastFolder(),
             "*.mp3;*.wav;*.flac;*.ogg;*.aiff;*.m4a;*.aac"
         );
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
         fileChooser->launchAsync(
             juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectMultipleItems,
-            [this](const juce::FileChooser& fc) {
+            [safeThis](const juce::FileChooser& fc) {
+                if (safeThis == nullptr) return;
                 auto results = fc.getResults();
                 for (const auto& f : results) {
-                    processor.addFile(f);
+                    safeThis->processor.addFile(f);
                 }
-                listBox.updateContent();
-                updateTrackUI();
+                safeThis->listBox.updateContent();
+                safeThis->updateTrackUI();
             }
         );
     }
@@ -1260,14 +1276,16 @@ public:
             "Add Music Folder to Playlist...",
             processor.getLastFolder()
         );
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
         fileChooser->launchAsync(
             juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-            [this](const juce::FileChooser& fc) {
+            [safeThis](const juce::FileChooser& fc) {
+                if (safeThis == nullptr) return;
                 auto dir = fc.getResult();
                 if (dir.isDirectory()) {
-                    processor.addFolder(dir);
-                    listBox.updateContent();
-                    updateTrackUI();
+                    safeThis->processor.addFolder(dir);
+                    safeThis->listBox.updateContent();
+                    safeThis->updateTrackUI();
                 }
             }
         );
@@ -1289,32 +1307,36 @@ public:
         alert->addButton("Open Downloads Folder", 4);
         alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
-        alert->enterModalState(true, juce::ModalCallbackFunction::create([this, alert](int result) {
-            juce::String url = alert->getTextEditorContents("url").trim();
-            delete alert;
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
+        juce::Component::SafePointer<juce::AlertWindow> safeAlert(alert);
+        alert->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, safeAlert](int result) {
+            if (safeThis == nullptr) return;
+            juce::String url = safeAlert != nullptr ? safeAlert->getTextEditorContents("url").trim() : juce::String();
 
             if (result == 1 || result == 2) {
                 bool playNow = (result == 2);
                 if (url.isNotEmpty()) {
-                    deckATrackLabel.setText("Looking up song details: " + url + "...", juce::dontSendNotification);
+                    safeThis->deckATrackLabel.setText("Looking up song details: " + url + "...", juce::dontSendNotification);
                     
-                    YoutubeDownloadManager::fetchVideoInfoAsync(url, [this, url, playNow](const YoutubeDownloadManager::VideoInfo& info) {
-                        deckATrackLabel.setText(info.success ? ("Found: " + info.title) : "Starting download...", juce::dontSendNotification);
-                        showDownloadConfirmation(url, info, playNow);
+                    YoutubeDownloadManager::fetchVideoInfoAsync(url, [safeThis, url, playNow](const YoutubeDownloadManager::VideoInfo& info) {
+                        if (safeThis == nullptr) return;
+                        safeThis->deckATrackLabel.setText(info.success ? ("Found: " + info.title) : "Starting download...", juce::dontSendNotification);
+                        safeThis->showDownloadConfirmation(url, info, playNow);
                     });
                 }
             } else if (result == 3) {
-                fileChooser = std::make_unique<juce::FileChooser>(
+                safeThis->fileChooser = std::make_unique<juce::FileChooser>(
                     "Select Destination Folder for YouTube Downloads...",
                     YoutubeDownloadManager::getInstance().getDownloadsDir()
                 );
-                fileChooser->launchAsync(
+                safeThis->fileChooser->launchAsync(
                     juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-                    [this](const juce::FileChooser& fc) {
+                    [safeThis](const juce::FileChooser& fc) {
+                        if (safeThis == nullptr) return;
                         auto dir = fc.getResult();
                         if (dir.isDirectory()) {
                             YoutubeDownloadManager::getInstance().setDownloadsDir(dir);
-                            promptYoutubeDownload();
+                            safeThis->promptYoutubeDownload();
                         }
                     }
                 );
@@ -1351,29 +1373,32 @@ public:
         }
         confirm->addButton("Cancel / Wrong Song", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
-        confirm->enterModalState(true, juce::ModalCallbackFunction::create([this, confirm, url](int result) {
-            delete confirm;
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
+        confirm->enterModalState(true, juce::ModalCallbackFunction::create([safeThis, url](int result) {
+            if (safeThis == nullptr) return;
             if (result == 1 || result == 2) {
                 bool playNow = (result == 2);
-                deckATrackLabel.setText("Downloading: " + url + "...", juce::dontSendNotification);
+                safeThis->deckATrackLabel.setText("Downloading: " + url + "...", juce::dontSendNotification);
                 YoutubeDownloadManager::getInstance().queueDownload(url, playNow, {},
-                    [this, playNow](bool success, const juce::File& file, const juce::String& /*title*/, const juce::String& err) {
+                    [safeThis, playNow](bool success, const juce::File& file, const juce::String& /*title*/, const juce::String& err) {
+                        if (safeThis == nullptr) return;
                         if (success && file.existsAsFile()) {
-                            processor.addFile(file);
-                            listBox.updateContent();
+                            safeThis->processor.addFile(file);
+                            safeThis->listBox.updateContent();
                             if (playNow) {
-                                int newIdx = (int)processor.getPlaylist().size() - 1;
-                                processor.playTrack(newIdx, true);
+                                int newIdx = (int)safeThis->processor.getPlaylist().size() - 1;
+                                safeThis->processor.playTrack(newIdx, true);
                             }
-                            updateTrackUI();
+                            safeThis->updateTrackUI();
                         } else {
                             auto* errBox = new juce::AlertWindow("Download Failed", err.isNotEmpty() ? err : "Failed to download audio from YouTube URL", juce::AlertWindow::WarningIcon);
                             errBox->addButton("OK", 1);
                             errBox->enterModalState(true, nullptr, true);
                         }
                     },
-                    [this](const juce::String& status, float /*progress*/) {
-                        deckATrackLabel.setText(status, juce::dontSendNotification);
+                    [safeThis](const juce::String& status, float /*progress*/) {
+                        if (safeThis != nullptr)
+                            safeThis->deckATrackLabel.setText(status, juce::dontSendNotification);
                     }
                 );
             }
@@ -1386,16 +1411,18 @@ public:
             processor.getLastFolder().getChildFile("playlist.m3u"),
             "*.m3u;*.json"
         );
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
         fileChooser->launchAsync(
             juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-            [this](const juce::FileChooser& fc) {
+            [safeThis](const juce::FileChooser& fc) {
+                if (safeThis == nullptr) return;
                 auto file = fc.getResult();
                 if (file != juce::File()) {
                     if (file.getFileExtension().isEmpty()) {
                         file = file.withFileExtension("m3u");
                     }
-                    processor.savePlaylist(file);
-                    processor.setLastFolder(file);
+                    safeThis->processor.savePlaylist(file);
+                    safeThis->processor.setLastFolder(file);
                 }
             }
         );
@@ -1407,15 +1434,17 @@ public:
             processor.getLastFolder(),
             "*.m3u;*.json"
         );
+        juce::Component::SafePointer<Mp3PlayerComponent> safeThis(this);
         fileChooser->launchAsync(
             juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-            [this](const juce::FileChooser& fc) {
+            [safeThis](const juce::FileChooser& fc) {
+                if (safeThis == nullptr) return;
                 auto file = fc.getResult();
                 if (file.existsAsFile()) {
-                    processor.loadPlaylist(file);
-                    processor.setLastFolder(file);
-                    listBox.updateContent();
-                    updateTrackUI();
+                    safeThis->processor.loadPlaylist(file);
+                    safeThis->processor.setLastFolder(file);
+                    safeThis->listBox.updateContent();
+                    safeThis->updateTrackUI();
                 }
             }
         );
@@ -1426,7 +1455,7 @@ public:
 
     juce::Label titleLabel;
     juce::TextButton closeBtn;
-    juce::TextButton helpBtn{"HAAALP!"};
+    juce::TextButton helpBtn{"Help"};
     std::vector<std::unique_ptr<BankButton>> bankButtons;
 
     // Deck A Components

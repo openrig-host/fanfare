@@ -93,6 +93,9 @@ FanfareEngine::~FanfareEngine()
 // Call this BEFORE the engine is destroyed to release all VST3 plugins
   void FanfareEngine::releaseAllPlugins() 
 {
+    ScopedAudioQuietWindow quietWindow(*this);
+    juce::ScopedLock sl(lock);
+
     // Release all slot plugins
     for (auto &slot : slots) {
       slot->clearChain();
@@ -102,8 +105,14 @@ FanfareEngine::~FanfareEngine()
       slot->clearChain();
     }
 
-    // Release Master FX chains
-    for (auto &p : fohPluginChain) {
+    // Release Master FX chains outside masterFxLock
+    std::vector<std::unique_ptr<juce::AudioPluginInstance>> oldFoh, oldIem;
+    {
+      juce::SpinLock::ScopedLockType mfl(masterFxLock);
+      oldFoh.swap(fohPluginChain);
+      oldIem.swap(iemPluginChain);
+    }
+    for (auto &p : oldFoh) {
       if (p) {
         if (onBeforePluginDestroyed)
           onBeforePluginDestroyed(p.get());
@@ -113,9 +122,7 @@ FanfareEngine::~FanfareEngine()
         }, "fohPlugin releaseResources/reset");
       }
     }
-    fohPluginChain.clear();
-
-    for (auto &p : iemPluginChain) {
+    for (auto &p : oldIem) {
       if (p) {
         if (onBeforePluginDestroyed)
           onBeforePluginDestroyed(p.get());
@@ -125,8 +132,11 @@ FanfareEngine::~FanfareEngine()
         }, "iemPlugin releaseResources/reset");
       }
     }
-    iemPluginChain.clear();
-    lastAppliedPluginStates.clear();
+
+    {
+      juce::ScopedLock sLock(stagingLock);
+      lastAppliedPluginStates.clear();
+    }
 
     // Close all opened MIDI output devices.
     juce::SpinLock::ScopedLockType mol(midiOutputLock);
@@ -781,6 +791,7 @@ void FanfareEngine::loadPluginList()
 // --- Persistence (JSON / var) ---
   juce::String FanfareEngine::exportRigToJson() 
 {
+    juce::ScopedLock sl(lock);
     saveCurrentStateToScene(getCurrentSceneIndex());
 
     auto *rig = new juce::DynamicObject();
@@ -1017,6 +1028,16 @@ void FanfareEngine::loadPluginList()
           pObj->setProperty("level", (double)cs.level.load());
           pObj->setProperty("enabled", cs.enabled.load());
           chainNodes.add(juce::var(pObj));
+        } else if (pIdx < 3 && s->isChainSlotB3(pIdx)) {
+          auto* pObj = new juce::DynamicObject();
+          auto& cs = s->getChainSlotSettings(pIdx);
+          pObj->setProperty("isB3", true);
+          pObj->setProperty("b3State", s->getB3Organ(pIdx).getState());
+          pObj->setProperty("lowNote", cs.lowNote.load());
+          pObj->setProperty("highNote", cs.highNote.load());
+          pObj->setProperty("level", (double)cs.level.load());
+          pObj->setProperty("enabled", cs.enabled.load());
+          chainNodes.add(juce::var(pObj));
         } else if (pIdx < 3 && s->isChainSlotMidiOut(pIdx)) {
           auto* pObj = new juce::DynamicObject();
           auto& cs = s->getChainSlotSettings(pIdx);
@@ -1185,6 +1206,7 @@ void FanfareEngine::applyRig(const juce::var &rig)
     } reapFlusher{*this};
 
     ScopedAudioQuietWindow quietWindow(*this);
+    juce::ScopedLock sl(lock);
 
     // Note: ScopedAudioQuietWindow pauses audio processing cleanly without spinning or priority inversions.
     // Displaced plugins are moved into pendingReapPlugins and destroyed by ReapFlushOnExit AFTER
@@ -1228,7 +1250,7 @@ void FanfareEngine::applyRig(const juce::var &rig)
         }
       }
     } else {
-      clearMasterChains();
+      clearMasterChain(true);
     }
 
     if (auto *iemArr = rig.getProperty("iemFx", juce::var()).getArray()) {
@@ -1247,7 +1269,7 @@ void FanfareEngine::applyRig(const juce::var &rig)
         }
       }
     } else {
-      clearMasterChains();
+      clearMasterChain(false);
     }
 
     // Channels
@@ -1511,11 +1533,15 @@ void FanfareEngine::applyRig(const juce::var &rig)
               juce::String moDev = pv.getProperty("midiOutDevice", "").toString();
               bool isSy = pv.getProperty("isSynth", false);
               bool isFm = pv.getProperty("isFm", false);
+              bool isB3 = pv.getProperty("isB3", false);
               if (isSy && p < 3) {
                 s->setChainSlotSynth(p, true, pv.getProperty("synthState", juce::var()));
                 anyChainSynthRestored = true;
               } else if (isFm && p < 3) {
                 s->setChainSlotFm(p, true, pv.getProperty("fmState", juce::var()));
+              } else if (isB3 && p < 3) {
+                s->setChainSlotB3(p, true, pv.getProperty("b3State", juce::var()));
+                restoreB3ExtPluginsForSlot(s);
               } else if (isMo && moDev.isNotEmpty()) {
                 // MIDI OUT destination: open the device and bind this chain slot.
                 int devIdx = getOrCreateMidiOutput(moDev);
@@ -1524,8 +1550,10 @@ void FanfareEngine::applyRig(const juce::var &rig)
                                        moDev, midiOutputNameForIdentifier(moDev));
               } else {
                 loadPluginFromVarSmart(i, p, pv, true);
-                s->clearChainSlotMidiOut(p); // plugin replaces any midi-out config
+                s->clearChainSlotMidiOut(p); // plugin replaces any midi-out/synth/fm/b3 config
                 s->clearChainSlotSynth(p);
+                s->clearChainSlotFm(p);
+                s->clearChainSlotB3(p);
               }
               // Per-instrument stacking settings
               if (p < 3) {
@@ -1538,6 +1566,8 @@ void FanfareEngine::applyRig(const juce::var &rig)
             } else if (p < 3) {
               s->clearChainSlotMidiOut(p);
               s->clearChainSlotSynth(p);
+              s->clearChainSlotFm(p);
+              s->clearChainSlotB3(p);
             }
           }
         }
@@ -1547,7 +1577,8 @@ void FanfareEngine::applyRig(const juce::var &rig)
         if (!anyChainSynthRestored && s->getSynth(0).enabled.load()) {
           for (int c = 0; c < 3; ++c) {
             if (!s->getPluginInstance(c) && !s->isChainSlotMidiOut(c) &&
-                !s->isChainSlotSynth(c)) {
+                !s->isChainSlotSynth(c) && !s->isChainSlotFm(c) &&
+                !s->isChainSlotB3(c)) {
               if (c != 0)
                 s->setChainSlotSynth(c, true, s->getSynth(0).getState());
               else
@@ -2042,6 +2073,9 @@ Fanfare::SongSlot FanfareEngine::exportSlot(int slotIdx)
       ps.isFm = s->isChainSlotFm(pIdx);
       if (ps.isFm)
         ps.fmState = s->getFmSynth(pIdx).getState();
+      ps.isB3 = s->isChainSlotB3(pIdx);
+      if (ps.isB3)
+        ps.b3State = s->getB3Organ(pIdx).getState();
       songSlot.chain.push_back(ps);
     }
 
@@ -2201,6 +2235,7 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
         s->clearChainSlotMidiOut(c);
         s->clearChainSlotSynth(c);
         s->clearChainSlotFm(c);
+        s->clearChainSlotB3(c);
       }
     }
     bool anyChainSynthRestored = false;
@@ -2210,6 +2245,9 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
         anyChainSynthRestored = true;
       } else if (p < 3 && songSlot.chain[p].isFm) {
         s->setChainSlotFm(p, true, songSlot.chain[p].fmState);
+      } else if (p < 3 && songSlot.chain[p].isB3) {
+        s->setChainSlotB3(p, true, songSlot.chain[p].b3State);
+        restoreB3ExtPluginsForSlot(s);
       } else if (songSlot.chain[p].isMidiOut && songSlot.chain[p].midiOutDevice.isNotEmpty()) {
         // MIDI OUT destination takes over this chain slot.
         const auto& ps = songSlot.chain[p];
@@ -2222,16 +2260,19 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
         s->clearChainSlotMidiOut(p); // plugin replaces any midi-out config
         s->clearChainSlotSynth(p);
         s->clearChainSlotFm(p);
+        s->clearChainSlotB3(p);
       } else {
         s->clearChainSlotMidiOut(p);
         s->clearChainSlotSynth(p);
         s->clearChainSlotFm(p);
+        s->clearChainSlotB3(p);
       }
     }
     if (!anyChainSynthRestored && songSlot.synth.enabled) {
       for (int c = 0; c < 3; ++c) {
         if (!s->getPluginInstance(c) && !s->isChainSlotMidiOut(c) &&
-            !s->isChainSlotSynth(c) && !s->isChainSlotFm(c)) {
+            !s->isChainSlotSynth(c) && !s->isChainSlotFm(c) &&
+            !s->isChainSlotB3(c)) {
           s->setChainSlotSynth(c, true, songSlot.synth.state);
           break;
         }
@@ -2245,7 +2286,8 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
       if (!anyFmRestored) {
         for (int c = 0; c < 3; ++c) {
           if (!s->getPluginInstance(c) && !s->isChainSlotMidiOut(c) &&
-              !s->isChainSlotSynth(c) && !s->isChainSlotFm(c)) {
+              !s->isChainSlotSynth(c) && !s->isChainSlotFm(c) &&
+              !s->isChainSlotB3(c)) {
             s->setChainSlotFm(c, true, songSlot.fm.state);
             break;
           }
@@ -2354,6 +2396,7 @@ juce::var FanfareEngine::songSlotToPluginVar(const Fanfare::PluginState& ps)
 
 juce::String FanfareEngine::getMasterPluginPath(bool isFoh, int chainIndex) const 
 {
+    juce::SpinLock::ScopedLockType mfl(masterFxLock);
     const auto &chain = isFoh ? fohPluginChain : iemPluginChain;
     if (chainIndex >= 0 && chainIndex < (int)chain.size()) {
       if (chain[chainIndex]) {
@@ -2380,7 +2423,9 @@ void FanfareEngine::loadPluginFromVarSmart(int slotIdx, int chainIdx, const juce
     // calling setStateInformation on the live instance under the callback lock.
     auto key = stagingKeyFor(slotIdx, chainIdx, isFohOrChannel);
     if (stagingHasKey(key)) {
-      if (loadPluginFromVar(slotIdx, chainIdx, vt, isFohOrChannel))
+      const bool ok = loadPluginFromVar(slotIdx, chainIdx, vt, isFohOrChannel);
+      juce::ScopedLock sLock(stagingLock);
+      if (ok)
         lastAppliedPluginStates[key] = newStateBase64;
       else
         lastAppliedPluginStates.erase(key);
@@ -2406,11 +2451,12 @@ void FanfareEngine::loadPluginFromVarSmart(int slotIdx, int chainIdx, const juce
       if (currentPlugin)
         currentPath = slots[slotIdx]->getPluginPath(chainIdx);
     } else {
+      juce::SpinLock::ScopedLockType mfl(masterFxLock);
       const auto &chain = isFohOrChannel ? fohPluginChain : iemPluginChain;
       if (chainIdx >= 0 && chainIdx < (int)chain.size()) {
         currentPlugin = chain[chainIdx].get();
         if (currentPlugin)
-          currentPath = getMasterPluginPath(isFohOrChannel, chainIdx);
+          currentPath = currentPlugin->getPluginDescription().fileOrIdentifier;
       }
     }
 
@@ -2418,10 +2464,13 @@ void FanfareEngine::loadPluginFromVarSmart(int slotIdx, int chainIdx, const juce
     if (currentPlugin && normalizePath(currentPath) == normalizedNewPath) {
       // Avoid redundant setStateInformation if the patch/state is identical.
       // This saves seconds/tens of seconds for heavy plugins (Kontakt, Omnisphere).
-      auto it = lastAppliedPluginStates.find(key);
-      if (it != lastAppliedPluginStates.end() && it->second == newStateBase64) {
-        logToFile("TRACE: Skipping setStateInformation for " + currentPlugin->getName() + " - state is unchanged.");
-        return;
+      {
+        juce::ScopedLock sLock(stagingLock);
+        auto it = lastAppliedPluginStates.find(key);
+        if (it != lastAppliedPluginStates.end() && it->second == newStateBase64) {
+          logToFile("TRACE: Skipping setStateInformation for " + currentPlugin->getName() + " - state is unchanged.");
+          return;
+        }
       }
 
       juce::MemoryBlock blob;
@@ -2431,17 +2480,24 @@ void FanfareEngine::loadPluginFromVarSmart(int slotIdx, int chainIdx, const juce
         currentPlugin->setStateInformation(blob.getData(), (int)blob.getSize());
       }, "setStateInformation (Reused " + currentPlugin->getName() + ")");
       logToFile("TRACE: setStateInformation finished for reused plugin: " + currentPlugin->getName());
-      if (stateOk) {
-        lastAppliedPluginStates[key] = newStateBase64;
-      } else {
-        lastAppliedPluginStates.erase(key);
+      {
+        juce::ScopedLock sLock(stagingLock);
+        if (stateOk) {
+          lastAppliedPluginStates[key] = newStateBase64;
+        } else {
+          lastAppliedPluginStates.erase(key);
+        }
+      }
+      if (!stateOk) {
         logToFile("WARNING: setStateInformation faulted for reused plugin: " + currentPlugin->getName() + ", continuing");
       }
       return;
     }
 
     // Different plugin or no plugin - load new one
-    if (loadPluginFromVar(slotIdx, chainIdx, vt, isFohOrChannel))
+    const bool loaded = loadPluginFromVar(slotIdx, chainIdx, vt, isFohOrChannel);
+    juce::ScopedLock sLock(stagingLock);
+    if (loaded)
       lastAppliedPluginStates[key] = newStateBase64;
     else
       lastAppliedPluginStates.erase(key);
@@ -2726,17 +2782,18 @@ juce::AudioPluginInstance *FanfareEngine::getMasterPluginInstance(bool isFoh,
 
   
 
-void FanfareEngine::clearMasterChains() 
+void FanfareEngine::clearMasterChain(bool isFoh) 
 {
     juce::ScopedLock sl(lock);
-    std::vector<std::unique_ptr<juce::AudioPluginInstance>> oldFoh, oldIem;
+    std::vector<std::unique_ptr<juce::AudioPluginInstance>> oldChain;
     {
       juce::SpinLock::ScopedLockType mfl(masterFxLock);
-      oldFoh.swap(fohPluginChain);
-      oldIem.swap(iemPluginChain);
+      oldChain.swap(isFoh ? fohPluginChain : iemPluginChain);
     }
     const bool deferReap = isApplyingRig.load(std::memory_order_acquire);
-    for (auto &p : oldFoh) {
+    const char *label = isFoh ? "oldFoh releaseResources/reset"
+                              : "oldIem releaseResources/reset";
+    for (auto &p : oldChain) {
       if (p != nullptr) {
         if (onBeforePluginDestroyed)
           onBeforePluginDestroyed(p.get());
@@ -2746,52 +2803,28 @@ void FanfareEngine::clearMasterChains()
           FanfareLog::safeExecutePluginCall([&]() {
             p->releaseResources();
             p.reset();
-          }, "oldFoh releaseResources/reset");
+          }, label);
         }
       }
     }
-    for (auto &p : oldIem) {
-      if (p != nullptr) {
-        if (onBeforePluginDestroyed)
-          onBeforePluginDestroyed(p.get());
-        if (deferReap) {
-          enqueueReapPlugin(std::move(p));
-        } else {
-          FanfareLog::safeExecutePluginCall([&]() {
-            p->releaseResources();
-            p.reset();
-          }, "oldIem releaseResources/reset");
-        }
-      }
-    }
+  }
+
+void FanfareEngine::clearMasterChains() 
+{
+    clearMasterChain(true);
+    clearMasterChain(false);
   }
 
   
 
 void FanfareEngine::clearAllRacks() 
 {
-    const bool alreadyApplying = isApplyingRig.exchange(true, std::memory_order_seq_cst);
-    struct ClearGuard {
+    struct ReapFlushOnExit {
       FanfareEngine &eng;
-      std::atomic<bool> &flag;
-      std::atomic<juce::int64> &endTicks;
-      bool restoreFalse;
-      ~ClearGuard() {
-        if (restoreFalse) {
-          endTicks.store(juce::Time::getHighResolutionTicks(), std::memory_order_release);
-          flag.store(false, std::memory_order_release);
-          eng.flushReapQueue();
-        }
-      }
-    } guard{*this, isApplyingRig, lastRigApplyEndTicks, !alreadyApplying};
+      ~ReapFlushOnExit() { eng.flushReapQueue(); }
+    } reapFlusher{*this};
 
-    for (int waitIter = 0;
-         (isInProcessAudio.load(std::memory_order_acquire) ||
-          dspInFlightWorkers.load(std::memory_order_acquire) != 0) &&
-         waitIter < 50;
-         ++waitIter) {
-      juce::Thread::sleep(1);
-    }
+    ScopedAudioQuietWindow quietWindow(*this);
 
     juce::ScopedLock sl(lock);
     for (auto &slot : slots) {
@@ -2803,7 +2836,10 @@ void FanfareEngine::clearAllRacks()
         slot->clearChain(&pendingReapPlugins);
     }
     clearMasterChains();
-    lastAppliedPluginStates.clear();
+    {
+      juce::ScopedLock sLock(stagingLock);
+      lastAppliedPluginStates.clear();
+    }
     logToFile("TRACE: clearAllRacks() completed - all slot and master plugins unloaded.");
   }
 
@@ -2987,13 +3023,69 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
   // path has been proving this all along). On timeout the build is abandoned:
   // the half-built instance lives on the detached worker thread and the
   // caller gets null — the rig survives.
+bool FanfareEngine::findPrimaryPluginDescription(const juce::String &path,
+                                                 juce::PluginDescription &outDesc,
+                                                 juce::String &outError) 
+{
+    const juce::String normKey = normalizePath(path);
+    {
+      juce::ScopedLock cacheSl(pluginDescCacheLock);
+      auto it = pluginDescCache.find(normKey);
+      if (it != pluginDescCache.end()) {
+        outDesc = it->second;
+        return true;
+      }
+    }
+
+    juce::AudioPluginFormat *vst3Format = findVst3Format();
+    if (!vst3Format) {
+      outError = "VST3 format not available";
+      return false;
+    }
+
+    juce::OwnedArray<juce::PluginDescription> descriptions;
+    {
+      std::unique_lock<std::timed_mutex> fmLock(formatManagerMutex,
+                                                std::defer_lock);
+      if (!fmLock.try_lock_for(std::chrono::seconds(45))) {
+        outError = "VST3 format manager busy";
+        return false;
+      }
+      {
+        juce::ScopedLock cacheSl(pluginDescCacheLock);
+        auto it = pluginDescCache.find(normKey);
+        if (it != pluginDescCache.end()) {
+          outDesc = it->second;
+          return true;
+        }
+      }
+      vst3Format->findAllTypesForFile(descriptions, path);
+    }
+
+    if (descriptions.isEmpty()) {
+      outError = "No plugins found in file: " + path;
+      return false;
+    }
+
+    outDesc = *descriptions[0];
+    {
+      juce::ScopedLock cacheSl(pluginDescCacheLock);
+      pluginDescCache[normKey] = outDesc;
+    }
+    return true;
+  }
+
   std::unique_ptr<juce::AudioPluginInstance> FanfareEngine::buildInstanceOffThread(
       const juce::PluginDescription &desc, juce::String &error,
-      int timeoutMs ) 
+      int timeoutMs, const juce::String &gatePath ) 
 {
     struct OffThreadBuild {
       FanfareEngine *engine;
+      std::shared_ptr<std::atomic<bool>> alive;
       juce::PluginDescription desc;
+      juce::String gatePath;
+      double sampleRate = 48000.0;
+      int blockSize = 512;
       std::unique_ptr<juce::AudioPluginInstance> inst;
       juce::String err;
       std::atomic<bool> done{false};
@@ -3001,34 +3093,78 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
     };
     auto ctx = std::make_shared<OffThreadBuild>();
     ctx->engine = this;
+    ctx->alive = engineAlive;
     ctx->desc = desc;
+    ctx->gatePath = gatePath;
+    ctx->sampleRate = currentSampleRate > 0.0 ? currentSampleRate : 48000.0;
+    ctx->blockSize = currentBlockSize > 0 ? currentBlockSize : 512;
 
     std::thread t([ctx]() {
-      ctx->engine->applyBackgroundThreadTuning();
+      const bool engineUpAtStart =
+          ctx->alive && ctx->alive->load(std::memory_order_acquire);
+      if (engineUpAtStart)
+        ctx->engine->applyBackgroundThreadTuning();
 #ifdef _WIN32
       ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 #endif
       std::unique_ptr<juce::AudioPluginInstance> tmp;
       juce::String tmpErr;
-      if (! ctx->abandoned.load(std::memory_order_acquire))
-        tmp = ctx->engine->getFormatManager().createPluginInstance(
-            ctx->desc, ctx->engine->getCurrentSampleRate(),
-            ctx->engine->getCurrentBlockSize(), tmpErr);
-      if (tmp && ! ctx->abandoned.load(std::memory_order_acquire)) {
-        ctx->engine->configureStereoLayout(tmp.get());
-        if (! ctx->abandoned.load(std::memory_order_acquire))
-          tmp->prepareToPlay(ctx->engine->getCurrentSampleRate(),
-                             ctx->engine->getCurrentBlockSize());
+      auto isAlive = [&]() {
+        return !ctx->abandoned.load(std::memory_order_acquire) && ctx->alive &&
+               ctx->alive->load(std::memory_order_acquire);
+      };
+
+      if (isAlive()) {
+        std::unique_lock<std::timed_mutex> fmLock(
+            ctx->engine->formatManagerMutex, std::defer_lock);
+        if (fmLock.try_lock_for(std::chrono::seconds(35))) {
+          if (isAlive()) {
+            tmp = ctx->engine->getFormatManager().createPluginInstance(
+                ctx->desc, ctx->sampleRate, ctx->blockSize, tmpErr);
+          }
+        } else {
+          tmpErr = "VST3 format manager busy";
+        }
       }
-      if (! ctx->abandoned.load(std::memory_order_acquire)) {
+      if (tmp && isAlive()) {
+        ctx->engine->configureStereoLayout(tmp.get());
+        if (isAlive()) {
+          bool prepOk = FanfareLog::safeExecutePluginCall([&]() {
+            tmp->prepareToPlay(ctx->sampleRate, ctx->blockSize);
+          }, "prepareToPlay (OffThread " + ctx->desc.name + ")");
+          if (!prepOk) {
+            tmpErr = "plugin prepareToPlay faulted/crashed";
+            if (ctx->alive && ctx->alive->load(std::memory_order_acquire)) {
+              std::unique_lock<std::timed_mutex> fmLock(
+                  ctx->engine->formatManagerMutex, std::defer_lock);
+              (void)fmLock.try_lock_for(std::chrono::seconds(2));
+              tmp.reset();
+            } else {
+              tmp.reset();
+            }
+          }
+        }
+      }
+      if (isAlive()) {
         ctx->inst = std::move(tmp);
         ctx->err = tmpErr;
       } else {
-        tmp.reset(); // abandoned: release on the worker thread
+        if (tmp) {
+          if (ctx->alive && ctx->alive->load(std::memory_order_acquire)) {
+            std::unique_lock<std::timed_mutex> fmLock(
+                ctx->engine->formatManagerMutex, std::defer_lock);
+            (void)fmLock.try_lock_for(std::chrono::seconds(2));
+            tmp.reset();
+          } else {
+            tmp.reset(); // engine gone: release on the worker thread
+          }
+        }
       }
 #ifdef _WIN32
       ::CoUninitialize();
 #endif
+      if (ctx->gatePath.isNotEmpty())
+        Fanfare::releasePathBuildGate(ctx->gatePath);
       ctx->done.store(true, std::memory_order_release);
     });
 
@@ -3062,6 +3198,84 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
     return nullptr;
   }
 
+  std::unique_ptr<juce::AudioPluginInstance>
+  FanfareEngine::createPreparedInteractiveInstance(
+      const juce::String &pluginPath, juce::PluginDescription &outDesc,
+      juce::String &outError) 
+{
+    juce::File pluginFile(pluginPath);
+    if (!pluginFile.exists()) {
+      outError = "Plugin file not found: " + pluginPath;
+      return nullptr;
+    }
+
+    const juce::String normPath = normalizePath(pluginPath);
+    if (Fanfare::isPathPoisoned(normPath)) {
+      outError = "Plugin quarantined after prior fault: " +
+                 pluginFile.getFileName();
+      return nullptr;
+    }
+
+    logToFile("Scanning plugin...");
+    if (!findPrimaryPluginDescription(pluginPath, outDesc, outError))
+      return nullptr;
+
+    logToFile("Found: " + outDesc.name);
+    logToFile("desc: " + outDesc.name + " isInstrument=" +
+              juce::String(outDesc.isInstrument ? 1 : 0) + " inCh=" +
+              juce::String(outDesc.numInputChannels) + " outCh=" +
+              juce::String(outDesc.numOutputChannels));
+
+    const double safeSr = currentSampleRate > 0.0 ? currentSampleRate : 48000.0;
+    const int safeBs = currentBlockSize > 0 ? currentBlockSize : 512;
+
+    pinDllInMemory(pluginPath);
+
+    if (!Fanfare::tryAcquirePathBuildGate(normPath, 15000)) {
+      outError = "Plugin is busy initializing in another task";
+      return nullptr;
+    }
+
+    if (Fanfare::pluginRequiresMessageThread(pluginPath)) {
+      struct GateReleaser {
+        juce::String p;
+        ~GateReleaser() { Fanfare::releasePathBuildGate(p); }
+      } releaser{normPath};
+
+      logToFile("Building " + outDesc.name +
+                " on the message thread (interactive)...");
+      std::unique_ptr<juce::AudioPluginInstance> instance;
+      {
+        std::unique_lock<std::timed_mutex> fmLock(formatManagerMutex,
+                                                  std::defer_lock);
+        if (!fmLock.try_lock_for(std::chrono::seconds(35))) {
+          outError = "VST3 format manager busy";
+          return nullptr;
+        }
+        instance = formatManager.createPluginInstance(outDesc, safeSr, safeBs,
+                                                      outError);
+      }
+      if (!instance)
+        return nullptr;
+
+      configureStereoLayout(instance.get());
+      bool prepOk = FanfareLog::safeExecutePluginCall([&]() {
+        instance->prepareToPlay(safeSr, safeBs);
+      }, "prepareToPlay (Interactive " + outDesc.name + ")");
+      if (!prepOk) {
+        outError = "plugin prepareToPlay faulted/crashed";
+        std::unique_lock<std::timed_mutex> fmLock(formatManagerMutex,
+                                                  std::defer_lock);
+        (void)fmLock.try_lock_for(std::chrono::seconds(2));
+        instance.reset();
+        return nullptr;
+      }
+      return instance;
+    }
+
+    return buildInstanceOffThread(outDesc, outError, 300000, normPath);
+  }
+
   
 
 // Load a plugin from the registry into a specific slot
@@ -3084,89 +3298,13 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
     }
 
     juce::String pluginPath = availablePlugins[pluginIndex].path;
-    juce::File pluginFile(pluginPath);
-
     logToFile("=== LOADING PLUGIN (SYNC) ===");
     logToFile("Path: " + pluginPath);
 
-    if (!pluginFile.exists()) {
-      callback(false, "Plugin file not found: " + pluginPath);
-      return;
-    }
-
-    // Find VST3 format
-    juce::AudioPluginFormat *vst3Format = nullptr;
-    for (int i = 0; i < formatManager.getNumFormats(); ++i) {
-      if (formatManager.getFormat(i)->getName() == "VST3") {
-        vst3Format = formatManager.getFormat(i);
-        break;
-      }
-    }
-
-    if (!vst3Format) {
-      callback(false, "VST3 format not available");
-      return;
-    }
-
-    // Scan for plugin types (this may take a moment)
-    logToFile("Scanning plugin...");
-    juce::OwnedArray<juce::PluginDescription> descriptions;
-    vst3Format->findAllTypesForFile(descriptions, pluginPath);
-
-    if (descriptions.isEmpty()) {
-      callback(false, "No plugins found in file");
-      return;
-    }
-
-    juce::PluginDescription desc = *descriptions[0];
-    logToFile("Found: " + desc.name);
-    logToFile("desc: " + desc.name + " isInstrument=" +
-              juce::String(desc.isInstrument ? 1 : 0) + " inCh=" +
-              juce::String(desc.numInputChannels) + " outCh=" +
-              juce::String(desc.numOutputChannels));
-
-    // Engines that hang or AV when instantiated on a background MTA thread
-    // (see PluginBuildGate's pluginRequiresMessageThread) build synchronously
-    // right here on the message thread — the UI pauses for the build, which is
-    // what those engines need to come up reliably at all.
-    bool needsMessageThread = Fanfare::pluginRequiresMessageThread(pluginPath);
-    if (needsMessageThread) {
-      logToFile("Building " + desc.name + " on the message thread (interactive)...");
-      juce::String mtErr;
-      size_t ramBefore = FanfareLog::getMemoryStats().workingSetBytes;
-      auto instance = std::unique_ptr<juce::AudioPluginInstance>(
-          getFormatManager().createPluginInstance(desc, currentSampleRate,
-                                                  currentBlockSize, mtErr));
-      if (instance) {
-        configureStereoLayout(instance.get());
-        instance->prepareToPlay(currentSampleRate, currentBlockSize);
-        size_t ramAfter = FanfareLog::getMemoryStats().workingSetBytes;
-        if (ramAfter > ramBefore)
-          slotVec[realIdx]->setEstimatedRamBytes(ramAfter - ramBefore);
-        {
-          juce::ScopedLock sl(lock);
-          slotVec[realIdx]->clearChainSlotMidiOut(chainIndex);
-          slotVec[realIdx]->setPluginInChain(chainIndex, std::move(instance));
-          if (chainIndex == 0)
-            slotVec[realIdx]->setName(slotVec[realIdx]->getPluginName(0));
-        }
-        logToFile("Plugin loaded successfully (message thread)!");
-        callback(true, "");
-      } else {
-        logToFile("Load failed (message thread): " + mtErr);
-        callback(false, mtErr);
-      }
-      return;
-    }
-
-    // Build on an MTA background thread with a bounded wait (see
-    // buildInstanceOffThread): message-thread instantiation hangs for engines
-    // whose init needs a pumping thread (UVI Workstation, Sep 7) or faults
-    // outright (HALion 7, Sep 6).
+    juce::PluginDescription desc;
     juce::String errorMessage;
-    pinDllInMemory(pluginPath);
     size_t ramBefore = FanfareLog::getMemoryStats().workingSetBytes;
-    auto instance = buildInstanceOffThread(desc, errorMessage);
+    auto instance = createPreparedInteractiveInstance(pluginPath, desc, errorMessage);
 
     if (instance) {
       logToFile("Plugin loaded successfully!");
@@ -3178,7 +3316,9 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
       // CRITICAL: Lock while swapping the actual instance in the rack
       {
         juce::ScopedLock sl(lock);
-        slotVec[realIdx]->clearChainSlotMidiOut(chainIndex); // plugin replaces midi-out
+        slotVec[realIdx]->clearChainSlotMidiOut(chainIndex); // plugin replaces midi-out/synth/fm
+        slotVec[realIdx]->clearChainSlotSynth(chainIndex);
+        slotVec[realIdx]->clearChainSlotFm(chainIndex);
         slotVec[realIdx]->setPluginInChain(chainIndex, std::move(instance));
         if (chainIndex == 0)
           slotVec[realIdx]->setName(slotVec[realIdx]->getPluginName(0));
@@ -3188,6 +3328,111 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
     } else {
       logToFile("Load failed: " + errorMessage);
       callback(false, errorMessage);
+    }
+  }
+
+  void FanfareEngine::loadPluginIntoB3ExtSlot(
+      int slotIndex, int chainIndex, int b3ExtSlot, int pluginIndex,
+      std::function<void(bool, const juce::String &)> callback) {
+    bool isAux = (slotIndex >= 100);
+    int realIdx = isAux ? (slotIndex - 100) : slotIndex;
+    auto &slotVec = isAux ? auxReturns : slots;
+
+    if (realIdx < 0 || realIdx >= (int)slotVec.size() || chainIndex < 0 ||
+        chainIndex >= 3 || b3ExtSlot < 0 ||
+        b3ExtSlot >= B3OrganProcessor::kNumExtSlots) {
+      if (callback) callback(false, "Invalid B3 external slot indices");
+      return;
+    }
+
+    auto *slot = slotVec[(size_t)realIdx].get();
+    auto &b3 = slot->getB3Organ(chainIndex);
+
+    if (pluginIndex == -1) {
+      std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
+      {
+        juce::ScopedLock sl(lock);
+        oldPlugin = b3.swapExtPlugin(b3ExtSlot, nullptr, {}, {});
+      }
+      if (oldPlugin) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(oldPlugin.get());
+        FanfareLog::safeExecutePluginCall([&]() {
+          oldPlugin->releaseResources();
+          oldPlugin.reset();
+        }, "B3 oldExtPlugin releaseResources/reset");
+      }
+      if (callback) callback(true, "");
+      return;
+    }
+
+    if (pluginIndex < 0 || pluginIndex >= (int)availablePlugins.size()) {
+      if (callback) callback(false, "Invalid plugin index");
+      return;
+    }
+
+    const juce::String pluginPath = availablePlugins[(size_t)pluginIndex].path;
+    const juce::String pluginName = availablePlugins[(size_t)pluginIndex].name;
+    juce::PluginDescription desc;
+    juce::String errorMessage;
+    auto instance = createPreparedInteractiveInstance(pluginPath, desc, errorMessage);
+    if (instance) {
+      std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
+      {
+        juce::ScopedLock sl(lock);
+        oldPlugin = b3.swapExtPlugin(b3ExtSlot, std::move(instance), pluginPath, pluginName);
+      }
+      if (oldPlugin) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(oldPlugin.get());
+        FanfareLog::safeExecutePluginCall([&]() {
+          oldPlugin->releaseResources();
+          oldPlugin.reset();
+        }, "B3 oldExtPlugin releaseResources/reset");
+      }
+      if (callback) callback(true, "");
+    } else {
+      if (callback) callback(false, errorMessage);
+    }
+  }
+
+  void FanfareEngine::restoreB3ExtPluginsForSlot(RackSlot *slot) {
+    if (!slot)
+      return;
+    for (int c = 0; c < 3; ++c) {
+      if (!slot->isChainSlotB3(c))
+        continue;
+      auto &b3 = slot->getB3Organ(c);
+      for (int e = 0; e < B3OrganProcessor::kNumExtSlots; ++e) {
+        juce::String path, name, b64;
+        if (!b3.consumePendingExtPlugin(e, path, name, b64))
+          continue;
+        juce::PluginDescription desc;
+        juce::String err;
+        auto instance = createPreparedInteractiveInstance(path, desc, err);
+        if (instance) {
+          if (b64.isNotEmpty()) {
+            juce::MemoryBlock mb;
+            if (mb.fromBase64Encoding(b64) && mb.getSize() > 0)
+              instance->setStateInformation(mb.getData(), (int)mb.getSize());
+          }
+          std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
+          {
+            juce::ScopedLock sl(lock);
+            oldPlugin = b3.swapExtPlugin(
+                e, std::move(instance), path,
+                name.isNotEmpty() ? name : desc.name);
+          }
+          if (oldPlugin) {
+            if (onBeforePluginDestroyed)
+              onBeforePluginDestroyed(oldPlugin.get());
+            FanfareLog::safeExecutePluginCall([&]() {
+              oldPlugin->releaseResources();
+              oldPlugin.reset();
+            }, "B3 restore oldExtPlugin");
+          }
+        }
+      }
     }
   }
 
@@ -3227,35 +3472,11 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
     }
 
     juce::String pluginPath = availablePlugins[pluginIndex].path;
-    juce::AudioPluginFormat *vst3Format = nullptr;
-    for (int i = 0; i < formatManager.getNumFormats(); ++i) {
-      if (formatManager.getFormat(i)->getName() == "VST3") {
-        vst3Format = formatManager.getFormat(i);
-        break;
-      }
-    }
-
-    if (!vst3Format) {
-      callback(false, "VST3 format not available");
-      return;
-    }
-
-    juce::OwnedArray<juce::PluginDescription> descriptions;
-    vst3Format->findAllTypesForFile(descriptions, pluginPath);
-    if (descriptions.isEmpty()) {
-      callback(false, "No plugins found in file");
-      return;
-    }
-
-    juce::PluginDescription desc = *descriptions[0];
+    juce::PluginDescription desc;
     juce::String errorMessage;
-    pinDllInMemory(pluginPath);
-    auto instance = formatManager.createPluginInstance(
-        desc, currentSampleRate, currentBlockSize, errorMessage);
+    auto instance = createPreparedInteractiveInstance(pluginPath, desc, errorMessage);
 
     if (instance) {
-      configureStereoLayout(instance.get());
-      instance->prepareToPlay(currentSampleRate, currentBlockSize);
       std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
       {
         juce::ScopedLock sl(lock);
@@ -3333,27 +3554,29 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
 
     logToFile("TRACE: buildPluginFromVar started for path: " + path);
 
-    juce::AudioPluginFormat *vst3Format = findVst3Format();
-    if (!vst3Format) {
-      error = "VST3 format unavailable";
-      logToFile("TRACE: buildPluginFromVar failed - VST3 format unavailable");
-      return false;
-    }
-
-    juce::OwnedArray<juce::PluginDescription> descs;
-    vst3Format->findAllTypesForFile(descs, path);
-    if (descs.isEmpty()) {
-      error = "no plugin found in: " + path;
+    juce::PluginDescription desc;
+    if (!findPrimaryPluginDescription(path, desc, error)) {
       logToFile("TRACE: buildPluginFromVar failed - " + error);
       return false;
     }
 
-    logToFile("TRACE: buildPluginFromVar creating instance for " + descs[0]->name);
+    const double safeSr = currentSampleRate > 0.0 ? currentSampleRate : 48000.0;
+    const int safeBs = currentBlockSize > 0 ? currentBlockSize : 512;
+
+    logToFile("TRACE: buildPluginFromVar creating instance for " + desc.name);
     try {
       pinDllInMemory(path);
-      auto instance = formatManager.createPluginInstance(
-          *descs[0], currentSampleRate,
-          currentBlockSize > 0 ? currentBlockSize : 512, error);
+      std::unique_ptr<juce::AudioPluginInstance> instance;
+      {
+        std::unique_lock<std::timed_mutex> fmLock(formatManagerMutex,
+                                                  std::defer_lock);
+        if (!fmLock.try_lock_for(std::chrono::seconds(45))) {
+          error = "VST3 format manager busy";
+          logToFile("TRACE: buildPluginFromVar timed out waiting for formatManagerMutex: " + path);
+          return false;
+        }
+        instance = formatManager.createPluginInstance(desc, safeSr, safeBs, error);
+      }
       if (!instance) {
         logToFile("TRACE: buildPluginFromVar failed to create instance: " + error);
         return false;
@@ -3364,12 +3587,15 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
 
       logToFile("TRACE: buildPluginFromVar calling prepareToPlay for " + instance->getName());
       bool prepOk = FanfareLog::safeExecutePluginCall([&]() {
-        instance->prepareToPlay(currentSampleRate,
-                                currentBlockSize > 0 ? currentBlockSize : 512);
+        instance->prepareToPlay(safeSr, safeBs);
       }, "prepareToPlay (" + instance->getName() + ")");
       if (!prepOk) {
         error = "plugin prepareToPlay faulted/crashed";
         logToFile("TRACE: buildPluginFromVar prepareToPlay faulted for: " + instance->getName());
+        std::unique_lock<std::timed_mutex> fmLock(formatManagerMutex,
+                                                  std::defer_lock);
+        (void)fmLock.try_lock_for(std::chrono::seconds(5));
+        instance.reset();
         return false;
       }
 

@@ -58,12 +58,21 @@ public:
             }
         }
         
-        juce::FileOutputStream stream(file);
-        if (stream.openedOk()) {
-            stream.setPosition(0);
-            stream.truncate();
+        juce::File tempFile = file.getSiblingFile(file.getFileName() + ".tmp");
+        tempFile.deleteFile();
+        {
+            juce::FileOutputStream stream(tempFile);
+            if (!stream.openedOk())
+                return;
             juce::JSON::writeToStream(stream, juce::var(obj));
+            stream.flush();
+            if (stream.getStatus().failed()) {
+                tempFile.deleteFile();
+                return;
+            }
         }
+        if (!tempFile.moveFileTo(file))
+            tempFile.deleteFile();
     }
     
     void setTrigger(const juce::String& setupName, SetupMidiTrigger trigger) {

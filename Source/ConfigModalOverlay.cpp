@@ -72,7 +72,7 @@ ConfigModalOverlay::ConfigModalOverlay(Actions a) : actions(std::move(a)) {
   };
   addAndMakeVisible(closeBtn);
 
-  Fanfare::styleHelpButton(helpBtn, "#settings", "HAAALP! Open the Configuration & Settings section of the User's Manual");
+  Fanfare::styleHelpButton(helpBtn, "#settings", "Open the Configuration & Settings section of the User's Manual");
   addAndMakeVisible(helpBtn);
 
   refreshInfo();

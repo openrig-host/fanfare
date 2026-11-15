@@ -14,7 +14,9 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #ifdef _WIN32
@@ -222,8 +224,6 @@ void processAudio(const float *const *inputData, int numInputs,
 
     fohBus.clear(0, numSamples);
     iemBus.clear(0, numSamples);
-    aux1Bus.clear(0, numSamples);
-    aux2Bus.clear(0, numSamples);
 
     if (slotMidiBuffers.size() != slots.size()) {
       // Pre-allocated in prepareToPlay(). A mismatch means prepareToPlay()
@@ -253,6 +253,10 @@ void processAudio(const float *const *inputData, int numInputs,
             if (slot->isChainSlotFm(c) ||
                 (c == 0 && slot->getFmSynth(0).enabled.load(std::memory_order_relaxed))) {
               slot->getFmSynth(c).panicNow();
+            }
+            if (slot->isChainSlotB3(c) ||
+                (c == 0 && slot->getB3Organ(0).enabled.load(std::memory_order_relaxed))) {
+              slot->getB3Organ(c).requestPanic();
             }
           }
         }
@@ -548,9 +552,6 @@ void processAudio(const float *const *inputData, int numInputs,
 
     for (int i = 0; i < (int)auxReturns.size(); ++i) {
       auto &scratch = scratchBuffers[slots.size() + i];
-      const int chToClear = juce::jmin(2, scratch.getNumChannels());
-      for (int ch = 0; ch < chToClear; ++ch)
-        scratch.clear(ch, 0, numSamples);
       auto &bus = (i == 0) ? aux1Bus : aux2Bus;
 
       // Copy aux bus to return slot input
@@ -939,7 +940,11 @@ void setCurrentSceneIndex(int index) { currentSceneIndex = index; }
 juce::String getMasterPluginName(bool isFoh, int chainIndex) const;
 juce::AudioPluginInstance *getMasterPluginInstance(bool isFoh,
                                                      int chainIndex) const;
+void clearMasterChain(bool isFoh);
 void clearMasterChains();
+bool findPrimaryPluginDescription(const juce::String &path,
+                                  juce::PluginDescription &outDesc,
+                                  juce::String &outError);
 void clearAllRacks();
 bool isCurrentRigFreshBuild() const { return currentRigFreshBuild.load(); }
   
@@ -1120,7 +1125,7 @@ std::atomic<juce::int64> lastRigApplyEndTicks{0};
 std::atomic<float> lastQuietWindowMs{0.0f};
 std::vector<std::unique_ptr<juce::AudioPluginInstance>> pendingReapPlugins;
 // Master FX chains
-  juce::SpinLock masterFxLock;
+  mutable juce::SpinLock masterFxLock;
 std::vector<std::unique_ptr<juce::AudioPluginInstance>> fohPluginChain;
 std::vector<std::unique_ptr<juce::AudioPluginInstance>> iemPluginChain;
 std::atomic<int> fohFxFaultCount[3]{};
@@ -1144,7 +1149,10 @@ std::atomic<int> defaultMidiChannel{FanfareConstants::kDefaultMidiChannel};
   std::atomic<int> iemOutputOffset{2};
 // Hardware channels 3+4
   std::atomic<bool> currentRigFreshBuild{false};
-juce::CriticalSection lock;
+mutable juce::CriticalSection lock;
+  mutable std::timed_mutex formatManagerMutex;
+  mutable juce::CriticalSection pluginDescCacheLock;
+  std::unordered_map<juce::String, juce::PluginDescription> pluginDescCache;
 // Opened MIDI output devices for chain-slot MIDI OUT routing. Devices are
   // created on the message thread and appended (never destroyed while running);
   // the audio thread reads midiOutputs[idx] under a try-lock so an opening
@@ -1241,7 +1249,10 @@ juce::String getAvailablePluginPath(int index) const {
   // caller gets null — the rig survives.
   std::unique_ptr<juce::AudioPluginInstance> buildInstanceOffThread(
       const juce::PluginDescription &desc, juce::String &error,
-      int timeoutMs = 300000);
+      int timeoutMs = 300000, const juce::String &gatePath = {});
+  std::unique_ptr<juce::AudioPluginInstance> createPreparedInteractiveInstance(
+      const juce::String &pluginPath, juce::PluginDescription &outDesc,
+      juce::String &outError);
 // Load a plugin from the registry into a specific slot
   // NOTE: instantiation+configuration happen on an MTA background thread with
   // a bounded wait — see buildInstanceOffThread. The message thread waits
@@ -1250,6 +1261,10 @@ juce::String getAvailablePluginPath(int index) const {
   void
   loadPluginIntoSlot(int slotIndex, int chainIndex, int pluginIndex,
                      std::function<void(bool, const juce::String &)> callback);
+  void loadPluginIntoB3ExtSlot(
+      int slotIndex, int chainIndex, int b3ExtSlot, int pluginIndex,
+      std::function<void(bool, const juce::String &)> callback);
+  void restoreB3ExtPluginsForSlot(RackSlot *slot);
 // Same logic for Master chains
   void loadPluginIntoMasterBus(
       bool isFoh, int chainIndex, int pluginIndex,

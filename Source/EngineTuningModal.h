@@ -36,7 +36,7 @@ public:
         };
         addAndMakeVisible(closeBtn);
 
-        Fanfare::styleHelpButton(helpBtn, "#engine-tuning", "HAAALP! Open the Engine & CPU Optimization section of the User's Manual");
+        Fanfare::styleHelpButton(helpBtn, "#engine-tuning", "Open the Engine & CPU Optimization section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
         addAndMakeVisible(viewport);
@@ -131,10 +131,11 @@ private:
         contentComp.addAndMakeVisible(allCoresBtn);
 
         coreHelpLabel.setText(
-            "What it does: Modern laptop processors (Intel 12th-14th Gen / Core Ultra) split into fast Performance cores and Efficiency cores. "
-            "Auto pins real-time audio & DSP workers exclusively to fast Performance cores while offloading UI graphics, disk streaming, and background song preloading onto Efficiency cores so they never collide.\n"
-            "* When to use: Leave on Auto for laptops. Eliminates sudden dropouts where the CPU meter appears low.\n"
-            "* What it CANNOT fix: Won't help if your audio buffer is too tiny for a giant 20-plugin rig.",
+            "What it does: Modern hybrid processors (Intel 12th-14th Gen / Core Ultra) split into fast Performance cores and Efficiency cores. "
+            "Auto pins real-time audio & DSP workers exclusively to Performance cores while offloading UI, disk streaming, and background preloads onto Efficiency cores.\n"
+            "* Non-hybrid / uniform CPUs (e.g. AMD Ryzen, older Intel): Since all cores are equal, try \"Use All Cores\" if you hear periodic clicks.\n"
+            "* When to use Auto: Hybrid laptops, to prevent background tasks from colliding with audio.\n"
+            "* What it CANNOT fix: Won't help if your audio buffer is too tiny for a heavy rig.",
             juce::dontSendNotification);
         configureHelpLabel(coreHelpLabel);
         contentComp.addAndMakeVisible(coreHelpLabel);
@@ -224,7 +225,7 @@ private:
             acWarningBodyLabel.setBounds(inner);
         }
         {
-            auto inner = addCard(155);
+            auto inner = addCard(182);
             coreSectionLabel.setBounds(inner.removeFromTop(22));
             pCoresOnlyBtn.setBounds(inner.removeFromTop(24));
             allCoresBtn.setBounds(inner.removeFromTop(24));
@@ -277,7 +278,7 @@ private:
 
     juce::Label titleLabel;
     juce::TextButton closeBtn{"CLOSE"};
-    juce::TextButton helpBtn{"HAAALP!"};
+    juce::TextButton helpBtn{"Help"};
     juce::TextButton applyBtn;
 
     juce::Viewport viewport;

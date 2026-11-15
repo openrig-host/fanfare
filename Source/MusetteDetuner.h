@@ -32,14 +32,16 @@ namespace FanfareDSP {
  */
 class MusetteDetunerChannel {
 public:
-    MusetteDetunerChannel() = default;
+    MusetteDetunerChannel() { initHannLut(); }
 
     void prepare(double sampleRate) {
         if (sampleRate <= 0.0)
             sampleRate = 44100.0;
         sr = sampleRate;
+        mixSmoothCoeff = std::exp(-1.0f / juce::jmax(1.0f, 0.010f * (float)sr));
 
         updateCoefficients();
+        cachedSr = -1.0; // Force detune step recomputation on next sample
         reset();
     }
 
@@ -48,14 +50,19 @@ public:
         writeIndex = 0;
         phaseSharp = 0.0f;
         phaseFlat = 0.25f; // Initial phase offset between voices
+        smoothedMix = 0.0f;
 
         hpfS1 = hpfS2 = 0.0f;
         dipS1 = dipS2 = 0.0f;
     }
 
     float process(float input, float cents, int mode, float mix) {
-        if (mix <= 0.0001f)
+        const float targetMix = juce::jlimit(0.0f, 1.0f, mix);
+        smoothedMix = targetMix + mixSmoothCoeff * (smoothedMix - targetMix);
+        if (targetMix <= 0.0001f && smoothedMix <= 0.0001f) {
+            smoothedMix = 0.0f;
             return input;
+        }
 
         // 1. Wet Path Pre-Filtering
         // Step A: 85 Hz 2nd-order Butterworth HPF
@@ -66,43 +73,27 @@ public:
         // 2. Write filtered sample into circular delay buffer
         delayBuffer[writeIndex] = filtered;
 
-        const float windowSamples = juce::jlimit(256.0f, 4096.0f, 0.032f * (float)sr); // 32 ms window
-        const float minDelaySamples = 0.002f * (float)sr; // 2 ms guard delay
-
-        float sharpCents = cents;
-        float flatCents = -4.0f;
-        const bool hasFlat = (mode == 1 || mode == 2);
-
-        if (mode == 2) { // TEMU Musette: wide, unhinged bargain-bin accordion detuning
-            sharpCents = juce::jlimit(12.0f, 32.0f, cents * 2.5f);
-            flatCents = -juce::jlimit(10.0f, 26.0f, cents * 2.0f);
-        }
+        updateDetuneRatesIfNeeded(cents, mode);
 
         // --- Voice 1: Sharp Reed (+Cents) ---
-        const float rSharp = std::pow(2.0f, sharpCents / 1200.0f);
-        const float phaseStepSharp = (1.0f - rSharp) / windowSamples;
-
-        phaseSharp += phaseStepSharp;
+        phaseSharp += cachedPhaseStepSharp;
         if (phaseSharp < 0.0f)
             phaseSharp += 1.0f;
         else if (phaseSharp >= 1.0f)
             phaseSharp -= 1.0f;
 
-        float wetSharp = readDualTap(phaseSharp, minDelaySamples, windowSamples);
+        float wetSharp = readDualTap(phaseSharp, cachedMinDelay, cachedWindowSamples);
 
-        // --- Voice 2: Flat Reed (active in 3-reed MMM and TEMU modes) ---
+        // --- Voice 2: Flat Reed (active in 3-reed MMM and Wide Vibrato modes) ---
         float wetTotal = wetSharp;
-        if (hasFlat) {
-            const float rFlat = std::pow(2.0f, flatCents / 1200.0f);
-            const float phaseStepFlat = (1.0f - rFlat) / windowSamples;
-
-            phaseFlat += phaseStepFlat;
+        if (cachedHasFlat) {
+            phaseFlat += cachedPhaseStepFlat;
             if (phaseFlat < 0.0f)
                 phaseFlat += 1.0f;
             else if (phaseFlat >= 1.0f)
                 phaseFlat -= 1.0f;
 
-            float wetFlat = readDualTap(phaseFlat, minDelaySamples, windowSamples);
+            float wetFlat = readDualTap(phaseFlat, cachedMinDelay, cachedWindowSamples);
             wetTotal = 0.5f * (wetSharp + wetFlat);
         }
 
@@ -110,19 +101,61 @@ public:
         writeIndex = (writeIndex + 1) & kBufferMask;
 
         // 3. Dry/Wet Blend: 100% bit-accurate dry path + detuned wet path
-        return input * (1.0f - mix) + wetTotal * mix;
+        return input * (1.0f - smoothedMix) + wetTotal * smoothedMix;
     }
 
 private:
     static constexpr int kBufferSize = 8192;
     static constexpr int kBufferMask = kBufferSize - 1;
     static constexpr float kTwoPi = 6.28318530717958647692f;
+    static constexpr int kHannLutSize = 512;
+
+    void initHannLut() {
+        for (int i = 0; i <= kHannLutSize; ++i)
+            hannLut[i] = 0.5f * (1.0f - std::cos(kTwoPi * (float)i / (float)kHannLutSize));
+    }
+
+    float lookupHann(float phase) const noexcept {
+        const float pos = juce::jlimit(0.0f, (float)kHannLutSize, phase * (float)kHannLutSize);
+        const int idx = juce::jmin(kHannLutSize - 1, (int)pos);
+        const float frac = pos - (float)idx;
+        return hannLut[idx] + frac * (hannLut[idx + 1] - hannLut[idx]);
+    }
+
+    void updateDetuneRatesIfNeeded(float cents, int mode) {
+        if (cents == cachedCents && mode == cachedMode && sr == cachedSr)
+            return;
+
+        cachedCents = cents;
+        cachedMode = mode;
+        cachedSr = sr;
+        cachedWindowSamples = juce::jlimit(256.0f, 4096.0f, 0.032f * (float)sr);
+        cachedMinDelay = 0.002f * (float)sr;
+        cachedHasFlat = (mode == 1 || mode == 2);
+
+        float sharpCents = cents;
+        float flatCents = -4.0f;
+        if (mode == 2) { // Wide Musette: exaggerated dual-reed vibrato detuning
+            sharpCents = juce::jlimit(12.0f, 32.0f, cents * 2.5f);
+            flatCents = -juce::jlimit(10.0f, 26.0f, cents * 2.0f);
+        }
+
+        const float rSharp = std::pow(2.0f, sharpCents / 1200.0f);
+        cachedPhaseStepSharp = (1.0f - rSharp) / cachedWindowSamples;
+
+        if (cachedHasFlat) {
+            const float rFlat = std::pow(2.0f, flatCents / 1200.0f);
+            cachedPhaseStepFlat = (1.0f - rFlat) / cachedWindowSamples;
+        } else {
+            cachedPhaseStepFlat = 0.0f;
+        }
+    }
 
     float readDualTap(float phase, float minDelay, float windowSamples) const {
         // Tap 1
         float p1 = phase;
         float d1 = minDelay + p1 * windowSamples;
-        float w1 = 0.5f * (1.0f - std::cos(kTwoPi * p1));
+        float w1 = lookupHann(p1);
         float s1 = readHermite(d1);
 
         // Tap 2 (180 deg / 0.5 out of phase)
@@ -130,10 +163,9 @@ private:
         if (p2 >= 1.0f)
             p2 -= 1.0f;
         float d2 = minDelay + p2 * windowSamples;
-        float w2 = 0.5f * (1.0f - std::cos(kTwoPi * p2));
+        float w2 = 1.0f - w1;
         float s2 = readHermite(d2);
 
-        // Raised-cosine Hann windows sum identically to 1.0: w1 + w2 == 1.0
         return w1 * s1 + w2 * s2;
     }
 
@@ -221,6 +253,19 @@ private:
     int writeIndex = 0;
     float phaseSharp = 0.0f;
     float phaseFlat = 0.25f;
+
+    float mixSmoothCoeff = 0.99f;
+    float smoothedMix = 0.0f;
+
+    double cachedSr = -1.0;
+    float cachedCents = -1.0f;
+    int cachedMode = -1;
+    float cachedWindowSamples = 1411.2f;
+    float cachedMinDelay = 88.2f;
+    float cachedPhaseStepSharp = 0.0f;
+    float cachedPhaseStepFlat = 0.0f;
+    bool cachedHasFlat = false;
+    float hannLut[kHannLutSize + 1] = {};
 
     // Filter states & coefficients
     float hpfB0 = 1.0f, hpfB1 = 0.0f, hpfB2 = 0.0f, hpfA1 = 0.0f, hpfA2 = 0.0f;

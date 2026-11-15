@@ -21,8 +21,10 @@ public:
                        std::function<void()> openNoteRangeCb,
                        std::function<void()> openCCCb,
                        std::function<void()> openMidiFxCb,
-                       std::function<void()> closeCb = {})
+                       std::function<void()> closeCb = {},
+                       juce::String customTitle = {})
       : slot(s), chainIndex(chainIdx), isFm(isFmSynth),
+        customName(std::move(customTitle)),
         onOpenNoteRange(std::move(openNoteRangeCb)),
         onOpenCCDialog(std::move(openCCCb)),
         onOpenMidiEffects(std::move(openMidiFxCb)),
@@ -116,7 +118,8 @@ public:
     g.drawText("MIDI ROUTING & CONTROLS", 14, 2, 240, 18, juce::Justification::centredLeft);
 
     // Subtitle
-    const juce::String synthName = isFm ? "CoplanDX" : "BLEEP-216";
+    const juce::String synthName =
+        customName.isNotEmpty() ? customName : (isFm ? "CoplanDX" : "BLEEP-216");
     const juce::String sub = "Strip: " + slot.getName() + "  |  " + synthName +
                              " [Socket " + juce::String(chainIndex + 1) + "]";
     g.setColour(ThemeManager::get(Theme::Role::textDim));
@@ -137,6 +140,7 @@ private:
   RackSlot &slot;
   int chainIndex;
   bool isFm;
+  juce::String customName;
 
   std::function<void()> onOpenNoteRange;
   std::function<void()> onOpenCCDialog;

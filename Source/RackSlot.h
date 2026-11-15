@@ -17,6 +17,7 @@
 #include "Mp3PlayerProcessor.h"
 #include "FanfareSynthProcessor.h"
 #include "Synth/Fm/FmSynthProcessor.h"
+#include "Synth/B3/B3OrganProcessor.h"
 #include <atomic>
 #include <map>
 #include <memory>
@@ -46,17 +47,20 @@ public:
     for (int i = 0; i < 3; ++i) {
       chainSynths[i].prepare(sampleRate, maxBlockSize);
       chainFms[i].prepare(sampleRate, maxBlockSize);
+      chainB3s[i].prepare(sampleRate, maxBlockSize);
     }
     mp3Player.prepare(sampleRate, maxBlockSize);
 
     // Pre-allocate scratch buffer for summed instrument rendering (audio-thread safe)
     int allocSize = juce::jmax(maxBlockSize, 8192);
-    scratchBuffer.setSize(32, allocSize);
+    scratchBuffer.setSize(64, allocSize);
     scratchBuffer.setSize(32, juce::jmax(1, maxBlockSize), false, false, true);
     filteredMidiScratch.ensureSize(2048);
     harmonyScratch.ensureSize(2048);
     passthroughScratch.ensureSize(2048);
     mixerCCScratch.ensureSize(2048);
+    synthMidiScratch.ensureSize(2048);
+    injectedMidi.ensureSize(2048);
     for (int i = 0; i < 3; ++i)
       midiOutChain[i].ensureSize(1024);
     scratchBuffer.clear();
@@ -78,6 +82,12 @@ public:
   }
   const FmSynthProcessor& getFmSynth(int chainIdx = 0) const {
     return chainFms[juce::jlimit(0, 2, chainIdx)];
+  }
+  B3OrganProcessor& getB3Organ(int chainIdx = 0) {
+    return chainB3s[juce::jlimit(0, 2, chainIdx)];
+  }
+  const B3OrganProcessor& getB3Organ(int chainIdx = 0) const {
+    return chainB3s[juce::jlimit(0, 2, chainIdx)];
   }
 
   // Per-plugin-chain-slot settings for instrument stacking (note range, level, enable)
@@ -132,6 +142,7 @@ public:
       return;
     clearChainSlotSynth(i);
     clearChainSlotFm(i);
+    clearChainSlotB3(i);
     invalidateCachedCCParams(i);
     chainIsInstrument[i].store(false);
     // Ensure no plugin occupies this slot (mutually exclusive), swapping out under pluginLock.
@@ -174,7 +185,8 @@ public:
   bool hasAnySynthSlot() const {
     for (int i = 0; i < 3; ++i)
       if (chainIsSynth[i].load() || chainSynths[i].enabled.load() ||
-          chainIsFm[i].load() || chainFms[i].enabled.load())
+          chainIsFm[i].load() || chainFms[i].enabled.load() ||
+          chainIsB3[i].load() || chainB3s[i].enabled.load())
         return true;
     return false;
   }
@@ -191,6 +203,7 @@ public:
     if (active) {
       clearChainSlotMidiOut(i);
       clearChainSlotSynth(i);
+      clearChainSlotB3(i);
       std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
       {
         juce::SpinLock::ScopedLockType sl(pluginLock);
@@ -207,19 +220,70 @@ public:
       }
       if (state.isObject())
         chainFms[i].applyState(state);
+      pendingChainFmReset[i].store(false, std::memory_order_release);
       chainFms[i].enabled.store(true);
       chainIsFm[i].store(true);
       chainIsInstrument[i].store(true);
     } else {
       chainIsFm[i].store(false);
       chainFms[i].enabled.store(false);
-      chainFms[i].reset();
-      if (getPluginInstance(i) == nullptr && !chainIsSynth[i].load())
+      pendingChainFmReset[i].store(true, std::memory_order_release);
+      if (getPluginInstance(i) == nullptr && !chainIsSynth[i].load() &&
+          !chainIsB3[i].load())
         chainIsInstrument[i].store(false);
     }
   }
 
   void clearChainSlotFm(int i) { setChainSlotFm(i, false); }
+
+  // --- Chain-slot Built-in B3 organ configuration ---
+  bool isChainSlotB3(int i) const {
+    return (i >= 0 && i < 3) ? chainIsB3[i].load() : false;
+  }
+
+  void setChainSlotB3(int i, bool active, const juce::var &state = juce::var()) {
+    if (i < 0 || i >= 3)
+      return;
+    invalidateCachedCCParams(i);
+    if (active) {
+      clearChainSlotMidiOut(i);
+      clearChainSlotSynth(i);
+      clearChainSlotFm(i);
+      std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
+      {
+        juce::SpinLock::ScopedLockType sl(pluginLock);
+        if (i < (int)pluginChain.size())
+          oldPlugin = std::move(pluginChain[i]);
+      }
+      if (oldPlugin) {
+        if (onBeforePluginDestroyed)
+          onBeforePluginDestroyed(oldPlugin.get());
+        FanfareLog::safeExecutePluginCall([&]() {
+          oldPlugin->releaseResources();
+          oldPlugin.reset();
+        }, "setChainSlotB3 releaseResources/reset");
+      }
+      if (state.isObject())
+        chainB3s[i].applyState(state);
+      pendingChainB3Reset[i].store(false, std::memory_order_release);
+      chainB3s[i].enabled.store(true);
+      chainIsB3[i].store(true);
+      chainIsInstrument[i].store(true);
+      for (int cc : {1, 7, 9, 11, 64,
+                     12, 13, 14, 15, 16, 17, 18, 19, 20,
+                     21, 22, 23, 24, 25, 26, 27, 28, 29,
+                     70, 71, 72, 73, 74, 75, 76,
+                     77, 78, 79, 80, 81, 82, 83, 85, 86})
+        allowCC(cc);
+    } else {
+      chainIsB3[i].store(false);
+      chainB3s[i].enabled.store(false);
+      pendingChainB3Reset[i].store(true, std::memory_order_release);
+      if (getPluginInstance(i) == nullptr && !chainIsSynth[i].load() && !chainIsFm[i].load())
+        chainIsInstrument[i].store(false);
+    }
+  }
+  void clearChainSlotB3(int i) { setChainSlotB3(i, false); }
 
   int getFirstSynthChainSlot() const {
     for (int i = 0; i < 3; ++i)
@@ -239,6 +303,7 @@ public:
     if (active) {
       clearChainSlotMidiOut(i);
       clearChainSlotFm(i);
+      clearChainSlotB3(i);
       std::unique_ptr<juce::AudioPluginInstance> oldPlugin;
       {
         juce::SpinLock::ScopedLockType sl(pluginLock);
@@ -255,13 +320,14 @@ public:
       }
       if (state.isObject())
         chainSynths[i].applyState(state);
+      pendingChainSynthReset[i].store(false, std::memory_order_release);
       chainSynths[i].enabled.store(true);
       chainIsSynth[i].store(true);
       chainIsInstrument[i].store(true);
     } else {
       chainIsSynth[i].store(false);
       chainSynths[i].enabled.store(false);
-      chainSynths[i].reset();
+      pendingChainSynthReset[i].store(true, std::memory_order_release);
       if (getPluginInstance(i) == nullptr && !chainIsFm[i].load())
         chainIsInstrument[i].store(false);
     }
@@ -276,6 +342,28 @@ public:
   void processBlock(juce::AudioBuffer<float> &slotBuffer,
                     juce::MidiBuffer &midiMessages) {
     juce::ScopedNoDenormals noDenormals;
+
+    if (pendingBypassReset.exchange(false, std::memory_order_acq_rel)) {
+      arpeggiator.reset();
+      harmonizer.reset();
+      sampler.reset();
+      for (int i = 0; i < 3; ++i) {
+        chainSynths[i].reset();
+        chainFms[i].reset();
+        chainB3s[i].reset();
+      }
+    }
+    for (int i = 0; i < 3; ++i) {
+      if (pendingChainSynthReset[i].exchange(false, std::memory_order_acq_rel) &&
+          !chainIsSynth[i].load())
+        chainSynths[i].reset();
+      if (pendingChainFmReset[i].exchange(false, std::memory_order_acq_rel) &&
+          !chainIsFm[i].load())
+        chainFms[i].reset();
+      if (pendingChainB3Reset[i].exchange(false, std::memory_order_acq_rel) &&
+          !chainIsB3[i].load())
+        chainB3s[i].reset();
+    }
 
     if (bypassed.load()) {
       leftPeak.store(0.0f);
@@ -326,13 +414,15 @@ public:
     }
 
     // Apply CC to parameter/level mappings FIRST, before plugins consume the
-    // messages
-    applyCCMappings(midiMessages);
+    // messages. Track which CCs were consumed by a live parameter mapping so
+    // the raw un-inverted MIDI CC isn't also forwarded into the plugin's
+    // internal MIDI handler (e.g. Blue3 drawbar CCs fighting [INV]).
+    bool consumedParamCCs[128] = {};
+    applyCCMappings(midiMessages, consumedParamCCs);
 
-    // Mixer-assigned CCs (FOH/IEM level) are consumed by the mixer and must
-    // NOT reach the plugin: some engines (UVI) cut sustained voices when
-    // certain CCs arrive mid-note.
-    stripMixerCCs(midiMessages);
+    // Mixer-assigned and parameter-consumed CCs are dropped from the MIDI
+    // stream before plugins see it (unless explicitly routed via passthrough).
+    stripMixerCCs(midiMessages, consumedParamCCs);
 
     // Remap passthrough CCs so the plugin sees the outgoing CC number
     applyCCPassthrough(midiMessages);
@@ -381,6 +471,22 @@ public:
       }
       chainFms[0].processBlock(slotBuffer, synthMidiScratch);
     }
+    if (!chainIsB3[0].load() && chainB3s[0].enabled.load()) {
+      synthMidiScratch.clear();
+      int lo = lowNote.load();
+      int hi = highNote.load();
+      for (const auto meta : midiMessages) {
+        auto msg = meta.getMessage();
+        if (msg.isNoteOnOrOff()) {
+          int n = msg.getNoteNumber();
+          if (n >= lo && n <= hi)
+            synthMidiScratch.addEvent(msg, meta.samplePosition);
+        } else {
+          synthMidiScratch.addEvent(msg, meta.samplePosition);
+        }
+      }
+      chainB3s[0].processBlock(slotBuffer, synthMidiScratch);
+    }
 
     // Harmonizer with redirection support: generated harmony notes go to harmonyScratch
     harmonyScratch.clear();
@@ -398,12 +504,12 @@ public:
       midiOutChain[i].clear();
 
     {
-      // Try-lock: if the UI is swapping a plugin in this chain, skip this block
-      // (brief gap) instead of blocking the real-time audio thread.
+      // Try-lock: if the UI is swapping a plugin in this chain, skip plugin
+      // processing for this block instead of blocking the real-time thread,
+      // while still allowing channel strip FX and metering below to run.
       juce::SpinLock::ScopedTryLockType pcl(pluginLock);
-      if (!pcl.isLocked())
-        return;
-      int chainLen = juce::jmax((int)pluginChain.size(), 3);
+      if (pcl.isLocked()) {
+        int chainLen = juce::jmax((int)pluginChain.size(), 3);
       for (int i = 0; i < chainLen; ++i) {
         if (i < 3 && chainMidiOut[i].isMidiOut.load()) {
           if (i == drainSlot.load())
@@ -596,6 +702,81 @@ public:
           continue;
         }
 
+        if (i < 3 && chainIsB3[i].load()) {
+          if (i == drainSlot.load() && !chainB3s[i].enabled.load())
+            drainSlot.store(-1);
+          if (chainB3s[i].enabled.load() &&
+              (chainSettings[i].enabled.load() || i == drainSlot.load())) {
+            auto plugStartTime = juce::Time::getHighResolutionTicks();
+            int numCh = juce::jmax(2, slotBuffer.getNumChannels());
+            int numSamp = slotBuffer.getNumSamples();
+            if (scratchBuffer.getNumChannels() != numCh ||
+                scratchBuffer.getNumSamples() != numSamp)
+              scratchBuffer.setSize(numCh, numSamp, false, false, true);
+            scratchBuffer.clear(0, numSamp);
+
+            filteredMidiScratch.clear();
+            int low = chainSettings[i].lowNote.load();
+            int high = chainSettings[i].highNote.load();
+            float instGain = chainSettings[i].level.load();
+
+            for (const auto metadata : midiMessages) {
+              auto msg = metadata.getMessage();
+              if (msg.isNoteOnOrOff()) {
+                int note = msg.getNoteNumber();
+                if (note >= low && note <= high)
+                  filteredMidiScratch.addEvent(msg, metadata.samplePosition);
+              } else {
+                filteredMidiScratch.addEvent(msg, metadata.samplePosition);
+              }
+            }
+
+            if (i == enablePanicSlot.load()) {
+              enablePanicSlot.store(-1);
+              B3OrganProcessor &bp = chainB3s[i];
+              bp.requestPanic();
+            }
+            if (i == drainSlot.load() && !drainPanicSent.exchange(true)) {
+              chainB3s[i].requestPanic();
+            }
+
+            chainB3s[i].processBlock(scratchBuffer, filteredMidiScratch);
+            scratchBuffer.applyGain(instGain);
+
+            if (i == drainSlot.load()) {
+              scratchBuffer.applyGain(drainGain.load());
+              float step = (float)numSamp /
+                           (float)(0.08 * juce::jmax(8000.0, lastSampleRate));
+              float g = drainGain.load() - step;
+              if (g <= 0.0f) {
+                drainGain.store(0.0f);
+                drainSlot.store(-1);
+              } else {
+                drainGain.store(g);
+              }
+            }
+
+            for (int ch = 0; ch < slotBuffer.getNumChannels(); ++ch) {
+              if (ch < scratchBuffer.getNumChannels())
+                slotBuffer.addFrom(ch, 0, scratchBuffer, ch, 0, numSamp);
+            }
+
+            auto plugElapsed =
+                juce::Time::getHighResolutionTicks() - plugStartTime;
+            double plugElapsedSecs =
+                (double)plugElapsed /
+                juce::Time::getHighResolutionTicksPerSecond();
+            float plugLoad = (totalBlockSecs > 0.0)
+                                 ? (float)(plugElapsedSecs / totalBlockSecs)
+                                 : 0.0f;
+            chainCpuUsage[i].store(0.92f * chainCpuUsage[i].load() +
+                                   0.08f * plugLoad);
+          } else {
+            chainCpuUsage[i].store(0.92f * chainCpuUsage[i].load());
+          }
+          continue;
+        }
+
         if (i >= (int)pluginChain.size())
           continue;
 
@@ -733,6 +914,7 @@ public:
           }
         }
       }
+    }
 
     // 2. Process Channel Strip (Gate -> EQ -> Comp)
     strip.processBlock(slotBuffer);
@@ -991,14 +1173,8 @@ public:
   void setBypass(bool shouldBypass) {
     const bool prev = bypassed.exchange(shouldBypass);
     if (prev != shouldBypass) {
-      arpeggiator.reset();
-      harmonizer.reset();
-      sampler.reset();
-      for (int i = 0; i < 3; ++i) {
-        chainSynths[i].reset();
-        chainFms[i].reset();
-      }
-      unbypassPanicPending.store(true);
+      pendingBypassReset.store(true, std::memory_order_release);
+      unbypassPanicPending.store(true, std::memory_order_release);
     }
   }
   bool isBypassed() const { return bypassed.load(); }
@@ -1096,6 +1272,7 @@ public:
 
     clearChainSlotSynth(chainIndex);
     clearChainSlotFm(chainIndex);
+    clearChainSlotB3(chainIndex);
     midiTraceLogged.store(false); // re-arm the one-shot MIDI trace
     invalidateCachedCCParams(chainIndex);
 
@@ -1154,6 +1331,7 @@ public:
       clearChainSlotMidiOut(i);
       clearChainSlotSynth(i);
       clearChainSlotFm(i);
+      clearChainSlotB3(i);
     }
   }
 
@@ -1197,10 +1375,11 @@ public:
     for (int i = 0; i < 3; ++i) {
       if ((chainIsSynth[i].load() && chainSynths[i].enabled.load()) ||
           (chainIsFm[i].load() && chainFms[i].enabled.load()) ||
+          (chainIsB3[i].load() && chainB3s[i].enabled.load()) ||
           chainMidiOut[i].isMidiOut.load())
         return true;
     }
-    if (chainSynths[0].enabled.load() || chainFms[0].enabled.load() ||
+    if (chainSynths[0].enabled.load() || chainFms[0].enabled.load() || chainB3s[0].enabled.load() ||
         sampler.enabled.load())
       return true;
     juce::SpinLock::ScopedTryLockType pcl(pluginLock);
@@ -1225,6 +1404,12 @@ public:
       const juce::String pName = fm.getCurrentPresetName();
       return (fm.enabled.load() ? "DX: " : "DX (OFF): ") +
              (pName.isNotEmpty() ? pName : "INIT VOICE");
+    }
+    if (chainIndex >= 0 && chainIndex < 3 && chainIsB3[chainIndex].load()) {
+      const auto &b3 = chainB3s[chainIndex];
+      const juce::String pName = b3.getCurrentPresetName();
+      return (b3.enabled.load() ? "B3: " : "B3 (OFF): ") +
+             (pName.isNotEmpty() ? pName : "INIT");
     }
     juce::SpinLock::ScopedLockType pcl(pluginLock);
     if (chainIndex >= 0 && chainIndex < (int)pluginChain.size()) {
@@ -1262,7 +1447,7 @@ public:
     }
     for (int i = 0; i < 3; ++i) {
       if ((chainMidiOut[i].isMidiOut.load() || chainIsSynth[i].load() ||
-           chainIsFm[i].load()) && i >= sz)
+           chainIsFm[i].load() || chainIsB3[i].load()) && i >= sz)
         sz = i + 1;
     }
     return sz;
@@ -1337,7 +1522,8 @@ public:
     ccPassthroughMap.clear();
   }
 
-  const std::map<int, int> &getCCPassthroughMap() const {
+  std::map<int, int> getCCPassthroughMap() const {
+    juce::SpinLock::ScopedLockType lock(ccPassthroughLock);
     return ccPassthroughMap;
   }
 
@@ -1453,7 +1639,8 @@ public:
     ccParameterMappings.clear();
   }
 
-  const std::map<int, CCMapping> &getCCMappings() const {
+  std::map<int, CCMapping> getCCMappings() const {
+    juce::SpinLock::ScopedLockType lock(ccMappingLock);
     return ccParameterMappings;
   }
 
@@ -1494,29 +1681,32 @@ public:
     midiMessages.swapWith(passthroughScratch);
   }
 
-  // Remove mixer-assigned CCs (FOH/IEM level controls) from the MIDI stream
-  // before plugins see it: a CC that drives this strip's fader is a rig
-  // control, and some engines (UVI) cut sustained voices when CCs arrive
-  // mid-note. Call after applyCCMappings, before applyCCPassthrough.
-  void stripMixerCCs(juce::MidiBuffer &midiMessages) {
+  // Remove mixer-assigned CCs (FOH/IEM/Mute/Swap) and CCs already consumed by
+  // a live CC->Parameter mapping (unless explicitly in ccPassthroughMap) from
+  // the MIDI stream before plugins see it. Call after applyCCMappings, before
+  // applyCCPassthrough.
+  void stripMixerCCs(juce::MidiBuffer &midiMessages,
+                     const bool (&consumedParamCCs)[128]) {
     const int foh = fohCC.load();
     const int iem = iemCC.load();
     const int mute = muteCC.load();
     const int swap = swapCC.load();
-    if (foh < 0 && iem < 0 && mute < 0 && swap < 0)
-      return; // no mixer CCs assigned on this strip
 
     mixerCCScratch.clear();
     bool changed = false;
     for (const auto &meta : midiMessages) {
       auto msg = meta.getMessage();
-      if (msg.isController() &&
-          ((foh >= 0 && msg.getControllerNumber() == foh) ||
-           (iem >= 0 && msg.getControllerNumber() == iem) ||
-           (mute >= 0 && msg.getControllerNumber() == mute) ||
-           (swap >= 0 && msg.getControllerNumber() == swap))) {
-        changed = true; // consumed by the mixer — dropped from the plugin stream
-        continue;
+      if (msg.isController()) {
+        const int ccNum = msg.getControllerNumber();
+        const bool isMixerCC =
+            (foh >= 0 && ccNum == foh) || (iem >= 0 && ccNum == iem) ||
+            (mute >= 0 && ccNum == mute) || (swap >= 0 && ccNum == swap);
+        const bool isParamConsumed =
+            (ccNum >= 0 && ccNum < 128 && consumedParamCCs[ccNum]);
+        if (isMixerCC || isParamConsumed) {
+          changed = true; // consumed by mixer/host — dropped from plugin stream
+          continue;
+        }
       }
       mixerCCScratch.addEvent(msg, meta.samplePosition);
     }
@@ -1525,7 +1715,8 @@ public:
   }
 
   // Apply CC values to mapped parameters (call in processBlock)
-  void applyCCMappings(const juce::MidiBuffer &midiMessages) {
+  void applyCCMappings(const juce::MidiBuffer &midiMessages,
+                       bool (&consumedParamCCs)[128]) {
     juce::SpinLock::ScopedTryLockType lock(ccMappingLock);
     if (!lock.isLocked())
       return;
@@ -1584,6 +1775,10 @@ public:
           juce::AudioProcessorParameter* targetParam = map.cachedParam;
 
           if (targetParam != nullptr) {
+            if (ccNum >= 0 && ccNum < 128 &&
+                ccPassthroughMap.find(ccNum) == ccPassthroughMap.end()) {
+              consumedParamCCs[ccNum] = true;
+            }
             if (map.toggle) {
               // Latch mode: a press (value crossing above 64, the same
               // convention as setup triggers) flips between the range ends;
@@ -1712,6 +1907,10 @@ private:
   std::atomic<bool> iemEnabled{true};
   std::atomic<bool> bypassed{false};
   std::atomic<bool> unbypassPanicPending{false};
+  std::atomic<bool> pendingBypassReset{false};
+  std::atomic<bool> pendingChainSynthReset[3]{false, false, false};
+  std::atomic<bool> pendingChainFmReset[3]{false, false, false};
+  std::atomic<bool> pendingChainB3Reset[3]{false, false, false};
   std::atomic<bool> midiTraceLogged{false}; // one-shot MIDI flow trace
   std::atomic<bool> fadersLinked{true}; // Faders move together by default
 
@@ -1743,11 +1942,11 @@ private:
 
   // CC to parameter mappings
   std::map<int, CCMapping> ccParameterMappings;
-  juce::SpinLock ccMappingLock; // Thread-safe access for audio thread
+  mutable juce::SpinLock ccMappingLock; // Thread-safe access for audio thread
 
   // CC passthrough remap (incoming CC -> outgoing CC)
   std::map<int, int> ccPassthroughMap;
-  juce::SpinLock ccPassthroughLock;
+  mutable juce::SpinLock ccPassthroughLock;
   juce::MidiBuffer passthroughScratch; // pre-allocated to avoid per-block alloc
   juce::MidiBuffer mixerCCScratch;     // scratch for mixer-CC stripping (FOH/IEM)
 
@@ -1764,7 +1963,9 @@ private:
   FanfareSynthProcessor chainSynths[3];
   std::atomic<bool> chainIsSynth[3]{false, false, false};
   FmSynthProcessor chainFms[3];
+  B3OrganProcessor chainB3s[3];
   std::atomic<bool> chainIsFm[3]{false, false, false};
+  std::atomic<bool> chainIsB3[3]{false, false, false};
   juce::MidiBuffer synthMidiScratch; // note-range-filtered MIDI for the synth
 
   FanfareDSP::ChannelStripProcessor strip;

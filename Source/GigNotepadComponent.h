@@ -306,7 +306,7 @@ public:
             updateLiveEditModeState();
         };
         addAndMakeVisible(liveModeBtn);
-        Fanfare::styleHelpButton(helpBtn, "#gig-notepad", "HAAALP! Open the Gig Notepad & Chord Charts section of the User's Manual");
+        Fanfare::styleHelpButton(helpBtn, "#gig-notepad", "Open the Gig Notepad & Chord Charts section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
         zoomOutBtn.setButtonText("A-");
@@ -848,7 +848,7 @@ private:
     juce::TextButton importBtn;
     juce::TextButton addTabBtn;
     juce::TextButton manageTabsBtn;
-    juce::TextButton helpBtn{"HAAALP!"};
+    juce::TextButton helpBtn{"Help"};
 
     juce::TextButton btnBold;
     juce::TextButton btnBlue;

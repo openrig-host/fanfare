@@ -15,7 +15,7 @@ StageRemoteModalOverlay::StageRemoteModalOverlay(StageHotspotController& hotspot
     Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Subtle);
     addAndMakeVisible(closeBtn);
 
-    Fanfare::styleHelpButton(helpBtn, "#web-remote", "HAAALP! Open the Tablet Stage HUD & Wi-Fi Hotspot section of the User's Manual");
+    Fanfare::styleHelpButton(helpBtn, "#web-remote", "Open the Tablet Stage HUD & Wi-Fi Hotspot section of the User's Manual");
     addAndMakeVisible(helpBtn);
     closeBtn.onClick = [this]() {
         if (onClose) onClose();

@@ -28,18 +28,101 @@ public:
         targetLevelLinear.store(linearLevel);
     }
 
+    void resized() override {
+        cachedFaceplate = juce::Image();
+    }
+
+    void lookAndFeelChanged() override {
+        cachedFaceplate = juce::Image();
+    }
+
     void paint(juce::Graphics& g) override {
         const auto& t = ThemeManager::getInstance().active();
-        auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+        const int w = getWidth();
+        const int h = getHeight();
+        if (w <= 4 || h <= 4)
+            return;
 
+        auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+        auto face = bounds.reduced(3.5f);
+
+        const auto vuArgb = t.vuFace.getARGB();
+        const auto sunkenArgb = t.sunken.getARGB();
+        const auto borderArgb = t.borderStrong.getARGB();
+        const float scale = g.getInternalContext().getPhysicalPixelScaleFactor();
+        const int imgW = juce::jmax(1, juce::roundToInt((float)w * scale));
+        const int imgH = juce::jmax(1, juce::roundToInt((float)h * scale));
+
+        if (!cachedFaceplate.isValid()
+            || cachedFaceplate.getWidth() != imgW
+            || cachedFaceplate.getHeight() != imgH
+            || cachedVuArgb != vuArgb
+            || cachedSunkenArgb != sunkenArgb
+            || cachedBorderArgb != borderArgb) {
+            cachedVuArgb = vuArgb;
+            cachedSunkenArgb = sunkenArgb;
+            cachedBorderArgb = borderArgb;
+            cachedFaceplate = juce::Image(juce::Image::ARGB, imgW, imgH, true);
+            juce::Graphics fg(cachedFaceplate);
+            fg.addTransform(juce::AffineTransform::scale(scale));
+            paintStaticFaceplate(fg, t, bounds, face);
+        }
+
+        g.drawImage(cachedFaceplate, 0, 0, w, h, 0, 0, imgW, imgH);
+
+        juce::Graphics::ScopedSaveState faceClip(g);
+        g.reduceClipRegion(face.toNearestInt());
+
+        float pivotX = face.getCentreX();
+        float pivotY = face.getBottom() + (face.getHeight() * 0.25f);
+        float radius = face.getHeight() * 0.95f;
+
+        // 4. Peak Clip Indicator LED
+        float ledX = face.getRight() - 13.0f;
+        float ledY = face.getY() + 19.0f;
+        float ledR = 3.5f;
+
+        bool isPeaking = (currentLevelLinear > 0.99f || peakHoldCounter > 0);
+        g.setColour(isPeaking ? juce::Colour(0xffff2200) : juce::Colour(0xff551100));
+        g.fillEllipse(ledX - ledR, ledY - ledR, ledR * 2.0f, ledR * 2.0f);
+        g.setColour(juce::Colours::black.withAlpha(0.55f));
+        g.drawEllipse(ledX - ledR, ledY - ledR, ledR * 2.0f, ledR * 2.0f, 1.0f);
+
+        // 5. Dynamic Needle Pointer
+        float currentAngle = dbToAngle(currentDb);
+        float needleLen = radius - 2.0f;
+        float nx = pivotX + needleLen * std::sin(currentAngle);
+        float ny = pivotY - needleLen * std::cos(currentAngle);
+
+        g.setColour(juce::Colours::black.withAlpha(0.16f));
+        g.drawLine(pivotX + 1.5f, pivotY + 1.0f, nx + 1.5f, ny + 1.0f, 1.4f);
+
+        g.setColour(juce::Colour(0xff181715));
+        g.drawLine(pivotX, pivotY, nx, ny, 1.3f);
+
+        // Bottom Pivot Housing Cap
+        float capR = face.getHeight() * 0.14f;
+        juce::Path capPath;
+        capPath.addCentredArc(pivotX, pivotY, capR, capR, 0.0f,
+                             juce::degreesToRadians(-90.0f), juce::degreesToRadians(90.0f), true);
+        capPath.lineTo(pivotX, pivotY);
+        capPath.closeSubPath();
+
+        g.setColour(juce::Colour(0xff222226));
+        g.fillPath(capPath);
+        g.setColour(juce::Colour(0xff44444a));
+        g.strokePath(capPath, juce::PathStrokeType(1.0f));
+    }
+
+private:
+    void paintStaticFaceplate(juce::Graphics& g, const Theme& t,
+                              juce::Rectangle<float> bounds, juce::Rectangle<float> face) const {
         // 1. Recessed Front Panel Metal Bezel
         g.setColour(t.sunken);
         g.fillRoundedRectangle(bounds, 3.0f);
 
         g.setColour(t.borderStrong);
         g.drawRoundedRectangle(bounds.reduced(0.5f), 3.0f, 1.0f);
-
-        auto face = bounds.reduced(3.5f);
 
         // 2. Warm Cream Hardware VU Faceplate (routed via Theme::Role::vuFace)
         juce::Colour vuBase = t.vuFace;
@@ -120,50 +203,18 @@ public:
         g.drawText(label, (int)face.getX(), (int)face.getBottom() - (int)(face.getHeight() * 0.38f),
                    (int)face.getWidth(), 18, juce::Justification::centred, false);
 
-        // 4. Peak Clip Indicator LED
+        // Static PEAK label next to dynamic LED
         float ledX = face.getRight() - 13.0f;
         float ledY = face.getY() + 19.0f;
-        float ledR = 3.5f;
-
-        bool isPeaking = (currentLevelLinear > 0.99f || peakHoldCounter > 0);
-        g.setColour(isPeaking ? juce::Colour(0xffff2200) : juce::Colour(0xff551100));
-        g.fillEllipse(ledX - ledR, ledY - ledR, ledR * 2.0f, ledR * 2.0f);
-        g.setColour(juce::Colours::black.withAlpha(0.55f));
-        g.drawEllipse(ledX - ledR, ledY - ledR, ledR * 2.0f, ledR * 2.0f, 1.0f);
-
         g.setFont(BoutiqueLookAndFeel::condensedFont(face.getHeight() * 0.13f, 0.04f));
         g.setColour(juce::Colour(0xff554433));
         g.drawText("PEAK", (int)ledX - 16, (int)ledY + 4, 32, 10, juce::Justification::centred, false);
-
-        // 5. Dynamic Needle Pointer
-        float currentAngle = dbToAngle(currentDb);
-        float needleLen = radius - 2.0f;
-        float nx = pivotX + needleLen * std::sin(currentAngle);
-        float ny = pivotY - needleLen * std::cos(currentAngle);
-
-        g.setColour(juce::Colours::black.withAlpha(0.16f));
-        g.drawLine(pivotX + 1.5f, pivotY + 1.0f, nx + 1.5f, ny + 1.0f, 1.4f);
-
-        g.setColour(juce::Colour(0xff181715));
-        g.drawLine(pivotX, pivotY, nx, ny, 1.3f);
-
-        // Bottom Pivot Housing Cap
-        float capR = face.getHeight() * 0.14f;
-        juce::Path capPath;
-        capPath.addCentredArc(pivotX, pivotY, capR, capR, 0.0f,
-                             juce::degreesToRadians(-90.0f), juce::degreesToRadians(90.0f), true);
-        capPath.lineTo(pivotX, pivotY);
-        capPath.closeSubPath();
-
-        g.setColour(juce::Colour(0xff222226));
-        g.fillPath(capPath);
-        g.setColour(juce::Colour(0xff44444a));
-        g.strokePath(capPath, juce::PathStrokeType(1.0f));
     }
 
-private:
     void timerCallback() override {
         float targetLin = targetLevelLinear.load();
+        const float prevDb = currentDb;
+        const bool wasPeaking = (currentLevelLinear > 0.99f || peakHoldCounter > 0);
 
         if (targetLin > currentLevelLinear) {
             currentLevelLinear += (targetLin - currentLevelLinear) * 0.25f;
@@ -180,7 +231,9 @@ private:
             peakHoldCounter--;
         }
 
-        repaint();
+        const bool isPeaking = (currentLevelLinear > 0.99f || peakHoldCounter > 0);
+        if (std::abs(currentDb - prevDb) > 0.03f || isPeaking != wasPeaking)
+            repaint();
     }
 
     float dbToAngle(float db) const {
@@ -196,6 +249,11 @@ private:
     float currentLevelLinear = 0.0f;
     float currentDb = -40.0f;
     int peakHoldCounter = 0;
+
+    juce::Image cachedFaceplate;
+    juce::uint32 cachedVuArgb = 0;
+    juce::uint32 cachedSunkenArgb = 0;
+    juce::uint32 cachedBorderArgb = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AnalogVuMeter)
 };

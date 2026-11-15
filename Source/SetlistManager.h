@@ -363,17 +363,20 @@ public:
     }
 
     bool saveSetlist(const juce::File& file) {
+        const auto setupsSnap = getSetupsSnapshot();
+        const int activeSnap = getActiveIndex();
+
         juce::DynamicObject::Ptr obj = new juce::DynamicObject();
         juce::Array<juce::var> pathsArr;
         auto songsDir = RigLibrary::getSongsDirectory();
-        for (const auto& f : setups) {
+        for (const auto& f : setupsSnap) {
             // Store paths relative to the songs directory so setlists are
             // portable. For in-dir files this is a bare filename; for files
             // elsewhere it is a ../ or absolute path, both resolvable on reload.
             pathsArr.add(f.getRelativePathFrom(songsDir));
         }
         obj->setProperty("setups", pathsArr);
-        obj->setProperty("activeIndex", activeIndex);
+        obj->setProperty("activeIndex", activeSnap);
 
         file.getParentDirectory().createDirectory();
         // Stage through a temp sibling and rename so a crash mid-save can't

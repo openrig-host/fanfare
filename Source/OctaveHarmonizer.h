@@ -9,9 +9,15 @@ public:
     OctaveHarmonizer() {
         std::fill(std::begin(localRefCount), std::end(localRefCount), 0);
         std::fill(std::begin(routedRefCount), std::end(routedRefCount), 0);
+        std::fill(std::begin(africa2OffsetPerNote), std::end(africa2OffsetPerNote), (int8_t)0);
+        outputScratch.ensureSize(2048);
+        targetOutputScratch.ensureSize(2048);
     }
 
-    void prepare(double /*sr*/) {}
+    void prepare(double /*sr*/) {
+        outputScratch.ensureSize(2048);
+        targetOutputScratch.ensureSize(2048);
+    }
 
     void reset() {
         // Schedules a flush on the next audio callback. Safe to call from any thread.
@@ -21,41 +27,51 @@ public:
     void processBlock(juce::MidiBuffer& midi, int /*numSamples*/,
                       juce::MidiBuffer* harmonyOutput = nullptr,
                       int transposeSemis = 0) {
-        juce::MidiBuffer output;
-        juce::MidiBuffer targetOutput; // holds generated voices routed to another strip
-
-        // Generated harmony voices go to destinationBuffer. When a route target
-        // is active they are diverted to targetOutput (forwarded to another
-        // slot); otherwise they stay local in output.
+        const bool isEnabled = enabled.load();
         bool hasRouteTarget = (harmonyTargetSlot.load() >= 0 && harmonyOutput != nullptr);
         const bool routeChanged = (hasRouteTarget != prevHadRouteTarget);
         prevHadRouteTarget = hasRouteTarget;
-        juce::MidiBuffer& destinationBuffer = hasRouteTarget ? targetOutput : output;
+        const bool disabledEdge = (!isEnabled && prevEnabled);
+        prevEnabled = isEnabled;
+
+        const bool doFlush = needsFlush.exchange(false) || routeChanged || disabledEdge;
+
+        if (!isEnabled && !doFlush)
+            return;
+
+        outputScratch.clear();
+        targetOutputScratch.clear();
+
+        // Generated harmony voices go to destinationBuffer. When a route target
+        // is active they are diverted to targetOutputScratch (forwarded to another
+        // slot); otherwise they stay local in outputScratch.
+        juce::MidiBuffer& destinationBuffer = hasRouteTarget ? targetOutputScratch : outputScratch;
         int* harmRef = hasRouteTarget ? routedRefCount : localRefCount;
 
         // --- Flush any stuck generated notes (mode change, route change, enable toggle, panic) ---
-        if (needsFlush.exchange(false) || routeChanged) {
+        if (doFlush) {
             for (int note = 0; note < 128; ++note) {
                 if (localRefCount[note] > 0) {
-                    output.addEvent(juce::MidiMessage::noteOff(1, note), 0);
+                    outputScratch.addEvent(juce::MidiMessage::noteOff(1, note), 0);
                 }
                 if (routedRefCount[note] > 0) {
                     if (harmonyOutput != nullptr)
-                        targetOutput.addEvent(juce::MidiMessage::noteOff(1, note), 0);
-                    output.addEvent(juce::MidiMessage::noteOff(1, note), 0);
+                        targetOutputScratch.addEvent(juce::MidiMessage::noteOff(1, note), 0);
+                    outputScratch.addEvent(juce::MidiMessage::noteOff(1, note), 0);
                 }
             }
             std::fill(std::begin(localRefCount), std::end(localRefCount), 0);
             std::fill(std::begin(routedRefCount), std::end(routedRefCount), 0);
+            std::fill(std::begin(africa2OffsetPerNote), std::end(africa2OffsetPerNote), (int8_t)0);
         }
 
-        if (!enabled.load()) {
-            // Pass all incoming MIDI through unchanged (note-offs reach the synth)
+        if (!isEnabled) {
+            // Pass all incoming MIDI through alongside the flush note-offs
             for (const auto meta : midi)
-                output.addEvent(meta.getMessage(), meta.samplePosition);
+                outputScratch.addEvent(meta.getMessage(), meta.samplePosition);
             if (harmonyOutput != nullptr)
-                harmonyOutput->addEvents(targetOutput, 0, -1, 0);
-            midi.swapWith(output);
+                harmonyOutput->addEvents(targetOutputScratch, 0, -1, 0);
+            midi.swapWith(outputScratch);
             return;
         }
 
@@ -66,7 +82,7 @@ public:
         auto addLocalNote = [&](int genNote, int vel, int pos) {
             if (genNote >= 0 && genNote < 128) {
                 if (localRefCount[genNote] == 0) {
-                    output.addEvent(juce::MidiMessage::noteOn(1, genNote, (juce::uint8)vel), pos);
+                    outputScratch.addEvent(juce::MidiMessage::noteOn(1, genNote, (juce::uint8)vel), pos);
                 }
                 localRefCount[genNote]++;
             }
@@ -86,7 +102,7 @@ public:
                 if (localRefCount[genNote] > 0) {
                     localRefCount[genNote]--;
                     if (localRefCount[genNote] == 0) {
-                        output.addEvent(juce::MidiMessage::noteOff(1, genNote), pos);
+                        outputScratch.addEvent(juce::MidiMessage::noteOff(1, genNote), pos);
                     }
                 }
             }
@@ -112,7 +128,7 @@ public:
                 int vel = msg.getVelocity();
 
                 if (note < 0 || note >= 128) {
-                    output.addEvent(msg, pos);
+                    outputScratch.addEvent(msg, pos);
                     continue;
                 }
 
@@ -124,9 +140,11 @@ public:
                 if (africa == 1) {
                     addHarmonyNote(note - 5, vel, pos);
                 } else if (africa == 2) {
-                    const int offsets[12] = { -3, -3, -4, -4, -4, -3, -3, -3, -4, -4, -3, -3 };
+                    static constexpr int8_t offsets[12] = { -3, -3, -4, -4, -4, -3, -3, -3, -4, -4, -3, -3 };
                     int pc = (((note - transposeSemis) % 12) + 12) % 12;
-                    addHarmonyNote(note + offsets[pc], vel, pos);
+                    int8_t off = offsets[pc];
+                    africa2OffsetPerNote[note] = off;
+                    addHarmonyNote(note + off, vel, pos);
                 } else if (africa == 3) {
                     int transposed = note - 1;
                     bool isPart1 = (note >= 48);
@@ -150,7 +168,7 @@ public:
                 int note = msg.getNoteNumber();
 
                 if (note < 0 || note >= 128) {
-                    output.addEvent(msg, pos);
+                    outputScratch.addEvent(msg, pos);
                     continue;
                 }
 
@@ -161,9 +179,14 @@ public:
                 if (africa == 1) {
                     releaseHarmonyNote(note - 5, pos);
                 } else if (africa == 2) {
-                    const int offsets[12] = { -3, -3, -4, -4, -4, -3, -3, -3, -4, -4, -3, -3 };
-                    int pc = (((note - transposeSemis) % 12) + 12) % 12;
-                    releaseHarmonyNote(note + offsets[pc], pos);
+                    int off = (int)africa2OffsetPerNote[note];
+                    if (off == 0) {
+                        static constexpr int8_t offsets[12] = { -3, -3, -4, -4, -4, -3, -3, -3, -4, -4, -3, -3 };
+                        int pc = (((note - transposeSemis) % 12) + 12) % 12;
+                        off = offsets[pc];
+                    }
+                    africa2OffsetPerNote[note] = 0;
+                    releaseHarmonyNote(note + off, pos);
                 } else if (africa == 3) {
                     int transposed = note - 1;
                     bool isPart1 = (note >= 48);
@@ -185,13 +208,13 @@ public:
                 }
             } else {
                 // Pass through all other MIDI (CC, pitch bend, etc.) — always local
-                output.addEvent(msg, pos);
+                outputScratch.addEvent(msg, pos);
             }
         }
 
         if (harmonyOutput != nullptr)
-            harmonyOutput->addEvents(targetOutput, 0, -1, 0);
-        midi.swapWith(output);
+            harmonyOutput->addEvents(targetOutputScratch, 0, -1, 0);
+        midi.swapWith(outputScratch);
     }
 
     // Parameters — atomic, safe to write from message thread
@@ -208,5 +231,9 @@ public:
 private:
     int localRefCount[128];          // note -> active reference count on local strip
     int routedRefCount[128];         // note -> active reference count on routed target strip
+    int8_t africa2OffsetPerNote[128];
     bool prevHadRouteTarget = false;
+    bool prevEnabled = false;
+    juce::MidiBuffer outputScratch;
+    juce::MidiBuffer targetOutputScratch;
 };

@@ -89,9 +89,9 @@ struct Theme {
     juce::Colour vuFace;         // cream analog VU faceplate
     juce::Colour faderCapFoh;
     juce::Colour faderCapIem;
-    juce::Colour helpFaceTop;    // warm amber HAAALP! cap top
-    juce::Colour helpFaceBot;    // warm amber HAAALP! cap bottom
-    juce::Colour helpText;       // dark engraved ink on HAAALP! cap
+    juce::Colour helpFaceTop;    // warm amber help cap top
+    juce::Colour helpFaceBot;    // warm amber help cap bottom
+    juce::Colour helpText;       // dark engraved ink on help cap
 
     enum class Role {
         background, panel, panelAlt, raised, border, borderStrong,

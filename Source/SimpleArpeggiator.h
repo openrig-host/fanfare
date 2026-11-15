@@ -14,9 +14,13 @@ public:
         std::fill(std::begin(heldNotesVelocity), std::end(heldNotesVelocity), 0);
         heldNotesCount = 0;
         arpNotesCount = 0;
+        outputScratch.ensureSize(2048);
     }
 
-    void prepare(double sr) { sampleRate = sr; }
+    void prepare(double sr) {
+        sampleRate = juce::jmax(8000.0, sr);
+        outputScratch.ensureSize(2048);
+    }
 
     void reset() {
         std::fill(std::begin(heldNotesVelocity), std::end(heldNotesVelocity), 0);
@@ -31,12 +35,15 @@ public:
     }
 
     void processBlock(juce::MidiBuffer& midi, int numSamples) {
+        if (numSamples <= 0)
+            return;
+
         if (!enabled.load()) {
             if (soundingNote >= 0) {
                 midi.addEvent(juce::MidiMessage::noteOff(1, soundingNote), 0);
                 soundingNote = -1;
             }
-            if (heldNotesCount > 0) {
+            if (heldNotesCount > 0 || noteOffAt >= 0) {
                 reset();
             }
             return;
@@ -48,55 +55,76 @@ public:
         int up = juce::jlimit(0, 4, octavesUp.load());
         int down = juce::jlimit(0, 4, octavesDown.load());
         float g = gate.load();
-        Pattern pat = static_cast<Pattern>(patternIdx.load());
+        Pattern pat = static_cast<Pattern>(juce::jlimit(0, 3, patternIdx.load()));
 
         // 16th-note step length
         double stepLen = sampleRate * 60.0 / currentBpm / 4.0;
-        int gateLen = std::max(1, (int)(stepLen * std::clamp(g, 0.01f, 1.0f)));
+        juce::int64 gateLen = (juce::int64)std::max(1, (int)(stepLen * std::clamp(g, 0.01f, 1.0f)));
 
         // --- 1. Scan input for note events ---
         bool notesChanged = false;
         bool firstNoteAfterSilence = false;
         bool wasEmpty = (heldNotesCount == 0);
+        int tapNote = -1;
+        int tapVel = 0;
+        int tapOnPos = 0;
+        int tapOffPos = 0;
 
         for (const auto meta : midi) {
             auto msg = meta.getMessage();
             if (msg.isNoteOn() && msg.getVelocity() > 0) {
                 int note = msg.getNoteNumber();
                 if (note >= 0 && note < 128) {
-                    if (wasEmpty) firstNoteAfterSilence = true;
+                    if (wasEmpty) {
+                        firstNoteAfterSilence = true;
+                        if (tapNote < 0) {
+                            tapNote = note;
+                            tapVel = msg.getVelocity();
+                            tapOnPos = meta.samplePosition;
+                        }
+                    }
                     if (heldNotesVelocity[note] == 0) {
                         heldNotesCount++;
                     }
                     heldNotesVelocity[note] = msg.getVelocity();
                     notesChanged = true;
                 }
-            } else if (msg.isNoteOff()) {
+            } else if (msg.isNoteOff() || (msg.isNoteOn() && msg.getVelocity() == 0)) {
                 int note = msg.getNoteNumber();
                 if (note >= 0 && note < 128) {
                     if (heldNotesVelocity[note] > 0) {
                         heldNotesVelocity[note] = 0;
                         heldNotesCount = std::max(0, heldNotesCount - 1);
                         notesChanged = true;
+                        if (note == tapNote)
+                            tapOffPos = meta.samplePosition;
                     }
                 }
             }
         }
 
-        // --- 2. No notes held: send note-off and bail ---
+        // --- 2. No notes held: flush or render short single-block tap ---
         if (heldNotesCount == 0) {
-            juce::MidiBuffer output;
+            outputScratch.clear();
             if (soundingNote >= 0) {
-                output.addEvent(juce::MidiMessage::noteOff(1, soundingNote), 0);
+                outputScratch.addEvent(juce::MidiMessage::noteOff(1, soundingNote), 0);
                 soundingNote = -1;
                 noteOffAt = -1;
+            }
+            if (wasEmpty && tapNote >= 0) {
+                const int onPos = juce::jlimit(0, juce::jmax(0, numSamples - 1), tapOnPos);
+                const int offPos = juce::jlimit(0, juce::jmax(0, numSamples - 1),
+                                                std::max(onPos, tapOffPos));
+                outputScratch.addEvent(juce::MidiMessage::noteOn(1, tapNote, (juce::uint8)tapVel), onPos);
+                outputScratch.addEvent(juce::MidiMessage::noteOff(1, tapNote), offPos);
             }
             for (const auto meta : midi) {
                 auto msg = meta.getMessage();
                 if (!msg.isNoteOn() && !msg.isNoteOff())
-                    output.addEvent(msg, meta.samplePosition);
+                    outputScratch.addEvent(msg, meta.samplePosition);
             }
-            midi.swapWith(output);
+            totalSamples += numSamples;
+            midi.swapWith(outputScratch);
             return;
         }
 
@@ -107,10 +135,17 @@ public:
             if (arpNotesCount == 0) { midi.clear(); return; }
 
             if (firstNoteAfterSilence) {
-                // Starting fresh from silence — reset to the lowest held note
-                // and fire the first step immediately in this block.
-                stepIndex = 0;
-                direction = 1;
+                // Starting fresh from silence — align start index to pattern direction
+                if (pat == Pattern::Down) {
+                    stepIndex = arpNotesCount - 1;
+                    direction = -1;
+                } else if (pat == Pattern::Random) {
+                    stepIndex = (int)(rng() % arpNotesCount);
+                    direction = 1;
+                } else {
+                    stepIndex = 0;
+                    direction = 1;
+                }
                 nextStepDbl = (double)totalSamples;
                 soundingNote = -1;
                 noteOffAt = -1;
@@ -132,38 +167,41 @@ public:
                 }
             }
 
-            if (stepIndex >= arpNotesCount)
+            if (stepIndex >= arpNotesCount || stepIndex < 0)
                 stepIndex = 0;
         }
 
-        if (arpNotesCount == 0) return;
+        if (arpNotesCount == 0) {
+            totalSamples += numSamples;
+            return;
+        }
 
         // --- 4. Build output buffer ---
-        juce::MidiBuffer output;
+        outputScratch.clear();
 
         for (const auto meta : midi) {
             auto msg = meta.getMessage();
             if (!msg.isNoteOn() && !msg.isNoteOff())
-                output.addEvent(msg, meta.samplePosition);
+                outputScratch.addEvent(msg, meta.samplePosition);
         }
 
-        int blockStartAbs = totalSamples;
-        int blockEndAbs = totalSamples + numSamples;
+        juce::int64 blockStartAbs = totalSamples;
+        juce::int64 blockEndAbs = totalSamples + (juce::int64)numSamples;
 
         // --- 5. Pending note-off from previous block gate ---
         if (noteOffAt >= 0 && noteOffAt < blockEndAbs && soundingNote >= 0) {
-            int relPos = juce::jlimit(0, numSamples - 1, noteOffAt - blockStartAbs);
-            output.addEvent(juce::MidiMessage::noteOff(1, soundingNote), relPos);
+            int relPos = juce::jlimit(0, numSamples - 1, (int)(noteOffAt - blockStartAbs));
+            outputScratch.addEvent(juce::MidiMessage::noteOff(1, soundingNote), relPos);
             soundingNote = -1;
             noteOffAt = -1;
         }
 
         // --- 6. Step boundaries in this block ---
-        while ((int)nextStepDbl < blockEndAbs) {
-            int relPos = juce::jlimit(0, numSamples - 1, (int)nextStepDbl - blockStartAbs);
+        while ((juce::int64)nextStepDbl < blockEndAbs) {
+            int relPos = juce::jlimit(0, numSamples - 1, (int)((juce::int64)nextStepDbl - blockStartAbs));
 
             if (soundingNote >= 0) {
-                output.addEvent(juce::MidiMessage::noteOff(1, soundingNote), relPos);
+                outputScratch.addEvent(juce::MidiMessage::noteOff(1, soundingNote), relPos);
                 soundingNote = -1;
             }
 
@@ -171,9 +209,9 @@ public:
                 int idx = stepIndex % arpNotesCount;
                 int note = arpNotes[idx];
                 int vel = arpVelocities[idx];
-                output.addEvent(juce::MidiMessage::noteOn(1, note, (juce::uint8)vel), relPos);
+                outputScratch.addEvent(juce::MidiMessage::noteOn(1, note, (juce::uint8)vel), relPos);
                 soundingNote = note;
-                noteOffAt = (int)nextStepDbl + gateLen;
+                noteOffAt = (juce::int64)nextStepDbl + gateLen;
             }
 
             advanceStep(pat);
@@ -182,14 +220,14 @@ public:
 
         // --- 7. Check if the last note triggered in the loop needs to be turned off in this block ---
         if (noteOffAt >= 0 && noteOffAt < blockEndAbs && soundingNote >= 0) {
-            int relPos = juce::jlimit(0, numSamples - 1, noteOffAt - blockStartAbs);
-            output.addEvent(juce::MidiMessage::noteOff(1, soundingNote), relPos);
+            int relPos = juce::jlimit(0, numSamples - 1, (int)(noteOffAt - blockStartAbs));
+            outputScratch.addEvent(juce::MidiMessage::noteOff(1, soundingNote), relPos);
             soundingNote = -1;
             noteOffAt = -1;
         }
 
         totalSamples = blockEndAbs;
-        midi.swapWith(output);
+        midi.swapWith(outputScratch);
     }
 
     // --- Parameters (atomic) ---
@@ -235,7 +273,11 @@ private:
 
     void advanceStep(Pattern pat) {
         int total = arpNotesCount;
-        if (total == 0) return;
+        if (total <= 1) {
+            stepIndex = 0;
+            direction = 1;
+            return;
+        }
 
         switch (pat) {
             case Pattern::Up:
@@ -246,8 +288,8 @@ private:
                 break;
             case Pattern::UpDown:
                 stepIndex += direction;
-                if (stepIndex >= total - 1) { stepIndex = total - 1; direction = -1; }
-                if (stepIndex <= 0)          { stepIndex = 0;          direction = 1;  }
+                if (stepIndex >= total - 1)      { stepIndex = total - 1; direction = -1; }
+                else if (stepIndex <= 0)          { stepIndex = 0;          direction = 1;  }
                 break;
             case Pattern::Random:
                 stepIndex = (int)(rng() % total);
@@ -262,10 +304,11 @@ private:
     int arpVelocities[512];
     int arpNotesCount = 0;
     int soundingNote = -1;
-    int noteOffAt = -1;
+    juce::int64 noteOffAt = -1;
     double nextStepDbl = 0.0;
     int stepIndex = 0;
     int direction = 1;
-    int totalSamples = 0;
+    juce::int64 totalSamples = 0;
+    juce::MidiBuffer outputScratch;
     std::mt19937 rng{std::random_device{}()};
 };

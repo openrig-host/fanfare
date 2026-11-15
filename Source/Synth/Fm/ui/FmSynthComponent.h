@@ -222,7 +222,7 @@ private:
   void commitPatchFromUi() {
     if (compareActive)
       exitCompareKeepCurrent();
-    proc.engine().setPatch(proc.engine().patch());
+    proc.commitUiPatch();
     proc.markDirty();
     rightDeck.syncFromProcessor();
     for (auto &op : operatorCards)
@@ -273,7 +273,7 @@ private:
 
   uint64_t computeEngineSnapshotHash() const noexcept {
     uint64_t h = 14695981039346656037ULL;
-    const auto &p = proc.engine().patch();
+    const auto &p = proc.uiPatch();
     for (int i = 0; i < FanfareFm::kPatchSize; ++i) {
       h ^= static_cast<uint64_t>(p.d[i]);
       h *= 1099511628211ULL;
@@ -328,13 +328,12 @@ private:
   }
 
   void refreshLcdDisplay() {
-    const auto &e = proc.engine();
     const juce::String curName = proc.getCurrentPresetName();
     const int curIdx = proc.getCurrentPresetIndex();
     const int displayNum = curIdx >= 0 ? (curIdx + 1) : 0;
     const juce::String srcTag = proc.getCurrentPresetProvenance();
 
-    header.lcd.setPatchDisplay(displayNum, FanfareFm::fmModeName(e.mode()),
+    header.lcd.setPatchDisplay(displayNum, FanfareFm::fmModeName(proc.uiMode()),
                                curName, proc.isPresetDirty(), srcTag);
 
     if (!proc.enabled.load()) {
@@ -361,7 +360,7 @@ private:
 
     const juce::String catName = proc.getCurrentPresetCategory();
     const juce::String algPart =
-        "ALG " + juce::String(e.effectiveAlg() + 1).paddedLeft('0', 2);
+        "ALG " + juce::String(proc.uiEffectiveAlg() + 1).paddedLeft('0', 2);
     const juce::String summary =
         (catName.isNotEmpty() ? (catName + "  |  ") : juce::String()) +
         algPart + "  |  " + formatActiveFxSummary();
@@ -402,7 +401,7 @@ private:
       exitCompareKeepCurrent();
     FanfareFm::FmPatch p;
     FanfareFm::initPatch(p);
-    proc.engine().loadPatchRaw(p);
+    proc.loadUiPatchRaw(p);
     proc.setFx(FmSynthProcessor::fxChoMix, 0.0f);
     proc.setFx(FmSynthProcessor::fxDlyMix, 0.0f);
     proc.setFx(FmSynthProcessor::fxRevMix, 0.0f);
@@ -741,7 +740,7 @@ private:
           if (f == juce::File())
             return;
           uint8_t raw[FanfareFm::kSingleSysexSize];
-          FanfareFm::packSingleSysex(safeThis->proc.engine().patch(), raw);
+          FanfareFm::packSingleSysex(safeThis->proc.uiPatch(), raw);
           if (f.replaceWithData(raw, FanfareFm::kSingleSysexSize)) {
             safeThis->transientStatus = "Exported '" + f.getFileName() + "'";
             safeThis->transientError = false;
@@ -756,9 +755,11 @@ private:
   void timerCallback() override {
     header.updateMeterTelemetry(proc.getOutputPeakL(), proc.getOutputPeakR(),
                                 proc.getActiveVoices(),
-                                proc.engine().polyphony());
+                                proc.uiPolyphony());
 
-    if (!anyWidgetDragging()) {
+    if (proc.syncFromAudio() && !anyWidgetDragging()) {
+      syncAllControlsFromProcessor();
+    } else if (!anyWidgetDragging()) {
       const uint64_t nowHash = computeEngineSnapshotHash();
       if (nowHash != lastSyncedHash)
         syncAllControlsFromProcessor();

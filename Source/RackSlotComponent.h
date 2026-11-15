@@ -41,6 +41,7 @@ public:
   std::function<void()> onShowMp3Player;
   std::function<void()> onShowSynth;
   std::function<void()> onShowFm;
+  std::function<void()> onShowB3;
   std::function<void()> onSaveStrip;
   std::function<void()> onLoadStrip;
   std::function<void(const juce::File&)> onLoadStripFile;
@@ -105,6 +106,7 @@ private:
   // with the matching learn armed; the release click is then suppressed.
   struct LongPressMouseListener : public juce::MouseListener,
                                   public juce::Timer {
+    ~LongPressMouseListener() override { stopTimer(); }
     RackSlotComponent *owner = nullptr;
     int holdMs = 0;
     bool fired = false;

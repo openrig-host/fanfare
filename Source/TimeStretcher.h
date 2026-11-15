@@ -26,7 +26,8 @@ public:
 
         initWindow(grainSize);
 
-        int maxFifo = juce::jmax(maxBlockSize * 4, 32768);
+        const int safeBlock = juce::jmax(64, maxBlockSize);
+        int maxFifo = juce::jmax(safeBlock * 4, 32768);
         inputFifo.setSize(2, maxFifo);
         inputFifo.clear();
 
@@ -44,6 +45,7 @@ public:
         samplesInInputFifo = 0;
         samplesInOutputFifo = 0;
         initializedFirstGrain = false;
+        wasBypassed = true;
     }
 
     void reset() {
@@ -58,6 +60,7 @@ public:
         samplesInInputFifo = 0;
         samplesInOutputFifo = 0;
         initializedFirstGrain = false;
+        wasBypassed = true;
     }
 
     void setTempoRatio(float ratio) {
@@ -70,33 +73,70 @@ public:
     }
 
     // Process a block of audio.
-    // If tempoRatio is ~1.0, bypasses stretching with direct copy.
+    // If tempoRatio is ~1.0, bypasses stretching with click-free crossfade.
     void process(const juce::AudioBuffer<float>& input, juce::AudioBuffer<float>& output, int numSamples) {
-        float ratio = tempoRatio.load();
+        if (numSamples <= 0)
+            return;
 
-        // 1. Instant Bypass when ratio is 1.0 (0.0% CPU overhead)
-        if (std::abs(ratio - 1.0f) < 0.002f) {
+        float ratio = tempoRatio.load();
+        const bool bypass = (std::abs(ratio - 1.0f) < 0.002f);
+
+        // 1. Bypass when ratio is 1.0 (0.0% CPU overhead once faded out)
+        if (bypass) {
             for (int ch = 0; ch < output.getNumChannels(); ++ch) {
                 int inCh = juce::jmin(ch, input.getNumChannels() - 1);
                 output.copyFrom(ch, 0, input, inCh, 0, numSamples);
             }
+            if (!wasBypassed) {
+                const int fadeLen = juce::jmin(64, numSamples, samplesInOutputFifo);
+                if (fadeLen > 0) {
+                    const int outFifoSize = outputFifo.getNumSamples();
+                    for (int ch = 0; ch < output.getNumChannels(); ++ch) {
+                        const int srcCh = juce::jmin(ch, 1);
+                        float* dst = output.getWritePointer(ch);
+                        for (int i = 0; i < fadeLen; ++i) {
+                            const float wet = outputFifo.getSample(srcCh, (outReadPos + i) % outFifoSize);
+                            const float alpha = (float)(i + 1) / (float)fadeLen;
+                            dst[i] = wet * (1.0f - alpha) + dst[i] * alpha;
+                        }
+                    }
+                }
+                reset();
+            }
             return;
         }
+
+        const bool enteringWsola = wasBypassed;
+        wasBypassed = false;
 
         // 2. Push input samples into input FIFO
         pushInput(input, numSamples);
 
-        // 3. Generate stretched output grains while enough input exists
-        // synthesizeGrain() can seek up to (hopIn + searchRange/2) and then read grainSize samples.
+        // 3. Generate stretched output grains while enough input exists and output has full grain room
+        // synthesizeGrain() can seek up to (hopIn + searchRange/2) and writes grainSize samples.
         float hopIn = (float)hopOut * ratio;
         int neededInputForGrain = grainSize + (int)std::ceil(hopIn) + (searchRange / 2) + 4;
 
-        while (samplesInInputFifo >= neededInputForGrain && samplesInOutputFifo + hopOut <= outputFifo.getNumSamples()) {
+        while (samplesInInputFifo >= neededInputForGrain &&
+               samplesInOutputFifo + grainSize <= outputFifo.getNumSamples()) {
             synthesizeGrain(hopIn);
         }
 
         // 4. Pop available samples from output FIFO into output buffer
         popOutput(output, numSamples);
+
+        if (enteringWsola) {
+            const int fadeLen = juce::jmin(64, numSamples);
+            for (int ch = 0; ch < output.getNumChannels(); ++ch) {
+                const int inCh = juce::jmin(ch, input.getNumChannels() - 1);
+                const float* dry = input.getReadPointer(inCh);
+                float* dst = output.getWritePointer(ch);
+                for (int i = 0; i < fadeLen; ++i) {
+                    const float alpha = (float)(i + 1) / (float)fadeLen;
+                    dst[i] = dry[i] * (1.0f - alpha) + dst[i] * alpha;
+                }
+            }
+        }
     }
 
 private:
@@ -199,13 +239,13 @@ private:
         outWritePos = (outWritePos + hopOut) % outFifoSize;
         samplesInOutputFifo += hopOut;
 
-        // Advance input FIFO
-        int samplesToDiscard = juce::jmin(samplesInInputFifo, (int)(hopIn + bestOffset));
-        samplesToDiscard = juce::jmax(0, samplesToDiscard);
+        // Advance input FIFO while preserving fractional phase residual
+        const double advance = inputReadPos + (double)hopIn + (double)bestOffset;
+        int samplesToDiscard = juce::jmin(samplesInInputFifo, juce::jmax(0, (int)std::floor(advance)));
 
         fifoReadPos = (fifoReadPos + samplesToDiscard) % fifoSize;
         samplesInInputFifo -= samplesToDiscard;
-        inputReadPos = 0.0;
+        inputReadPos = juce::jlimit(0.0, 4.0, advance - (double)samplesToDiscard);
     }
 
     void popOutput(juce::AudioBuffer<float>& output, int numSamples) {
@@ -250,6 +290,7 @@ private:
     int samplesInInputFifo = 0;
     int samplesInOutputFifo = 0;
     bool initializedFirstGrain = false;
+    bool wasBypassed = true;
 
     std::atomic<float> tempoRatio{1.0f};
 

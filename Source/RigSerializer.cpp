@@ -87,6 +87,8 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
             ps.synthState = v.getProperty("synthState", juce::var());
             ps.isFm = (bool)v.getProperty("isFm", false);
             ps.fmState = v.getProperty("fmState", juce::var());
+            ps.isB3 = (bool)v.getProperty("isB3", false);
+            ps.b3State = v.getProperty("b3State", juce::var());
         }
         return ps;
     };
@@ -416,6 +418,9 @@ juce::var RigSerializer::songToVar(const Song& song) {
         o->setProperty("isFm", ps.isFm);
         if (ps.fmState.isObject())
             o->setProperty("fmState", ps.fmState);
+        o->setProperty("isB3", ps.isB3);
+        if (ps.b3State.isObject())
+            o->setProperty("b3State", ps.b3State);
         return juce::var(o);
     };
 
@@ -594,7 +599,7 @@ juce::var RigSerializer::songToVar(const Song& song) {
 
         juce::Array<juce::var> chainNodes;
         for (const auto& ps : s.chain) {
-            if (ps.path.isNotEmpty() || ps.isMidiOut || ps.isSynth || ps.isFm)
+            if (ps.path.isNotEmpty() || ps.isMidiOut || ps.isSynth || ps.isFm || ps.isB3)
                 chainNodes.add(writePluginState(ps));
             else
                 chainNodes.add(juce::var());
@@ -728,6 +733,9 @@ juce::String RigSerializer::serializeStrip(const SongSlot& slot) {
         o->setProperty("isFm", ps.isFm);
         if (ps.fmState.isObject())
             o->setProperty("fmState", ps.fmState);
+        o->setProperty("isB3", ps.isB3);
+        if (ps.b3State.isObject())
+            o->setProperty("b3State", ps.b3State);
         return juce::var(o);
     };
 
@@ -887,7 +895,7 @@ juce::String RigSerializer::serializeStrip(const SongSlot& slot) {
 
     juce::Array<juce::var> chainNodes;
     for (const auto& ps : slot.chain) {
-        if (ps.path.isNotEmpty() || ps.isMidiOut || ps.isSynth || ps.isFm)
+        if (ps.path.isNotEmpty() || ps.isMidiOut || ps.isSynth || ps.isFm || ps.isB3)
             chainNodes.add(writePluginState(ps));
         else
             chainNodes.add(juce::var());
@@ -1095,6 +1103,8 @@ bool RigSerializer::readStripFromFile(const juce::File& file, SongSlot& outSlot)
                 ps.synthState = pv.getProperty("synthState", juce::var());
                 ps.isFm = (bool)pv.getProperty("isFm", false);
                 ps.fmState = pv.getProperty("fmState", juce::var());
+                ps.isB3 = (bool)pv.getProperty("isB3", false);
+                ps.b3State = pv.getProperty("b3State", juce::var());
             }
             outSlot.chain.push_back(ps);
         }

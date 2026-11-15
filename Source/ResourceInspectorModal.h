@@ -24,7 +24,7 @@ public:
         };
         addAndMakeVisible(closeBtn);
 
-        Fanfare::styleHelpButton(helpBtn, "#resource-inspector", "HAAALP! Open the Resource & DSP Inspector section of the User's Manual");
+        Fanfare::styleHelpButton(helpBtn, "#resource-inspector", "Open the Resource & DSP Inspector section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
         refreshBtn.setButtonText("REFRESH STATS");
@@ -267,7 +267,7 @@ private:
     juce::Label titleLabel;
     juce::Label infoLabel;
     juce::TextButton closeBtn;
-    juce::TextButton helpBtn{"HAAALP!"};
+    juce::TextButton helpBtn{"Help"};
     juce::TextButton refreshBtn;
     juce::TableListBox table;
 

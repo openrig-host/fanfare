@@ -34,7 +34,7 @@ public:
                       "Lush Reverb Algorithm") {
     addAndMakeVisible(algView);
     algView.onAlgorithmSelected = [this](int alg) {
-      proc.engine().patch().d[134] = static_cast<uint8_t>(alg);
+      proc.uiPatch().d[134] = static_cast<uint8_t>(alg);
       sink.handleTelemetryEdited("Algorithm: " + juce::String(alg + 1));
       commitCallback();
     };
@@ -53,7 +53,7 @@ public:
     fbFader.setTelemetrySink(&sink);
     fbFader.setAccentRole(Theme::Role::warn, Theme::Role::warn);
     fbFader.onValueChanged = [this](int v) {
-      proc.engine().patch().d[135] = static_cast<uint8_t>(v);
+      proc.uiPatch().d[135] = static_cast<uint8_t>(v);
       commitCallback();
     };
     addAndMakeVisible(fbFader);
@@ -76,7 +76,7 @@ public:
              formatTranspose(static_cast<int>(std::lround(n * 48.0f)));
     };
     trspKnob.onNormChanged = [this](float n) {
-      proc.engine().patch().d[144] =
+      proc.uiPatch().d[144] =
           static_cast<uint8_t>(juce::jlimit(0, 48, static_cast<int>(std::lround(n * 48.0f))));
       commitCallback();
     };
@@ -117,11 +117,10 @@ public:
   }
 
   void syncFromProcessor() {
-    const auto &e = proc.engine();
-    const auto &p = e.patch();
-    const int maxAlgs = fmModeMaxAlg(e.mode());
+    const auto &p = proc.uiPatch();
+    const int maxAlgs = fmModeMaxAlg(proc.uiMode());
 
-    algView.setState(e.effectiveAlg(), maxAlgs, e.numOps(), p.d[155]);
+    algView.setState(proc.uiEffectiveAlg(), maxAlgs, proc.uiNumOps(), p.d[155]);
     fbFader.setValueSilent(p.d[135]);
     volFader.setValueSilent(static_cast<int>(std::lround(proc.getVolume() * 100.0f)));
     trspKnob.setNormSilent(static_cast<float>(p.d[144]) / 48.0f);
@@ -212,11 +211,10 @@ public:
   void paint(juce::Graphics &g) override {
     paintHardwareCardFrame(g, algCardRect, "ALGORITHM");
 
-    const auto &e = proc.engine();
     g.setColour(ThemeManager::get(Theme::Role::accent));
     g.setFont(BoutiqueLookAndFeel::monoFont(10.5f, true));
-    g.drawFittedText(juce::String(e.effectiveAlg() + 1).paddedLeft('0', 2) + "/" +
-                         juce::String(fmModeMaxAlg(e.mode())),
+    g.drawFittedText(juce::String(proc.uiEffectiveAlg() + 1).paddedLeft('0', 2) + "/" +
+                         juce::String(fmModeMaxAlg(proc.uiMode())),
                      algNumRect, juce::Justification::centred, 1);
 
     const auto bf = bottomCardRect.toFloat();
@@ -254,13 +252,13 @@ private:
   }
 
   void stepAlgorithm(int delta) {
-    const int mx = fmModeMaxAlg(proc.engine().mode());
-    int a = proc.engine().effectiveAlg() + delta;
+    const int mx = fmModeMaxAlg(proc.uiMode());
+    int a = proc.uiEffectiveAlg() + delta;
     if (a < 0)
       a = mx - 1;
     if (a >= mx)
       a = 0;
-    proc.engine().patch().d[134] = static_cast<uint8_t>(a);
+    proc.uiPatch().d[134] = static_cast<uint8_t>(a);
     sink.handleTelemetryEdited("Algorithm: " + juce::String(a + 1) + "/" +
                                juce::String(mx));
     commitCallback();
@@ -282,19 +280,19 @@ private:
 
     modPage.addAndMakeVisible(lfoWaveSwitch);
     lfoWaveSwitch.onSelectionChanged = [this](int idx) {
-      proc.engine().patch().d[142] = static_cast<uint8_t>(idx);
+      proc.uiPatch().d[142] = static_cast<uint8_t>(idx);
       commitCallback();
     };
 
     modPage.addAndMakeVisible(oscSyncToggle);
     oscSyncToggle.onToggled = [this](bool on) {
-      proc.engine().patch().d[136] = on ? 1 : 0;
+      proc.uiPatch().d[136] = on ? 1 : 0;
       commitCallback();
     };
 
     modPage.addAndMakeVisible(lfoSyncToggle);
     lfoSyncToggle.onToggled = [this](bool on) {
-      proc.engine().patch().d[141] = on ? 1 : 0;
+      proc.uiPatch().d[141] = on ? 1 : 0;
       commitCallback();
     };
 
@@ -311,7 +309,7 @@ private:
           kLfoShort[i], kLfoFull[i], kLfoMax[i], kLfoDef[i]);
       lfoFaders[(size_t)i]->setTelemetrySink(&sink);
       lfoFaders[(size_t)i]->onValueChanged = [this, i](int v) {
-        auto &p = proc.engine().patch();
+        auto &p = proc.uiPatch();
         if (i < 4)
           p.d[137 + i] = static_cast<uint8_t>(v);
         else
@@ -332,7 +330,7 @@ private:
           99, isLevel ? 50 : 99, isLevel, 50);
       pegFaders[(size_t)i]->setTelemetrySink(&sink);
       pegFaders[(size_t)i]->onValueChanged = [this, i](int v) {
-        proc.engine().patch().d[126 + i] = static_cast<uint8_t>(v);
+        proc.uiPatch().d[126 + i] = static_cast<uint8_t>(v);
         commitCallback();
       };
       modPage.addAndMakeVisible(*pegFaders[(size_t)i]);

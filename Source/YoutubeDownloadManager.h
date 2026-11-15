@@ -4,6 +4,7 @@
 #include <JuceHeader.h>
 #include <atomic>
 #include <functional>
+#include <map>
 #include <queue>
 
 class YoutubeDownloadManager : public juce::Thread {
@@ -433,6 +434,10 @@ private:
     args.add("--"); // end of options: URL is a positional only
     args.add(job.url);
 
+    std::map<juce::String, juce::Time> preExistingMp3s;
+    for (const auto &f : dlDir.findChildFiles(juce::File::findFiles, false, "*.mp3"))
+      preExistingMp3s[f.getFullPathName()] = f.getLastModificationTime();
+
     juce::ChildProcess process;
     if (!process.start(args, juce::ChildProcess::wantStdOut |
                                  juce::ChildProcess::wantStdErr)) {
@@ -448,67 +453,101 @@ private:
     juce::String detectedTitle;
     juce::File detectedFile;
 
+    auto consumeOutputChunk = [&](const juce::String &chunk) {
+      outputLog += chunk;
+      if (chunk.contains("%")) {
+        int pctIdx = chunk.indexOf("%");
+        int startIdx = juce::jmax(0, pctIdx - 5);
+        juce::String sub = chunk.substring(startIdx, pctIdx).trim();
+        float pct = (float)sub.getDoubleValue();
+        if (pct > 0.0f) {
+          setStatus("Downloading: " + juce::String((int)pct) + "%",
+                    0.3f + (pct * 0.005f), job);
+        }
+      }
+      if (chunk.contains("[ExtractAudio]")) {
+        setStatus("Converting to MP3 192k...", 0.90f, job);
+      }
+    };
+
     // Monitor process output
-    while (process.isRunning() && !threadShouldExit()) {
+    bool cancelled = false;
+    while (process.isRunning()) {
+      if (threadShouldExit()) {
+        cancelled = true;
+        process.kill();
+        process.waitForProcessToFinish(1000);
+        break;
+      }
       char buffer[512];
       int bytesRead = process.readProcessOutput(buffer, sizeof(buffer) - 1);
       if (bytesRead > 0) {
         buffer[bytesRead] = '\0';
-        juce::String chunk(buffer);
-        outputLog += chunk;
-
-        // Check for percentage progress
-        if (chunk.contains("%")) {
-          int pctIdx = chunk.indexOf("%");
-          int startIdx = juce::jmax(0, pctIdx - 5);
-          juce::String sub = chunk.substring(startIdx, pctIdx).trim();
-          float pct = (float)sub.getDoubleValue();
-          if (pct > 0.0f) {
-            setStatus("Downloading: " + juce::String((int)pct) + "%",
-                      0.3f + (pct * 0.005f), job);
-          }
-        }
-
-        if (chunk.contains("[ExtractAudio]")) {
-          setStatus("Converting to MP3 192k...", 0.90f, job);
-        }
+        consumeOutputChunk(juce::String(buffer));
       }
       wait(50);
     }
 
-    int exitCode = process.getExitCode();
-
-    // Scan target directory for the newest mp3 file matching the timestamp
-    auto files = dlDir.findChildFiles(juce::File::findFiles, false, "*.mp3");
-    juce::File newestFile;
-    juce::Time newestTime(0);
-
-    for (const auto &f : files) {
-      auto t = f.getLastModificationTime();
-      if (t > newestTime) {
-        newestTime = t;
-        newestFile = f;
+    if (!cancelled) {
+      for (;;) {
+        char buffer[512];
+        int bytesRead = process.readProcessOutput(buffer, sizeof(buffer) - 1);
+        if (bytesRead <= 0)
+          break;
+        buffer[bytesRead] = '\0';
+        consumeOutputChunk(juce::String(buffer));
       }
     }
 
-    bool success = (exitCode == 0 && newestFile.existsAsFile());
+    int exitCode = cancelled ? -1 : process.getExitCode();
+
+    // Scan target directory for the newly created or updated mp3 file
+    auto files = dlDir.findChildFiles(juce::File::findFiles, false, "*.mp3");
+    juce::File newestNewFile;
+    juce::Time newestNewTime(0);
+    juce::File newestAnyFile;
+    juce::Time newestAnyTime(0);
+
+    for (const auto &f : files) {
+      auto t = f.getLastModificationTime();
+      const auto path = f.getFullPathName();
+      auto it = preExistingMp3s.find(path);
+      if (it == preExistingMp3s.end() || t > it->second) {
+        if (t > newestNewTime) {
+          newestNewTime = t;
+          newestNewFile = f;
+        }
+      }
+      if (t > newestAnyTime) {
+        newestAnyTime = t;
+        newestAnyFile = f;
+      }
+    }
+    juce::File newestFile =
+        newestNewFile.existsAsFile() ? newestNewFile : newestAnyFile;
+
+    bool success = (!cancelled && exitCode == 0 && newestFile.existsAsFile());
     if (success) {
       detectedFile = newestFile;
       detectedTitle = newestFile.getFileNameWithoutExtension();
       setStatus("Download complete: " + detectedTitle, 1.0f, job);
     } else {
-      setStatus("Download failed (Exit code " + juce::String(exitCode) + ")",
+      setStatus(cancelled
+                    ? "Download cancelled"
+                    : "Download failed (Exit code " + juce::String(exitCode) + ")",
                 0.0f, job);
     }
 
-    juce::MessageManager::callAsync([job, success, detectedFile, detectedTitle,
-                                     outputLog]() {
-      if (job.onComplete) {
-        job.onComplete(success, detectedFile, detectedTitle,
-                       success ? ""
-                               : outputLog.substring(outputLog.length() - 300));
-      }
-    });
+    const int tailStart = juce::jmax(0, outputLog.length() - 300);
+    const juce::String errTail =
+        success ? juce::String() : outputLog.substring(tailStart);
+
+    juce::MessageManager::callAsync(
+        [job, success, detectedFile, detectedTitle, errTail]() {
+          if (job.onComplete) {
+            job.onComplete(success, detectedFile, detectedTitle, errTail);
+          }
+        });
   }
 
   mutable juce::CriticalSection configLock;

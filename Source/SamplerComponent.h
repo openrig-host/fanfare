@@ -225,11 +225,13 @@ private:
             juce::File::getSpecialLocation(juce::File::userHomeDirectory),
             "*.wav"
         );
+        juce::Component::SafePointer<SamplerSlotRow> safeThis(this);
         fileChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-            [this](const juce::FileChooser& fc) {
+            [safeThis](const juce::FileChooser& fc) {
+                if (safeThis == nullptr) return;
                 auto file = fc.getResult();
                 if (file.existsAsFile()) {
-                    loadWavFile(file);
+                    safeThis->loadWavFile(file);
                 }
             }
         );
@@ -364,9 +366,10 @@ private:
         m.addItem(6, "CC 18 (General 3)", true, slotRef.getSampler().getSlotConfig(idx).volumeCC == 18);
         m.addItem(7, "CC 19 (General 4)", true, slotRef.getSampler().getSlotConfig(idx).volumeCC == 19);
 
-        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&volCcBtn), [this](int result) {
-            if (result == 0) return;
-            auto cfg = slotRef.getSampler().getSlotConfig(idx);
+        juce::Component::SafePointer<SamplerSlotRow> safeThis(this);
+        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&volCcBtn), [safeThis](int result) {
+            if (safeThis == nullptr || result == 0) return;
+            auto cfg = safeThis->slotRef.getSampler().getSlotConfig(safeThis->idx);
             if (result == 1) cfg.volumeCC = -1;
             else if (result == 2) cfg.volumeCC = 7;
             else if (result == 3) cfg.volumeCC = 11;
@@ -374,8 +377,8 @@ private:
             else if (result == 5) cfg.volumeCC = 17;
             else if (result == 6) cfg.volumeCC = 18;
             else if (result == 7) cfg.volumeCC = 19;
-            slotRef.getSampler().setSlotConfig(idx, cfg);
-            updateUI();
+            safeThis->slotRef.getSampler().setSlotConfig(safeThis->idx, cfg);
+            safeThis->updateUI();
         });
     }
 
@@ -415,7 +418,7 @@ public:
         Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Danger);
         closeBtn.onClick = [this] { if (closeCallback) closeCallback(); };
         addAndMakeVisible(closeBtn);
-        Fanfare::styleHelpButton(helpBtn, "#sampler", "HAAALP! Open the 8-Pad Sampler section of the User's Manual");
+        Fanfare::styleHelpButton(helpBtn, "#sampler", "Open the 8-Pad Sampler section of the User's Manual");
         addAndMakeVisible(helpBtn);
 
         auto styleHeader = [this](juce::Label& lbl, const juce::String& text, juce::Justification just = juce::Justification::centred) {
@@ -545,7 +548,7 @@ private:
 
     juce::TextButton enableBtn;
     juce::TextButton closeBtn{"CLOSE"};
-    juce::TextButton helpBtn{"HAAALP!"};
+    juce::TextButton helpBtn{"Help"};
 
     juce::Label learnHeader, fileHeader, volHeader, pitchHeader, rootHeader, rangeHeader;
 

@@ -233,8 +233,9 @@ void MainComponent::showConfigOverlay() {
 
   configOverlay = std::make_unique<ConfigModalOverlay>(std::move(a));
   addAndMakeVisible(configOverlay.get());
-  configOverlay->centreWithSize(configOverlay->getWidth(),
-                                configOverlay->getHeight());
+  configOverlay->centreWithSize(
+      juce::jmin(getWidth() - 28, configOverlay->getWidth()),
+      juce::jmin(getHeight() - 28, configOverlay->getHeight()));
 }
 
 void MainComponent::showSetupBuilderOverlay() {
@@ -252,8 +253,9 @@ void MainComponent::showSetupBuilderOverlay() {
     setupBuilderOverlay = std::make_unique<SetupBuilderOverlay>(a);
     addAndMakeVisible(setupBuilderOverlay.get());
   }
-  setupBuilderOverlay->centreWithSize(setupBuilderOverlay->getWidth(),
-                                      setupBuilderOverlay->getHeight());
+  setupBuilderOverlay->centreWithSize(
+      juce::jmin(getWidth() - 28, setupBuilderOverlay->getWidth()),
+      juce::jmin(getHeight() - 28, setupBuilderOverlay->getHeight()));
   setupBuilderOverlay->toFront(true);
 }
 
@@ -266,7 +268,8 @@ void MainComponent::showResourceInspectorModal() {
         });
     addAndMakeVisible(resourceInspectorOverlay.get());
   }
-  resourceInspectorOverlay->centreWithSize(740, 520);
+  resourceInspectorOverlay->centreWithSize(juce::jmin(getWidth() - 28, 740),
+                                           juce::jmin(getHeight() - 28, 520));
   resourceInspectorOverlay->toFront(true);
 }
 
@@ -422,14 +425,44 @@ void MainComponent::updateMissingPluginsToastBounds() {
 
 bool MainComponent::keyPressed(const juce::KeyPress &key,
                                juce::Component *originatingComponent) {
+  if (key == juce::KeyPress::escapeKey) {
+    auto closeTopOverlay = [this]() -> bool {
+      if (welcomeOverlay) { welcomeOverlay.reset(); return true; }
+      if (stageRemoteOverlay) { stageRemoteOverlay.reset(); return true; }
+      if (rigDoctorOverlay) { rigDoctorOverlay.reset(); return true; }
+      if (engineTuningModal) { engineTuningModal.reset(); return true; }
+      if (resourceInspectorOverlay) { resourceInspectorOverlay.reset(); return true; }
+      if (setupBuilderOverlay) { setupBuilderOverlay.reset(); return true; }
+      if (configOverlay) { configOverlay.reset(); return true; }
+      if (mp3Overlay) { mp3Overlay.reset(); return true; }
+      if (samplerOverlay) {
+        samplerOverlayOpen.store(false, std::memory_order_release);
+        samplerOverlay.reset();
+        return true;
+      }
+      if (midiEffectsOverlay) { midiEffectsOverlay.reset(); return true; }
+      if (channelStripOverlay) { channelStripOverlay.reset(); return true; }
+      if (fmOverlay) { fmOverlay.reset(); return true; }
+      if (b3Overlay) { b3Overlay.reset(); return true; }
+      if (synthOverlay) { synthOverlay.reset(); return true; }
+      return false;
+    };
+    if (closeTopOverlay()) {
+      resized();
+      return true;
+    }
+  }
+
   if (dynamic_cast<juce::TextEditor *>(originatingComponent) != nullptr)
     return false;
 
   if (key == juce::KeyPress::spaceKey) {
     auto &sm = Fanfare::SetlistManager::getInstance();
     if (sm.hasNext()) {
+      auto setups = sm.getSetupsSnapshot();
       int idx = sm.getActiveIndex() + 1;
-      loadRigFromFile(sm.getSetups()[idx], idx);
+      if (idx >= 0 && idx < setups.size())
+        loadRigFromFile(setups[idx], idx);
     }
     return true;
   } else if (key.getModifiers().isCommandDown() &&

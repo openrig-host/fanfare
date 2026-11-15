@@ -652,7 +652,7 @@ void LibraryPanel::refreshAll() {
     case Context::Songs:   n = setupsList ? setupsList->getFileCount() : 0; unit = "songs"; break;
     case Context::Strips:  n = stripsList ? stripsList->getFileCount() : 0; unit = "strips"; break;
     case Context::Queue:   n = setsList ? setsList->getFileCount() : 0; unit = "maps"; break;
-    case Context::Setlist: n = Fanfare::SetlistManager::getInstance().getSetups().size(); unit = "in set"; break;
+    case Context::Setlist: n = Fanfare::SetlistManager::getInstance().getSetupsSnapshot().size(); unit = "in set"; break;
     default: break;
   }
   countLabel.setText(n >= 0 ? juce::String(n) + " " + unit : juce::String(), juce::dontSendNotification);

@@ -14,7 +14,7 @@ public:
         // Title
         titleLabel.setText("ARPEGGIATOR", juce::dontSendNotification);
         titleLabel.setFont(juce::FontOptions(20.0f, juce::Font::bold));
-        titleLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
+        titleLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
         titleLabel.setJustificationType(juce::Justification::centred);
         addAndMakeVisible(titleLabel);
 
@@ -95,7 +95,7 @@ public:
         bool useModern = (laf != nullptr && laf->useModernStyle);
 
         if (useModern) {
-            // Themed glassmorphic background
+            // Themed panel background
             g.fillAll(ThemeManager::get(Theme::Role::panel));
             g.setColour(ThemeManager::get(Theme::Role::border));
             g.drawRoundedRectangle(getLocalBounds().toFloat(), 8.0f, 1.5f);

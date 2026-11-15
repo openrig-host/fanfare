@@ -143,7 +143,7 @@ public:
     onSwitch.onToggled = [this, opPrefix](bool state) {
       if (!isOpActiveInMode())
         return;
-      auto &p = proc.engine().patch();
+      auto &p = proc.uiPatch();
       const int eOp = engineOpIndex();
       if (state)
         p.d[155] |= static_cast<uint8_t>(1u << eOp);
@@ -158,7 +158,7 @@ public:
     fixSwitch.onToggled = [this, opPrefix](bool fixedHz) {
       if (!isOpActiveInMode())
         return;
-      auto &p = proc.engine().patch();
+      auto &p = proc.uiPatch();
       const int off = patchByteOffset();
       p.d[off + 17] = fixedHz ? 1 : 0;
       commitCallback();
@@ -172,7 +172,7 @@ public:
     waveBtn.onWaveSelected = [this, opPrefix](int w) {
       if (!isOpActiveInMode())
         return;
-      auto &p = proc.engine().patch();
+      auto &p = proc.uiPatch();
       p.d[156 + engineOpIndex()] = static_cast<uint8_t>(w & 7);
       sink.handleTelemetryEdited(opPrefix + "Waveform: " + txWaveName(w));
       commitCallback();
@@ -188,7 +188,7 @@ public:
       return juce::String(static_cast<int>(std::lround(n * 31.0f)));
     };
     crsKnob.formatTelemetry = [this, opPrefix](float n) {
-      const auto &p = proc.engine().patch();
+      const auto &p = proc.uiPatch();
       const int off = patchByteOffset();
       const int c = static_cast<int>(std::lround(n * 31.0f));
       return opPrefix + "Coarse: " + juce::String(c) + "  (" +
@@ -197,7 +197,7 @@ public:
     crsKnob.onNormChanged = [this](float n) {
       if (!isOpActiveInMode())
         return;
-      proc.engine().patch().d[patchByteOffset() + 18] =
+      proc.uiPatch().d[patchByteOffset() + 18] =
           static_cast<uint8_t>(juce::jlimit(0, 31, static_cast<int>(std::lround(n * 31.0f))));
       commitCallback();
       repaint(freqReadoutRect);
@@ -208,7 +208,7 @@ public:
           .paddedLeft('0', 2);
     };
     fineKnob.formatTelemetry = [this, opPrefix](float n) {
-      const auto &p = proc.engine().patch();
+      const auto &p = proc.uiPatch();
       const int off = patchByteOffset();
       const int f = static_cast<int>(std::lround(n * 99.0f));
       return opPrefix + "Fine: " + juce::String(f) + "  (" +
@@ -217,7 +217,7 @@ public:
     fineKnob.onNormChanged = [this](float n) {
       if (!isOpActiveInMode())
         return;
-      proc.engine().patch().d[patchByteOffset() + 19] =
+      proc.uiPatch().d[patchByteOffset() + 19] =
           static_cast<uint8_t>(juce::jlimit(0, 99, static_cast<int>(std::lround(n * 99.0f))));
       commitCallback();
       repaint(freqReadoutRect);
@@ -233,7 +233,7 @@ public:
     detKnob.onNormChanged = [this](float n) {
       if (!isOpActiveInMode())
         return;
-      proc.engine().patch().d[patchByteOffset() + 20] =
+      proc.uiPatch().d[patchByteOffset() + 20] =
           static_cast<uint8_t>(juce::jlimit(0, 14, static_cast<int>(std::lround(n * 14.0f))));
       commitCallback();
     };
@@ -250,7 +250,7 @@ public:
       levelFaders[(size_t)i]->onValueChanged = [this, i](int v) {
         if (!isOpActiveInMode())
           return;
-        proc.engine().patch().d[patchByteOffset() + 4 + i] = static_cast<uint8_t>(v);
+        proc.uiPatch().d[patchByteOffset() + 4 + i] = static_cast<uint8_t>(v);
         commitCallback();
         repaint(envGraphRect);
       };
@@ -262,7 +262,7 @@ public:
       rateFaders[(size_t)i]->onValueChanged = [this, i](int v) {
         if (!isOpActiveInMode())
           return;
-        proc.engine().patch().d[patchByteOffset() + i] = static_cast<uint8_t>(v);
+        proc.uiPatch().d[patchByteOffset() + i] = static_cast<uint8_t>(v);
         commitCallback();
         repaint(envGraphRect);
       };
@@ -277,25 +277,25 @@ public:
     outFader.onValueChanged = [this](int v) {
       if (!isOpActiveInMode())
         return;
-      proc.engine().patch().d[patchByteOffset() + 16] = static_cast<uint8_t>(v);
+      proc.uiPatch().d[patchByteOffset() + 16] = static_cast<uint8_t>(v);
       commitCallback();
     };
     velFader.onValueChanged = [this](int v) {
       if (!isOpActiveInMode())
         return;
-      proc.engine().patch().d[patchByteOffset() + 15] = static_cast<uint8_t>(v);
+      proc.uiPatch().d[patchByteOffset() + 15] = static_cast<uint8_t>(v);
       commitCallback();
     };
     keyFader.onValueChanged = [this](int v) {
       if (!isOpActiveInMode())
         return;
-      proc.engine().patch().d[patchByteOffset() + 13] = static_cast<uint8_t>(v);
+      proc.uiPatch().d[patchByteOffset() + 13] = static_cast<uint8_t>(v);
       commitCallback();
     };
     modFader.onValueChanged = [this](int v) {
       if (!isOpActiveInMode())
         return;
-      proc.engine().patch().d[patchByteOffset() + 14] = static_cast<uint8_t>(v);
+      proc.uiPatch().d[patchByteOffset() + 14] = static_cast<uint8_t>(v);
       commitCallback();
     };
   }
@@ -317,16 +317,17 @@ public:
   }
 
   void syncFromProcessor() {
-    const auto &e = proc.engine();
-    const auto &p = e.patch();
+    const auto &p = proc.uiPatch();
     const bool active = isOpActiveInMode();
     const int eOp = engineOpIndex();
     const int off = patchByteOffset();
+    const int nOps = proc.uiNumOps();
+    const int effAlg = proc.uiEffectiveAlg();
 
     isCarrierRole =
-        active && ((e.numOps() == 6)
-                       ? FmCore6W::isAudioCarrier(e.effectiveAlg(), eOp)
-                       : FmCore4::isCarrier(e.effectiveAlg(), eOp));
+        active && ((nOps == 6)
+                       ? FmCore6W::isAudioCarrier(effAlg, eOp)
+                       : FmCore4::isCarrier(effAlg, eOp));
 
     const Theme::Role roleCol =
         isCarrierRole ? Theme::Role::foh : Theme::Role::iem;
@@ -455,7 +456,7 @@ public:
     }
 
     if (!freqReadoutRect.isEmpty()) {
-      const auto &p = proc.engine().patch();
+      const auto &p = proc.uiPatch();
       const int off = patchByteOffset();
       const juce::String freqTxt =
           formatOpFrequency(p.d[off + 17], p.d[off + 18], p.d[off + 19]);
@@ -485,16 +486,16 @@ public:
 
 private:
   bool isOpActiveInMode() const noexcept {
-    return dispOp <= proc.engine().numOps();
+    return dispOp <= proc.uiNumOps();
   }
 
   int engineOpIndex() const noexcept {
-    const int n = proc.engine().numOps();
+    const int n = proc.uiNumOps();
     return (dispOp <= n) ? (n - dispOp) : (6 - dispOp);
   }
 
   int patchByteOffset() const noexcept {
-    const int n = proc.engine().numOps();
+    const int n = proc.uiNumOps();
     if (dispOp <= n)
       return FmVoice::opOffset(n - dispOp, n);
     return (6 - dispOp) * 21;
@@ -527,7 +528,7 @@ private:
     g.setColour(ThemeManager::get(Theme::Role::border));
     g.drawRoundedRectangle(box, 2.5f, 0.8f);
 
-    const auto &p = proc.engine().patch();
+    const auto &p = proc.uiPatch();
     const int off = patchByteOffset();
     const auto yForLevel = [&](int lvl) {
       const float norm = juce::jlimit(0.0f, 1.0f, static_cast<float>(lvl) / 99.0f);

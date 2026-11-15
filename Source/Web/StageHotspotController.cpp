@@ -32,7 +32,7 @@ StageHotspotController::~StageHotspotController() {
         aliveToken->store(false, std::memory_order_release);
     signalThreadShouldExit();
     notify();
-    stopThread(-1);
+    stopThread(5000);
 
     std::function<void(bool, juce::String)> leftoverCb;
     {

@@ -25,6 +25,10 @@ public:
     startTimer(30);
   }
 
+  ~LoadingOverlay() override {
+    stopTimer();
+  }
+
   void resetProgress() {
     completedSteps = 0;
     totalSteps = 0;

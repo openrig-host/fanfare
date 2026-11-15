@@ -8,7 +8,7 @@
 		<title>Fanfare: Live Windows VST3 Host for Keyboard Players</title>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="description" content="Fanfare v1.60 (The 1984 Keyboard Rig Edition) is a dedicated Windows VST3 host for keyboard players who gig. Includes the built-in BLEEP-216 16-voice Juno-style polyphonic synthesizer (68 presets), CoplanDX 6-op/4-op DX7/TX81Z/DX100 FM synthesizer (558 presets), 11 dual-engine FM+Analog strip combos, LushReverb figure-8 tank reverb, Rig Doctor setup diagnostics &amp; surgical repair, global Controller Profiles, Save Version History, clean song changes, separate FOH and IEM mixes with per-strip IEM trim, Curve-Link EQ, built-in acoustic IRs, stereo/ping-pong/tape delay, dual-deck DJ player with broadcast auto-leveling, tablet HUD, and a panic button that works." />
+		<meta name="description" content="Fanfare v1.7 (Tonewheel &amp; Wavetable Edition) is a dedicated Windows VST3 host for keyboard players who gig. Includes the built-in Fanfare B3 91-Tonewheel Organ + Dual Leslie 122, BLEEP-216 16-voice Analog + 20-Bank Wavetable synthesizer (96 presets), CoplanDX 6-op/4-op DX7/TX81Z/DX100 FM synthesizer (558 presets), 11 dual-engine FM+Analog strip combos, LushReverb figure-8 tank reverb, Rig Doctor setup diagnostics &amp; surgical repair, global Controller Profiles, Save Version History, clean song changes, separate FOH and IEM mixes with per-strip IEM trim, Curve-Link EQ, built-in acoustic IRs, stereo/ping-pong/tape delay, dual-deck DJ player with broadcast auto-leveling, tablet HUD, and a panic button that works." />
 		<link rel="canonical" href="https://openrig-host.github.io/fanfare/" />
 		<link rel="icon" type="image/png" href="Fanfare_Icon.png" />
 		<meta property="og:site_name" content="Fanfare" />
@@ -258,8 +258,12 @@
 								<h2 class="major">Features</h2>
 								<div class="feature-grid">
 									<div>
-										<h3>BLEEP-216 Built-In Polysynth</h3>
-										<p>A 16-voice Juno/Jupiter-inspired analog-modeled synthesizer built directly into every channel strip &mdash; dual PolyBLEP oscillators + sub + noise, HPF, 12/24 dB resonant VCF, dual ADSRs, BBD Chorus I/II/I+II, stereo delay, <strong>LushReverb</strong> tank, onscreen keyboard, and <strong>68 stage-ready presets</strong> (from <em>Jump 1984 Brass</em>, <em>Take On Me Riff</em>, <em>Final Countdown</em>, and <em>Enyaesque</em> to 90s supersaws and 303 bass) with zero external VSTs required.</p>
+										<h3>Fanfare B3 Organ &amp; Dual Leslie 122</h3>
+										<p>A native 91-tonewheel organ in a vintage walnut &amp; bronze console: magnetic reluctance tonewheels, palladium key-click stagger, post-scanner Harmonic Percussion, LC Scanner V/C, 4x-oversampled AO-28 tube preamp, Dual Asynchronous Leslie 122 (with mono-to-stereo <code>SPREAD</code>, <code>WARMTH</code>, and <code>ROOM</code>), Studio Wood Room IR, Ping-Pong Delay, external <code>SAT</code>/<code>LESLIE</code> VST3 inserts, and hardware Drawbar CC Learn.</p>
+									</div>
+									<div>
+										<h3>BLEEP-216 Analog + Wavetable Synth</h3>
+										<p>A 16-voice Juno/Jupiter-inspired polyphonic synthesizer built directly into every strip &mdash; dual PolyBLEP DCOs + <strong>20 mipmapped 64-frame wavetable banks</strong> (morphable via Manual, LFO, or Envelope), Sub + Noise, HPF, 12/24 dB resonant VCF, dual ADSRs, BBD Chorus I/II/I+II, stereo delay, <strong>LushReverb</strong> tank, and <strong>96 stage-ready presets</strong> with zero external VSTs required.</p>
 									</div>
 									<div>
 										<h3>CoplanDX FM Synth &amp; 1984 Hybrid Rig</h3>
@@ -337,20 +341,22 @@
 								<h2 class="major">Screenshots</h2>
 								<div class="showcase-tabs">
 									<button type="button" class="tab-btn active" onclick="switchTab(0)">Full Live Rig</button>
-									<button type="button" class="tab-btn" onclick="switchTab(1)">BLEEP-216 Synth</button>
-									<button type="button" class="tab-btn" onclick="switchTab(2)">CoplanDX FM Synth</button>
-									<button type="button" class="tab-btn" onclick="switchTab(3)">Tablet Stage HUD</button>
-									<button type="button" class="tab-btn" onclick="switchTab(4)">HUD Touch Mixer</button>
-									<button type="button" class="tab-btn" onclick="switchTab(5)">Channel Strip DSP</button>
-									<button type="button" class="tab-btn" onclick="switchTab(6)">MIDI FX</button>
-									<button type="button" class="tab-btn" onclick="switchTab(7)">Sampler</button>
-									<button type="button" class="tab-btn" onclick="switchTab(8)">VST Editors</button>
-									<button type="button" class="tab-btn" onclick="switchTab(9)">CC Manager</button>
-									<button type="button" class="tab-btn" onclick="switchTab(10)">Break-Music Player</button>
+									<button type="button" class="tab-btn" onclick="switchTab(1)">Fanfare B3 Organ</button>
+									<button type="button" class="tab-btn" onclick="switchTab(2)">BLEEP-216 Synth</button>
+									<button type="button" class="tab-btn" onclick="switchTab(3)">CoplanDX FM Synth</button>
+									<button type="button" class="tab-btn" onclick="switchTab(4)">Tablet Stage HUD</button>
+									<button type="button" class="tab-btn" onclick="switchTab(5)">HUD Touch Mixer</button>
+									<button type="button" class="tab-btn" onclick="switchTab(6)">Channel Strip DSP</button>
+									<button type="button" class="tab-btn" onclick="switchTab(7)">MIDI FX</button>
+									<button type="button" class="tab-btn" onclick="switchTab(8)">Sampler</button>
+									<button type="button" class="tab-btn" onclick="switchTab(9)">VST Editors</button>
+									<button type="button" class="tab-btn" onclick="switchTab(10)">CC Manager</button>
+									<button type="button" class="tab-btn" onclick="switchTab(11)">Break-Music Player</button>
 								</div>
 								<div>
 									<img src="fanfare_v1_4_console.jpg" width="1024" height="581" decoding="async" class="showcase-img active" alt="Fanfare v1.60 Studio live mixer interface" />
-									<img src="bleep_216_synth.jpg" width="1024" height="594" loading="lazy" decoding="async" class="showcase-img" alt="Built-in BLEEP-216 16-voice polyphonic analog synthesizer with Roland Juno styling, 68 presets, and singing IR3109 VCF" />
+									<img src="fanfare_b3_organ.jpg" width="1024" height="560" loading="lazy" decoding="async" class="showcase-img" alt="Built-in Fanfare B3 91-Tonewheel Organ and Dual Leslie 122 rotary speaker console with Studio FX and external VST3 insert slots" />
+									<img src="bleep_216_wavetables.jpg" width="1024" height="539" loading="lazy" decoding="async" class="showcase-img" alt="Built-in BLEEP-216 16-voice polyphonic analog and 20-bank 64-frame wavetable synthesizer" />
 									<img src="coplandx_fm_synth.jpg" width="1024" height="590" loading="lazy" decoding="async" class="showcase-img" alt="Built-in CoplanDX 16-voice FM synthesizer with 5 hardware modes, 558 vintage presets, and real-time algorithm routing" />
 									<img src="tablet_stage_hud.png" width="966" height="471" loading="lazy" decoding="async" class="showcase-img" alt="Fanfare Tablet Stage HUD Songs view over Wi-Fi SoftAP" />
 									<img src="tablet_touch_mixer.png" width="471" height="966" loading="lazy" decoding="async" class="showcase-img portrait" alt="Fanfare mobile Touch Mixer with dual FOH and IEM faders" />
@@ -456,7 +462,8 @@
 			<script>
 				const captions = [
 					"Full Studio live mixer interface with Vertical Ribbon sidebar, Scene snapshots, dual FOH/IEM mixes, scrollable 24-strip rack, and peak VU metering.",
-					"Built-in BLEEP-216 16-voice polyphonic analog synthesizer on every strip: dual DCOs + Sub + Noise, 12/24 dB VCF with singing IR3109 resonance, dual ADSRs, BBD Chorus I/II/I+II, stereo delay, LushReverb tank, and 68 presets.",
+					"Built-in Fanfare B3 91-Tonewheel Organ and Dual Leslie 122 rotary speaker console with walnut/brushed-bronze UI, AO-28 tube preamp, Studio FX with ping-pong delay, external SAT/LESLIE VST3 insert slots, and toggleable 61-key waterfall manual.",
+					"Built-in BLEEP-216 16-voice analog + wavetable synthesizer on every strip: dual DCOs + 20 64-frame wavetable banks, Sub + Noise, 12/24 dB VCF with singing IR3109 resonance, dual ADSRs, BBD Chorus I/II/I+II, stereo delay, LushReverb tank, and 96 presets.",
 					"Built-in CoplanDX 16-voice FM synthesizer: DX7 (6-op), DX21/DX100 (4-op), TX81Z (8-waveform), and Dual Layer modes with 558 categorized vintage presets, algorithm diagram, and BBD FX.",
 					"Touchscreen Tablet Stage HUD running over Wi-Fi / SoftAP with color-coded song tags, favorites, Bright/Dark toggle, guarded Panic, and 3ms WebSocket sync.",
 					"Portrait mobile Touch Mixer in the Stage HUD: independent multi-touch gold FOH and cyan IEM faders per strip, Master faders, and live stereo VU meters.",

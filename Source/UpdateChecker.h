@@ -71,8 +71,13 @@ public:
       // Standard 3-part SemVer: 1.4.1 -> (1, 4), 1.5.0 -> (1, 5), 1.10.0 -> (1, 10)
       outMinor = parts[1].getIntValue();
     } else {
-      // 2-part tag: handle both "1.5" -> (1, 5) and decimal patch style "1.41" -> (1, 4)
-      if (parts[1].length() >= 2 && localMinor < 10)
+      // 2-part tag: handle both decimal patch style ("1.41" -> 1.4, "1.60" -> 1.6,
+      // "1.100" -> 1.10) and standard minor "1.10" when upgrading from 1.9+.
+      if (parts[1] == "10" && localMinor >= 9)
+        outMinor = 10;
+      else if (parts[1].length() >= 3 && localMinor < 10)
+        outMinor = parts[1].getIntValue() / 10;
+      else if (parts[1].length() >= 2 && localMinor < 10)
         outMinor = parts[1].substring(0, 1).getIntValue();
       else
         outMinor = parts[1].getIntValue();

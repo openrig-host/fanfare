@@ -110,7 +110,7 @@ public:
             if (!e.source.exists())
                 continue;
             juce::File dest = legacyBackupDir().getChildFile(e.destName);
-            tryCopy(e.source, dest);
+            tryCopyRecursive(e.source, dest);
         }
 
         // Touch the flag. We write regardless of copy success so we don't
@@ -124,17 +124,6 @@ private:
             dest.createDirectory();
             for (auto& child : juce::RangedDirectoryIterator(source, false, "*", juce::File::findFilesAndDirectories))
                 tryCopyRecursive(child.getFile(), dest.getChildFile(child.getFile().getFileName()));
-        } else if (source.existsAsFile()) {
-            if (!dest.existsAsFile())
-                source.copyFileTo(dest);
-        }
-    }
-
-    static void tryCopy(const juce::File& source, const juce::File& dest) {
-        if (source.isDirectory()) {
-            dest.createDirectory();
-            for (auto& child : juce::RangedDirectoryIterator(source, false, "*", juce::File::findFiles))
-                tryCopy(child.getFile(), dest.getChildFile(child.getFile().getFileName()));
         } else if (source.existsAsFile()) {
             if (!dest.existsAsFile())
                 source.copyFileTo(dest);

@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <cmath>
 #include "../SynthConstants.h"
+#include "WavetableBank.h"
 
 namespace FanfareSynth::Dsp {
 
@@ -10,7 +11,8 @@ enum OscWave : int {
   WaveSaw = 0,
   WavePulse = 1,
   WaveTriangle = 2,
-  WaveSawPulse = 3
+  WaveSawPulse = 3,
+  WaveWavetableBase = 4
 };
 
 enum SubMode : int {
@@ -77,25 +79,31 @@ struct DcoOscillator {
   };
 
   inline Output nextWithSub(double dt, int wave, double pulseWidth,
-                            int subMode, bool computeSub) noexcept {
+                            int subMode, bool computeSub,
+                            double wavePos = 0.5) noexcept {
     dt = juce::jlimit(1e-7, DspConfig::kMaxNyquistRatio, dt);
     const double t = phase;
 
     double mainOut = 0.0;
-    switch (wave) {
-    case WaveSaw:
-      mainOut = renderSaw(t, dt);
-      break;
-    case WavePulse:
-      mainOut = renderPulse(t, dt, pulseWidth);
-      break;
-    case WaveTriangle:
-      mainOut = renderTriangle(t, dt);
-      break;
-    case WaveSawPulse:
-    default:
-      mainOut = (renderSaw(t, dt) + renderPulse(t, dt, pulseWidth)) * 0.68;
-      break;
+    if (wave >= WaveWavetableBase) {
+      mainOut = WavetableBank::instance().sample(wave - WaveWavetableBase, t,
+                                                 dt, wavePos);
+    } else {
+      switch (wave) {
+      case WaveSaw:
+        mainOut = renderSaw(t, dt);
+        break;
+      case WavePulse:
+        mainOut = renderPulse(t, dt, pulseWidth);
+        break;
+      case WaveTriangle:
+        mainOut = renderTriangle(t, dt);
+        break;
+      case WaveSawPulse:
+      default:
+        mainOut = (renderSaw(t, dt) + renderPulse(t, dt, pulseWidth)) * 0.68;
+        break;
+      }
     }
 
     double subOut = 0.0;
@@ -124,8 +132,10 @@ struct DcoOscillator {
     return {mainOut, subOut};
   }
 
-  inline double nextMainOnly(double dt, int wave, double pulseWidth) noexcept {
-    return nextWithSub(dt, wave, pulseWidth, SubOct1Square, false).mainSample;
+  inline double nextMainOnly(double dt, int wave, double pulseWidth,
+                             double wavePos = 0.5) noexcept {
+    return nextWithSub(dt, wave, pulseWidth, SubOct1Square, false, wavePos)
+        .mainSample;
   }
 };
 

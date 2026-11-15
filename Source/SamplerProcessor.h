@@ -12,7 +12,9 @@ public:
                        double releaseTimeSecs,
                        double maxSampleLengthSeconds)
         : sourceSampleRate(reader.sampleRate),
-          length(juce::jmin((int)reader.lengthInSamples, (int)(maxSampleLengthSeconds * sourceSampleRate)))
+          length((int)juce::jmin<juce::int64>(
+              reader.lengthInSamples,
+              (juce::int64)(maxSampleLengthSeconds * sourceSampleRate)))
     {
         if (length > 0) {
             data.reset(new juce::AudioBuffer<float>(juce::jmin(2, (int)reader.numChannels), length));
@@ -72,7 +74,8 @@ public:
             
             const float safeStart = juce::jlimit(0.0f, 0.999f, s->startRatio.load());
             sourceSamplePosition = (double)safeStart * (double)juce::jmax(0, s->length - 1);
-            lgain = velocity * s->volume.load();
+            noteVelocity = velocity;
+            lgain = noteVelocity * s->volume.load();
             rgain = lgain;
             
             if (s->params.attack > 0.0001) {
@@ -112,21 +115,24 @@ public:
         const int safeLen = juce::jmin(sound->length, data.getNumSamples());
         const float safeStartRatio = juce::jlimit(0.0f, 0.999f, sound->startRatio.load());
         const float safeEndRatio = juce::jlimit(safeStartRatio + 0.001f, 1.0f, sound->endRatio.load());
-        const int endSample = juce::jlimit(1, safeLen, (int)(safeEndRatio * (float)safeLen));
+        const int startSampleInt = juce::jlimit(0, juce::jmax(0, safeLen - 2), (int)(safeStartRatio * (float)(safeLen - 1)));
+        const int endSample = juce::jlimit(startSampleInt + 1, safeLen, (int)(safeEndRatio * (float)safeLen));
+        const int loopLen = juce::jmax(1, endSample - startSampleInt);
+        const int loopXfade = (sound->isLooping.load() && !isReleasing) ? juce::jmin(128, loopLen / 4) : 0;
+        const float targetGain = noteVelocity * sound->volume.load();
         
         while (--numSamples >= 0) {
-            auto pos = (int)sourceSamplePosition;
-            if (pos >= endSample || pos >= safeLen) {
+            if (sourceSamplePosition >= (double)endSample || sourceSamplePosition >= (double)safeLen) {
                 if (sound->isLooping.load() && !isReleasing) {
-                    double startSamplePos = (double)safeStartRatio * (double)(safeLen - 1);
-                    sourceSamplePosition = juce::jlimit(0.0, (double)(safeLen - 1), startSamplePos);
-                    pos = (int)sourceSamplePosition;
+                    const double span = (double)loopLen;
+                    sourceSamplePosition -= std::floor((sourceSamplePosition - (double)startSampleInt) / span) * span;
+                    sourceSamplePosition = juce::jlimit((double)startSampleInt, (double)(safeLen - 1), sourceSamplePosition);
                 } else {
                     clearCurrentNote();
                     break;
                 }
             }
-            pos = juce::jlimit(0, safeLen - 1, pos);
+            int pos = juce::jlimit(0, safeLen - 1, (int)sourceSamplePosition);
             
             auto alpha = juce::jlimit(0.0f, 1.0f, (float)(sourceSamplePosition - pos));
             auto nextPos = pos + 1 < safeLen ? pos + 1 : pos;
@@ -148,7 +154,18 @@ public:
                 float s1_R = data.getSample(1, nextPos);
                 outR = s0_R + alpha * (s1_R - s0_R);
             }
+
+            if (loopXfade > 8 && pos >= endSample - loopXfade) {
+                const int offsetFromFade = pos - (endSample - loopXfade);
+                const float xAlpha = juce::jlimit(0.0f, 1.0f, (float)offsetFromFade / (float)loopXfade);
+                const int wrapPos = juce::jlimit(0, safeLen - 1, startSampleInt + offsetFromFade);
+                const float wrapL = data.getSample(0, wrapPos);
+                const float wrapR = (numChannels == 1) ? wrapL : data.getSample(1, wrapPos);
+                outL = outL * (1.0f - xAlpha) + wrapL * xAlpha;
+                outR = outR * (1.0f - xAlpha) + wrapR * xAlpha;
+            }
             
+            lgain += 0.005f * (targetGain - lgain);
             float currentGain = lgain * envelopeLevel;
             outL *= currentGain;
             outR *= currentGain;
@@ -182,6 +199,7 @@ public:
 private:
     double sourceSamplePosition = 0.0;
     double pitchRatio = 1.0;
+    float noteVelocity = 1.0f;
     float lgain = 0.0f, rgain = 0.0f;
     float envelopeLevel = 1.0f;
     float envelopeAttackStep = 0.01f;
@@ -212,7 +230,7 @@ public:
     void processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages) {
         if (!enabled.load()) {
             if (wasEnabled.exchange(false)) {
-                synth.allNotesOff(0, false);
+                synth.allNotesOff(0, true);
             }
             return;
         }
@@ -255,32 +273,53 @@ public:
     
     void setSlotConfig(int slotIdx, const SlotConfig& config) {
         if (slotIdx < 0 || slotIdx >= 8) return;
-        
-        juce::SpinLock::ScopedLockType sl(configLock);
-        
-        bool pathChanged = (configs[slotIdx].wavPath != config.wavPath);
-        configs[slotIdx] = config;
-        
-        if (pathChanged) {
-            reloadSound(slotIdx);
-        } else {
-            // Update existing sound parameters in real-time
-            if (auto* sound = sounds[slotIdx].get()) {
-                sound->volume.store(config.volume);
-                sound->pitchOffsetSemitones.store(config.pitchOffsetSemitones);
-                sound->rootNote.store(config.rootNote);
-                sound->startRatio.store(config.startRatio);
-                sound->endRatio.store(config.endRatio);
-                sound->isLooping.store(config.isLooping);
-                sound->volumeCC.store(config.volumeCC);
-                
-                // Update key range
-                juce::BigInteger keys;
-                int low = juce::jlimit(0, 127, juce::jmin(config.keyLow, config.keyHigh));
-                int high = juce::jlimit(0, 127, juce::jmax(config.keyLow, config.keyHigh));
-                keys.setRange(low, high - low + 1, true);
-                sound->midiNotesRange = keys;
+
+        bool pathChanged = false;
+        {
+            juce::SpinLock::ScopedLockType sl(configLock);
+            pathChanged = (configs[slotIdx].wavPath != config.wavPath);
+            if (!pathChanged) {
+                configs[slotIdx] = config;
+                applyParamsToSound(sounds[slotIdx].get(), config);
+                return;
             }
+        }
+
+        // Decode WAV file off-lock so real-time audio rendering never stalls on disk I/O
+        juce::ReferenceCountedObjectPtr<CustomSamplerSound> nextSound;
+        if (config.wavPath.isNotEmpty()) {
+            juce::File file(config.wavPath);
+            if (file.existsAsFile()) {
+                std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+                if (reader != nullptr) {
+                    nextSound = new CustomSamplerSound(
+                        "slot_" + juce::String(slotIdx),
+                        *reader,
+                        buildKeysMask(config.keyLow, config.keyHigh),
+                        config.rootNote,
+                        0.005,
+                        0.1,
+                        10.0
+                    );
+                    applyParamsToSound(nextSound.get(), config);
+                }
+            }
+        }
+
+        juce::ReferenceCountedObjectPtr<CustomSamplerSound> oldSound;
+        {
+            juce::SpinLock::ScopedLockType sl(configLock);
+            configs[slotIdx] = config;
+            oldSound = sounds[slotIdx];
+            if (oldSound != nullptr) {
+                for (int i = synth.getNumSounds() - 1; i >= 0; --i) {
+                    if (synth.getSound(i) == oldSound.get())
+                        synth.removeSound(i);
+                }
+            }
+            sounds[slotIdx] = nextSound;
+            if (nextSound != nullptr)
+                synth.addSound(nextSound.get());
         }
     }
     
@@ -293,48 +332,24 @@ public:
     std::atomic<bool> enabled{false};
 
 private:
-    void reloadSound(int slotIdx) {
-        if (sounds[slotIdx] != nullptr) {
-            for (int i = synth.getNumSounds() - 1; i >= 0; --i) {
-                if (synth.getSound(i) == sounds[slotIdx])
-                    synth.removeSound(i);
-            }
-            sounds[slotIdx] = nullptr;
-        }
-        
-        auto path = configs[slotIdx].wavPath;
-        if (path.isNotEmpty()) {
-            juce::File file(path);
-            if (file.existsAsFile()) {
-                std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
-                if (reader != nullptr) {
-                    juce::BigInteger keys;
-                    int low = juce::jlimit(0, 127, juce::jmin(configs[slotIdx].keyLow, configs[slotIdx].keyHigh));
-                    int high = juce::jlimit(0, 127, juce::jmax(configs[slotIdx].keyLow, configs[slotIdx].keyHigh));
-                    keys.setRange(low, high - low + 1, true);
-                    
-                    auto* newSound = new CustomSamplerSound(
-                        "slot_" + juce::String(slotIdx),
-                        *reader,
-                        keys,
-                        configs[slotIdx].rootNote,
-                        0.005,
-                        0.1,
-                        10.0
-                    );
-                    newSound->volume.store(configs[slotIdx].volume);
-                    newSound->pitchOffsetSemitones.store(configs[slotIdx].pitchOffsetSemitones);
-                    newSound->rootNote.store(configs[slotIdx].rootNote);
-                    newSound->startRatio.store(configs[slotIdx].startRatio);
-                    newSound->endRatio.store(configs[slotIdx].endRatio);
-                    newSound->isLooping.store(configs[slotIdx].isLooping);
-                    newSound->volumeCC.store(configs[slotIdx].volumeCC);
-                    
-                    sounds[slotIdx] = newSound;
-                    synth.addSound(newSound);
-                }
-            }
-        }
+    static juce::BigInteger buildKeysMask(int keyLow, int keyHigh) {
+        juce::BigInteger keys;
+        const int low = juce::jlimit(0, 127, juce::jmin(keyLow, keyHigh));
+        const int high = juce::jlimit(0, 127, juce::jmax(keyLow, keyHigh));
+        keys.setRange(low, high - low + 1, true);
+        return keys;
+    }
+
+    static void applyParamsToSound(CustomSamplerSound* sound, const SlotConfig& config) {
+        if (sound == nullptr) return;
+        sound->volume.store(config.volume);
+        sound->pitchOffsetSemitones.store(config.pitchOffsetSemitones);
+        sound->rootNote.store(config.rootNote);
+        sound->startRatio.store(config.startRatio);
+        sound->endRatio.store(config.endRatio);
+        sound->isLooping.store(config.isLooping);
+        sound->volumeCC.store(config.volumeCC);
+        sound->midiNotesRange = buildKeysMask(config.keyLow, config.keyHigh);
     }
 
     std::atomic<bool> wasEnabled{false};

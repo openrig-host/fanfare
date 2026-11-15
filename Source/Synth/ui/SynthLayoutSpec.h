@@ -231,13 +231,15 @@ inline bool verifyLayoutCompleteness() {
 
 inline bool isParamEffectivelyActive(int paramIdx,
                                      const FanfareSynthProcessor &proc) noexcept {
-  const auto hasPulseWave = [](int wave) { return wave == 1 || wave == 3; };
+  const auto hasModShapeWave = [](int wave) {
+    return wave == 1 || wave == 3 || wave >= 4;
+  };
   const bool o1Audible = proc.getParam(ParamId::o1Level) > 0.002f;
   const bool o2Audible = proc.getParam(ParamId::o2Level) > 0.002f;
   const int w1 = (int)std::lround(proc.getParam(ParamId::o1Wave));
   const int w2 = (int)std::lround(proc.getParam(ParamId::o2Wave));
   const bool anyPulseAudible =
-      (o1Audible && hasPulseWave(w1)) || (o2Audible && hasPulseWave(w2));
+      (o1Audible && hasModShapeWave(w1)) || (o2Audible && hasModShapeWave(w2));
   const int pwmSrc = (int)std::lround(proc.getParam(ParamId::pwmSource));
   const int vMode = (int)std::lround(proc.getParam(ParamId::voiceMode));
   const int uni = (int)std::lround(proc.getParam(ParamId::unison));

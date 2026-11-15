@@ -1,13 +1,14 @@
 #pragma once
 
-#include "MidiLearnBus.h"
-#include "RackSlot.h"
-#include <JuceHeader.h>
 #include "BoutiqueLookAndFeel.h"
 #include "ButtonRoles.h"
 #include "ControllerProfile.h"
 #include "HelpLauncher.h"
+#include "MidiLearnBus.h"
+#include "RackSlot.h"
 #include "ThemeManager.h"
+#include <JuceHeader.h>
+
 
 /**
     Detects parameter value changes on a plugin. Used by Quick Learn to
@@ -20,21 +21,24 @@ public:
 
   void audioProcessorParameterChanged(juce::AudioProcessor *processor,
                                       int parameterIndex, float) override {
-    juce::MessageManager::callAsync([safe = safeOwner, this, processor, parameterIndex] {
-      if (safe != nullptr && onParameterChanged)
-        onParameterChanged(processor, parameterIndex);
-    });
+    juce::MessageManager::callAsync(
+        [safe = safeOwner, this, processor, parameterIndex] {
+          if (safe != nullptr && onParameterChanged)
+            onParameterChanged(processor, parameterIndex);
+        });
   }
 
-  void audioProcessorChanged(juce::AudioProcessor *,
-                             const juce::AudioProcessorListener::ChangeDetails &) override {}
+  void audioProcessorChanged(
+      juce::AudioProcessor *,
+      const juce::AudioProcessorListener::ChangeDetails &) override {}
 };
 
 /**
     CC Assignment Manager.
-    Manual CC assignment PLUS arm-then-wiggle Learn (mirrors NoteRangeComponent),
-    for both plugin parameters and slot FOH/IEM faders. Min/max range editors,
-    duplicate/conflict detection, and a per-slot MIDI channel override.
+    Manual CC assignment PLUS arm-then-wiggle Learn (mirrors
+   NoteRangeComponent), for both plugin parameters and slot FOH/IEM faders.
+   Min/max range editors, duplicate/conflict detection, and a per-slot MIDI
+   channel override.
 
     Lifetime safety: Learn targets bind directly to the stable RackSlot via the
     MidiLearnBus; this component never holds itself into the bus except through
@@ -62,11 +66,14 @@ public:
     paramDetector.safeOwner = this;
     // --- Fader CC row ---
     addAndMakeVisible(fohLabel);
-    Fanfare::styleHelpButton(helpBtn, "#cc-assignments", "Open the CC Assignments & Inverse Drawbar section of the User's Manual");
+    Fanfare::styleHelpButton(helpBtn, "#cc-assignments",
+                             "Open the CC Assignments & Inverse Drawbar "
+                             "section of the User's Manual");
     addAndMakeVisible(helpBtn);
     fohLabel.setText("FOH CC:", juce::dontSendNotification);
     addAndMakeVisible(fohCCEditor);
-    fohCCEditor.setText(formatOptionalCC(slot.getFohCC()), juce::dontSendNotification);
+    fohCCEditor.setText(formatOptionalCC(slot.getFohCC()),
+                        juce::dontSendNotification);
     fohCCEditor.setInputRestrictions(3, "0123456789");
     fohCCEditor.onTextChange = [this] {
       slot.setFohCC(parseOptionalCC(fohCCEditor));
@@ -81,7 +88,8 @@ public:
     addAndMakeVisible(iemLabel);
     iemLabel.setText("IEM CC:", juce::dontSendNotification);
     addAndMakeVisible(iemCCEditor);
-    iemCCEditor.setText(formatOptionalCC(slot.getIemCC()), juce::dontSendNotification);
+    iemCCEditor.setText(formatOptionalCC(slot.getIemCC()),
+                        juce::dontSendNotification);
     iemCCEditor.setInputRestrictions(3, "0123456789");
     iemCCEditor.onTextChange = [this] {
       slot.setIemCC(parseOptionalCC(iemCCEditor));
@@ -97,7 +105,8 @@ public:
     muteLabel.setText("Mute:", juce::dontSendNotification);
     muteLabel.setTooltip("Mute toggle CC: press = mute, press again = unmute");
     addAndMakeVisible(muteCCEditor);
-    muteCCEditor.setText(formatOptionalCC(slot.getMuteCC()), juce::dontSendNotification);
+    muteCCEditor.setText(formatOptionalCC(slot.getMuteCC()),
+                         juce::dontSendNotification);
     muteCCEditor.setInputRestrictions(3, "0123456789");
     muteCCEditor.onTextChange = [this] {
       slot.setMuteCC(parseOptionalCC(muteCCEditor));
@@ -105,24 +114,28 @@ public:
     addAndMakeVisible(muteLearnBtn);
     muteLearnBtn.setButtonText("L");
     Fanfare::setButtonRole(muteLearnBtn, Fanfare::ButtonRole::Danger);
-    muteLearnBtn.setTooltip("Learn mute toggle CC (press = mute, press again = unmute)");
+    muteLearnBtn.setTooltip(
+        "Learn mute toggle CC (press = mute, press again = unmute)");
     muteLearnBtn.onClick = [this] { armMuteLearn(); };
 
     // --- Instrument swap row ---
     addAndMakeVisible(swapLabel);
     swapLabel.setText("Swap:", juce::dontSendNotification);
-    swapLabel.setTooltip("Instrument swap: one CC alternates which of the two plugins plays (both stay loaded)");
+    swapLabel.setTooltip("Instrument swap: one CC alternates which of the two "
+                         "plugins plays (both stay loaded)");
     addAndMakeVisible(swapACombo);
     swapACombo.setTooltip("First plugin of the swap pair");
     addAndMakeVisible(swapBCombo);
     swapBCombo.setTooltip("Second plugin of the swap pair");
     addAndMakeVisible(swapCCEditor);
     swapCCEditor.setInputRestrictions(3, "0123456789");
-    swapCCEditor.setTooltip("CC that toggles the swap (press = B plays, press again = A plays)");
+    swapCCEditor.setTooltip(
+        "CC that toggles the swap (press = B plays, press again = A plays)");
     addAndMakeVisible(swapLearnBtn);
     swapLearnBtn.setButtonText("L");
     Fanfare::setButtonRole(swapLearnBtn, Fanfare::ButtonRole::Primary);
-    swapLearnBtn.setTooltip("Learn instrument swap CC (press = B plays, press again = A plays)");
+    swapLearnBtn.setTooltip(
+        "Learn instrument swap CC (press = B plays, press again = A plays)");
     swapLearnBtn.onClick = [this] { armSwapLearn(); };
     refreshSwapCombos();
     swapACombo.onChange = [this] { applySwapBinding(); };
@@ -200,21 +213,24 @@ public:
     addAndMakeVisible(invBtn);
     invBtn.setButtonText("INV");
     Fanfare::setButtonRole(invBtn, Fanfare::ButtonRole::Foh);
-    invBtn.setTooltip("Invert CC direction (pull-down increases value, for B3 drawbars)");
+    invBtn.setTooltip(
+        "Invert CC direction (pull-down increases value, for B3 drawbars)");
     invBtn.setClickingTogglesState(true);
     invBtn.addListener(this);
 
     addAndMakeVisible(togBtn);
     togBtn.setButtonText("TOG");
     Fanfare::setButtonRole(togBtn, Fanfare::ButtonRole::Foh);
-    togBtn.setTooltip("Toggle mode: each press flips the parameter between Min and Max (press = on, press again = off)");
+    togBtn.setTooltip("Toggle mode: each press flips the parameter between Min "
+                      "and Max (press = on, press again = off)");
     togBtn.setClickingTogglesState(true);
     togBtn.addListener(this);
 
     // --- CC Passthrough controls ---
     addAndMakeVisible(passFromLabel);
     passFromLabel.setText("Pass:", juce::dontSendNotification);
-    passFromLabel.setTooltip("CC Passthrough: remap incoming CC to a different CC for plugin internal learn");
+    passFromLabel.setTooltip("CC Passthrough: remap incoming CC to a different "
+                             "CC for plugin internal learn");
     addAndMakeVisible(passFromEditor);
     passFromEditor.setInputRestrictions(3, "0123456789");
     passFromEditor.setTooltip("Incoming CC number");
@@ -228,21 +244,25 @@ public:
     addAndMakeVisible(passBtn);
     passBtn.setButtonText("PASS");
     Fanfare::setButtonRole(passBtn, Fanfare::ButtonRole::Standard);
-    passBtn.setTooltip("Add CC passthrough remap (for plugins with internal MIDI learn)");
+    passBtn.setTooltip(
+        "Add CC passthrough remap (for plugins with internal MIDI learn)");
     passBtn.addListener(this);
 
     addAndMakeVisible(ck88PresetBtn);
     ck88PresetBtn.setButtonText("PROFILE");
     Fanfare::setButtonRole(ck88PresetBtn, Fanfare::ButtonRole::Standard);
-    ck88PresetBtn.setTooltip("Allow every control in your controller profile on this strip "
-                             "(click). Right-click or press Edit to configure your controller's knobs once.");
+    ck88PresetBtn.setTooltip(
+        "Allow every control in your controller profile on this strip "
+        "(click). Right-click or press Edit to configure your controller's "
+        "knobs once.");
     ck88PresetBtn.addListener(this);
     ck88PresetBtn.addMouseListener(this, false);
 
     addAndMakeVisible(editProfileBtn);
     editProfileBtn.setButtonText("EDIT...");
     Fanfare::setButtonRole(editProfileBtn, Fanfare::ButtonRole::Subtle);
-    editProfileBtn.setTooltip("Define your controller's knobs, faders and pedals once (saved globally)");
+    editProfileBtn.setTooltip("Define your controller's knobs, faders and "
+                              "pedals once (saved globally)");
     editProfileBtn.onClick = [] { Fanfare::showControllerProfileEditor(); };
 
     // --- Quick Learn ---
@@ -250,7 +270,8 @@ public:
     quickLearnBtn.setButtonText("QUICK");
     Fanfare::setButtonRole(quickLearnBtn, Fanfare::ButtonRole::Foh);
     quickLearnBtn.setClickingTogglesState(true);
-    quickLearnBtn.setTooltip("Quick Learn: wiggle a CC then wiggle a plugin parameter (either order). Binds instantly.");
+    quickLearnBtn.setTooltip("Quick Learn: wiggle a CC then wiggle a plugin "
+                             "parameter (either order). Binds instantly.");
     quickLearnBtn.onClick = [this] {
       if (quickLearnBtn.getToggleState())
         armQuickLearn();
@@ -286,7 +307,8 @@ public:
     addAndMakeVisible(selTogBtn);
     selTogBtn.setButtonText("TOG");
     Fanfare::setButtonRole(selTogBtn, Fanfare::ButtonRole::Foh);
-    selTogBtn.setTooltip("Toggle latch mode on selected mapping (press = on, press again = off)");
+    selTogBtn.setTooltip("Toggle latch mode on selected mapping (press = on, "
+                         "press again = off)");
     selTogBtn.setClickingTogglesState(true);
     selTogBtn.onClick = [this] { toggleSelectedToggleMode(); };
 
@@ -295,20 +317,26 @@ public:
     Fanfare::setButtonRole(delBtn, Fanfare::ButtonRole::Danger);
     delBtn.onClick = [this] { deleteSelected(); };
 
-    const auto lblFont = ThemeManager::isStudio()
-                             ? BoutiqueLookAndFeel::uiFont(12.0f, true)
-                             : juce::Font(juce::FontOptions("Barlow Condensed", 12.0f, juce::Font::bold));
-    for (auto* lbl : { &fohLabel, &iemLabel, &muteLabel, &swapLabel, &chLabel,
-                       &minLabel, &maxLabel, &ccLabel, &passFromLabel, &passToLabel,
-                       &selMinLabel, &selMaxLabel }) {
+    const auto lblFont =
+        ThemeManager::isStudio()
+            ? BoutiqueLookAndFeel::uiFont(12.0f, true)
+            : juce::Font(juce::FontOptions("Barlow Condensed", 12.0f,
+                                           juce::Font::bold));
+    for (auto *lbl : {&fohLabel, &iemLabel, &muteLabel, &swapLabel, &chLabel,
+                      &minLabel, &maxLabel, &ccLabel, &passFromLabel,
+                      &passToLabel, &selMinLabel, &selMaxLabel}) {
       lbl->setFont(lblFont);
-      lbl->setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::engrave));
+      lbl->setColour(juce::Label::textColourId,
+                     ThemeManager::get(Theme::Role::engrave));
     }
-    fohLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::foh));
-    iemLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::iem));
+    fohLabel.setColour(juce::Label::textColourId,
+                       ThemeManager::get(Theme::Role::foh));
+    iemLabel.setColour(juce::Label::textColourId,
+                       ThemeManager::get(Theme::Role::iem));
 
     addAndMakeVisible(statusLabel);
-    statusLabel.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::warn));
+    statusLabel.setColour(juce::Label::textColourId,
+                          ThemeManager::get(Theme::Role::warn));
     statusLabel.setFont(BoutiqueLookAndFeel::uiFont(12.0f));
 
     updateMappingList();
@@ -369,7 +397,8 @@ public:
     if (auto *plugin = slot.getPluginInstance(chainIndex)) {
       auto &params = plugin->getParameters();
       if (paramIndex >= 0 && paramIndex < (int)params.size())
-        if (auto *withId = dynamic_cast<juce::AudioProcessorParameterWithID*>(params[paramIndex]))
+        if (auto *withId = dynamic_cast<juce::AudioProcessorParameterWithID *>(
+                params[paramIndex]))
           return withId->paramID;
     }
     return {};
@@ -491,7 +520,8 @@ public:
     }
     slot.setSwapPair(cc, a, b);
     statusLabel.setText("Swap bound: CC" + juce::String(cc) + " toggles " +
-                            slot.getPluginName(a) + " / " + slot.getPluginName(b),
+                            slot.getPluginName(a) + " / " +
+                            slot.getPluginName(b),
                         juce::dontSendNotification);
   }
 
@@ -516,7 +546,8 @@ public:
       });
     };
     LearnBus::getInstance().arm(t, cb);
-    statusLabel.setText("LEARNING: instrument swap", juce::dontSendNotification);
+    statusLabel.setText("LEARNING: instrument swap",
+                        juce::dontSendNotification);
   }
 
   void armNewParamLearn() {
@@ -554,14 +585,14 @@ public:
     t.parameterIndex = paramIdx;
 
     juce::Component::SafePointer<CCMappingComponent> safe(this);
-    std::function<void(int, int)> cb =
-        [s, chainIdx, paramIdx, paramId, mn, mx, inv, tog, safe](int cc, int) {
-          s->mapCCToParameter(cc, chainIdx, paramId, paramIdx, mn, mx, inv, tog);
-          juce::MessageManager::callAsync([safe, cc] {
-            if (safe)
-              safe->refreshAfterCapture(cc);
-          });
-        };
+    std::function<void(int, int)> cb = [s, chainIdx, paramIdx, paramId, mn, mx,
+                                        inv, tog, safe](int cc, int) {
+      s->mapCCToParameter(cc, chainIdx, paramId, paramIdx, mn, mx, inv, tog);
+      juce::MessageManager::callAsync([safe, cc] {
+        if (safe)
+          safe->refreshAfterCapture(cc);
+      });
+    };
     LearnBus::getInstance().arm(t, cb);
     statusLabel.setText("LEARNING: " + slot.getName() + " -> " + pname,
                         juce::dontSendNotification);
@@ -575,8 +606,8 @@ public:
     if (m.type == MappingItem::Passthrough)
       return;
     armParamLearn(m.mapping.chainIndex, m.mapping.parameterIndex,
-                  m.mapping.minValue, m.mapping.maxValue,
-                  m.mapping.invert, m.mapping.toggle);
+                  m.mapping.minValue, m.mapping.maxValue, m.mapping.invert,
+                  m.mapping.toggle);
   }
 
   // ---- Quick Learn ----
@@ -588,7 +619,8 @@ public:
     quickLearn.hasCC = false;
     quickLearn.hasParam = false;
 
-    // Attach parameter-change listeners to all plugins (ParamChangeDetector already dispatches via callAsync)
+    // Attach parameter-change listeners to all plugins (ParamChangeDetector
+    // already dispatches via callAsync)
     paramDetector.safeOwner = this;
     paramDetector.onParameterChanged = [this](juce::AudioProcessor *proc,
                                               int paramIdx) {
@@ -625,8 +657,9 @@ public:
     };
     LearnBus::getInstance().arm(t, cb);
 
-    statusLabel.setText("QUICK LEARN: wiggle a CC then a plugin knob (either order).",
-                        juce::dontSendNotification);
+    statusLabel.setText(
+        "QUICK LEARN: wiggle a CC then a plugin knob (either order).",
+        juce::dontSendNotification);
   }
 
   void disarmQuickLearn() {
@@ -651,7 +684,7 @@ public:
       quickLearn.hasCC = true;
       quickLearn.cc = cc;
       statusLabel.setText("QUICK LEARN: CC" + juce::String(cc) +
-                          " captured. Now move a plugin knob.",
+                              " captured. Now move a plugin knob.",
                           juce::dontSendNotification);
       // Re-arm the bus to stay in learn mode
       Fanfare::LearnTarget t;
@@ -697,7 +730,8 @@ public:
       quickLearn.paramIndex = paramIdx;
       quickLearn.paramId = paramId;
       quickLearn.paramName = pname;
-      statusLabel.setText("QUICK LEARN: " + pname + " captured. Now wiggle a CC.",
+      statusLabel.setText("QUICK LEARN: " + pname +
+                              " captured. Now wiggle a CC.",
                           juce::dontSendNotification);
       return;
     }
@@ -727,8 +761,8 @@ public:
                                                         : "Unknown";
     statusLabel.setText("QUICK LEARN bound: CC" + juce::String(cc) + " -> " +
                             slot.getPluginName(chainIdx) + " :" +
-                            boundParamName +
-                            (inv ? " [INV]" : "") + (tog ? " [TOG]" : ""),
+                            boundParamName + (inv ? " [INV]" : "") +
+                            (tog ? " [TOG]" : ""),
                         juce::dontSendNotification);
   }
 
@@ -743,7 +777,8 @@ public:
     slot.setCCInvert(m.cc, newState);
     m.mapping.invert = newState;
     mappingList.repaintRow(row);
-    statusLabel.setText("CC" + juce::String(m.cc) + (newState ? " inverted." : " normal."),
+    statusLabel.setText("CC" + juce::String(m.cc) +
+                            (newState ? " inverted." : " normal."),
                         juce::dontSendNotification);
   }
 
@@ -758,7 +793,8 @@ public:
     slot.setCCToggle(m.cc, newState);
     m.mapping.toggle = newState;
     mappingList.repaintRow(row);
-    statusLabel.setText("CC" + juce::String(m.cc) + (newState ? " toggle mode." : " direct mode."),
+    statusLabel.setText("CC" + juce::String(m.cc) +
+                            (newState ? " toggle mode." : " direct mode."),
                         juce::dontSendNotification);
   }
 
@@ -770,9 +806,11 @@ public:
     if (rowNumber < 0 || rowNumber >= (int)mappings.size())
       return;
     auto &m = mappings[rowNumber];
-    g.setColour(rowIsSelected ? ThemeManager::get(Theme::Role::accent).withAlpha(0.18f)
-                              : ((rowNumber % 2 == 0) ? ThemeManager::get(Theme::Role::sunken)
-                                                      : ThemeManager::get(Theme::Role::panelAlt)));
+    g.setColour(rowIsSelected
+                    ? ThemeManager::get(Theme::Role::accent).withAlpha(0.18f)
+                    : ((rowNumber % 2 == 0)
+                           ? ThemeManager::get(Theme::Role::sunken)
+                           : ThemeManager::get(Theme::Role::panelAlt)));
     g.fillRect(0, 0, width, height - 1);
 
     g.setColour(ThemeManager::get(Theme::Role::text));
@@ -785,8 +823,8 @@ public:
                           juce::String(m.outgoingCC).paddedLeft('0', 3) +
                           "  [PASSTHRU]";
       g.setColour(ThemeManager::get(Theme::Role::foh));
-      g.drawText(text, 8, 0, width - 12, height, juce::Justification::centredLeft,
-                 true);
+      g.drawText(text, 8, 0, width - 12, height,
+                 juce::Justification::centredLeft, true);
     } else {
       juce::String pluginName = slot.getPluginName(m.mapping.chainIndex);
       auto params = slot.getParameterNames(m.mapping.chainIndex);
@@ -799,13 +837,14 @@ public:
                           juce::String(m.mapping.maxValue, 2) + "]" +
                           (m.mapping.invert ? " [INV]" : "") +
                           (m.mapping.toggle ? " [TOG]" : "");
-      g.drawText(text, 8, 0, width - 12, height, juce::Justification::centredLeft,
-                 true);
+      g.drawText(text, 8, 0, width - 12, height,
+                 juce::Justification::centredLeft, true);
     }
   }
 
   void selectedRowsChanged(int lastRowSelected) override {
-    bool hasSel = (lastRowSelected >= 0 && lastRowSelected < (int)mappings.size());
+    bool hasSel =
+        (lastRowSelected >= 0 && lastRowSelected < (int)mappings.size());
     selMinEditor.setEnabled(hasSel);
     selMaxEditor.setEnabled(hasSel);
     selLearnBtn.setEnabled(hasSel);
@@ -840,7 +879,8 @@ public:
     int cc = ccTxt.isEmpty() ? -1 : ccTxt.getIntValue();
     int chainIdx = pluginSelector.getSelectedId() - 1;
     int paramIdx = paramSelector.getSelectedId() - 1;
-    auto params = (chainIdx >= 0) ? slot.getParameterNames(chainIdx) : juce::StringArray{};
+    auto params = (chainIdx >= 0) ? slot.getParameterNames(chainIdx)
+                                  : juce::StringArray{};
     if (cc < 0 || cc > 127 || chainIdx < 0 || paramIdx < 0 ||
         paramIdx >= params.size()) {
       statusLabel.setText("Select plugin, parameter, and a valid CC (0-127).",
@@ -858,8 +898,8 @@ public:
     ccEditor.setText("");
     invBtn.setToggleState(false, juce::dontSendNotification);
     togBtn.setToggleState(false, juce::dontSendNotification);
-    statusLabel.setText("Mapped CC" + juce::String(cc) +
-                            (inv ? " [INV]" : "") + (tog ? " [TOG]" : "") + ".",
+    statusLabel.setText("Mapped CC" + juce::String(cc) + (inv ? " [INV]" : "") +
+                            (tog ? " [TOG]" : "") + ".",
                         juce::dontSendNotification);
   }
 
@@ -879,7 +919,7 @@ public:
     passFromEditor.setText("");
     passToEditor.setText("");
     statusLabel.setText("Passthrough: CC" + juce::String(inCC) + " > CC" +
-                        juce::String(outCC) + ".",
+                            juce::String(outCC) + ".",
                         juce::dontSendNotification);
   }
 
@@ -893,9 +933,11 @@ public:
     for (int cc : ccs)
       slot.allowCC(cc);
     const auto profName = prof.getName();
-    const juce::String label = profName.isNotEmpty() ? profName : "Controller profile";
+    const juce::String label =
+        profName.isNotEmpty() ? profName : "Controller profile";
     statusLabel.setText(label + ": allowed " + juce::String((int)ccs.size()) +
-                            " controls on this strip (right-click Profile or press Edit to customize).",
+                            " controls on this strip (right-click Profile or "
+                            "press Edit to customize).",
                         juce::dontSendNotification);
   }
 
@@ -945,7 +987,7 @@ public:
       mappings.push_back(item);
     }
     // Passthrough mappings
-    auto &ptMap = slot.getCCPassthroughMap();
+    auto ptMap = slot.getCCPassthroughMap();
     for (const auto &pair : ptMap) {
       MappingItem item;
       item.type = MappingItem::Passthrough;
@@ -982,10 +1024,12 @@ public:
   }
 
   void paint(juce::Graphics &g) override {
-    const bool inCallOut = (findParentComponentOfClass<juce::CallOutBox>() != nullptr);
+    const bool inCallOut =
+        (findParentComponentOfClass<juce::CallOutBox>() != nullptr);
     Fanfare::ModalFrame::paintOverlayScrimAndPanel(
         g, getLocalBounds(), getLocalBounds(),
-        "CC ASSIGNMENT MANAGER // " + slot.getName().toUpperCase(), 40, !inCallOut);
+        "CC ASSIGNMENT MANAGER // " + slot.getName().toUpperCase(), 40,
+        !inCallOut);
   }
 
   void resized() override {
@@ -1002,7 +1046,8 @@ public:
                     &passFromLabel, &passToLabel})
       l->setJustificationType(juce::Justification::centredRight);
 
-    // ---- Row A: bus CCs - four balanced cells (FOH / IEM / MUTE / MIDI Ch) ----
+    // ---- Row A: bus CCs - four balanced cells (FOH / IEM / MUTE / MIDI Ch)
+    // ----
     {
       auto row = r.removeFromTop(rowH);
       int cw = (row.getWidth() - 3 * gap) / 4;
@@ -1038,7 +1083,8 @@ public:
     r.removeFromTop(8);
 
     // ---- Mapping list ----
-    auto listArea = r.removeFromTop(r.getHeight() - 8 - 4 * rowH - 4 * gap - 22);
+    auto listArea =
+        r.removeFromTop(r.getHeight() - 8 - 4 * rowH - 4 * gap - 22);
     mappingList.setBounds(listArea);
 
     r.removeFromTop(gap);
@@ -1156,8 +1202,8 @@ private:
   struct MappingItem {
     enum Type { Parameter, Passthrough };
     Type type = Parameter;
-    int cc;               // incoming CC (both types)
-    int outgoingCC = -1;  // for Passthrough only
+    int cc;                      // incoming CC (both types)
+    int outgoingCC = -1;         // for Passthrough only
     RackSlot::CCMapping mapping; // for Parameter only
   };
   std::vector<MappingItem> mappings;

@@ -118,7 +118,7 @@ public:
         Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Danger);
         closeBtn.onClick = [this] { if (closeCallback) closeCallback(); };
         addAndMakeVisible(closeBtn);
-        Fanfare::styleHelpButton(helpBtn, "#midi-effects", "HAAALP! Open the MIDI Effects & Harmonizer section of the User's Manual");
+        Fanfare::styleHelpButton(helpBtn, "#midi-effects", "Open the MIDI Effects & Harmonizer section of the User's Manual");
         addAndMakeVisible(helpBtn);
         setSize(620, 410);
     }
@@ -359,7 +359,7 @@ private:
     std::function<void()> closeCallback;
 
     juce::TextButton closeBtn{"CLOSE"};
-    juce::TextButton helpBtn{"HAAALP!"};
+    juce::TextButton helpBtn{"Help"};
 
     juce::Label transposeHeader, transposeValue;
     juce::Slider transposeSlider;

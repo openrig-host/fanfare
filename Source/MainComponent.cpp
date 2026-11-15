@@ -153,6 +153,7 @@ MainComponent::MainComponent() {
   }
   if constexpr (FanfareConstants::kPowerSchemeMgmtEnabled)
     configureWindowsPerformanceMode();
+  wlanScanGuard.suppressBackgroundScans();
 
   LOG_INFO(
       juce::String("Bisect build flags: mp3=") +
@@ -165,6 +166,7 @@ MainComponent::MainComponent() {
 #endif
   // Initialize MIDI collector with default rate
   midiCollector.reset(FanfareConstants::kDefaultSampleRate);
+  incomingMidiScratch.ensureSize(FanfareConstants::kMidiScratchBytes);
 
   // One-time, non-destructive migration of legacy scattered rig files into
   // the consolidated %APPDATA%/OpenRig library layout.
@@ -181,10 +183,23 @@ MainComponent::MainComponent() {
   engine.onBeforePluginDestroyed = [this](juce::AudioPluginInstance *pi) {
     if (pi == nullptr)
       return;
-    if (juce::MessageManager::getInstanceWithoutCreating() != nullptr &&
-        juce::MessageManager::getInstanceWithoutCreating()
-            ->isThisTheMessageThread()) {
-      closePluginWindowForInstance(pi);
+    if (auto *mm = juce::MessageManager::getInstanceWithoutCreating()) {
+      if (mm->isThisTheMessageThread() ||
+          mm->currentThreadHasLockedMessageManager()) {
+        closePluginWindowForInstance(pi);
+        return;
+      }
+      if (openPluginWindowCount.load(std::memory_order_acquire) <= 0)
+        return;
+      std::pair<MainComponent *, juce::AudioPluginInstance *> ctx{this, pi};
+      mm->callFunctionOnMessageThread(
+          [](void *raw) -> void * {
+            auto *p = static_cast<
+                std::pair<MainComponent *, juce::AudioPluginInstance *> *>(raw);
+            p->first->closePluginWindowForInstance(p->second);
+            return nullptr;
+          },
+          &ctx);
     }
   };
 
@@ -338,11 +353,17 @@ void MainComponent::onStartupSplashFinished() {
 }
 
 MainComponent::~MainComponent() {
+  if (stripWidthSavePending) {
+    stripWidthSavePending = false;
+    savePreferredStripWidth();
+  }
   if (menuBar)
     menuBar->setModel(nullptr);
   rackHScrollBar.removeListener(&rackScrollListener);
   if (webServer)
     webServer->stopServer();
+  YoutubeDownloadManager::getInstance().signalThreadShouldExit();
+  YoutubeDownloadManager::getInstance().stopThread(2000);
   removeKeyListener(this);
   stopTimer();
   updateChecker.stop();
@@ -373,6 +394,7 @@ MainComponent::~MainComponent() {
   setLookAndFeel(nullptr);
 
 #ifdef _WIN32
+  wlanScanGuard.restore();
   if (avrtModule != nullptr) {
     FreeLibrary(avrtModule);
     avrtModule = nullptr;
@@ -540,7 +562,10 @@ void MainComponent::logAudioGlitch(double actualMs, double expectedMs,
   // Batched: appends collect in memory and flush to disk at most once per
   // second (glitchMonitorTimer). During a storm this replaces ~13 file
   // opens/second with a single append - the message thread stays responsive.
-  pendingGlitchLogText += entry;
+  {
+    juce::ScopedLock sl(glitchLogLock);
+    pendingGlitchLogText += entry;
+  }
 }
 
 void MainComponent::logAudioNanSpike(int channel, int sampleIndex,
@@ -554,24 +579,27 @@ void MainComponent::logAudioNanSpike(int channel, int sampleIndex,
                        juce::String(sampleIndex) +
                        " Value: " + juce::String(badVal) + "\n";
 
-  pendingGlitchLogText += entry;
+  {
+    juce::ScopedLock sl(glitchLogLock);
+    pendingGlitchLogText += entry;
+  }
 }
 
 void MainComponent::flushGlitchLog() {
-  if (pendingGlitchLogText.isEmpty())
-    return;
+  juce::String batch;
+  {
+    juce::ScopedLock sl(glitchLogLock);
+    if (pendingGlitchLogText.isEmpty())
+      return;
+    batch = pendingGlitchLogText;
+    pendingGlitchLogText.clear();
+  }
   auto appData =
       juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
           .getChildFile("Fanfare");
   if (!appData.exists())
     appData.createDirectory();
   auto logFile = appData.getChildFile("audio_underrun_log.txt");
-  juce::String batch;
-  {
-    juce::ScopedLock sl(glitchLogLock);
-    batch = pendingGlitchLogText;
-    pendingGlitchLogText.clear();
-  }
   logFile.appendText(batch);
 }
 
@@ -590,7 +618,7 @@ void MainComponent::audioDeviceIOCallbackWithContext(
         (engine.getCurrentSampleRate() > 0.0 ? engine.getCurrentSampleRate()
                                              : 44100.0) *
         1000.0;
-    if (expectedMs > 0.0 && elapsedMs > expectedMs * 2.2) {
+    if (expectedMs > 0.0 && elapsedMs > expectedMs * FanfareConstants::kLateCallbackRatio) {
       const juce::int64 suppressUntil =
           suppressGlitchUntilTicks.load(std::memory_order_relaxed);
       const juce::int64 applyEndTicks = engine.getLastRigApplyEndTicks();
@@ -611,12 +639,18 @@ void MainComponent::audioDeviceIOCallbackWithContext(
                  postApplySettle) {
         // Suppressed during brief device-open settle or active rig state swap
       } else {
-        audioUnderrunCount++;
-        lastGlitchStallMs.store(elapsedMs);
-        pendingGlitchActualMs.store(elapsedMs);
-        pendingGlitchExpectedMs.store(expectedMs);
-        pendingGlitchDurationMs.store(prevDurationMs);
-        hasPendingGlitchLog.store(true);
+        lateCallbackCount.fetch_add(1, std::memory_order_relaxed);
+        if (elapsedMs > maxCallbackIntervalMs.load(std::memory_order_relaxed))
+          maxCallbackIntervalMs.store(elapsedMs, std::memory_order_relaxed);
+
+        if (elapsedMs > expectedMs * FanfareConstants::kUnderrunCallbackRatio) {
+          audioUnderrunCount++;
+          lastGlitchStallMs.store(elapsedMs);
+          pendingGlitchActualMs.store(elapsedMs);
+          pendingGlitchExpectedMs.store(expectedMs);
+          pendingGlitchDurationMs.store(prevDurationMs);
+          hasPendingGlitchLog.store(true);
+        }
       }
     }
   }
@@ -626,20 +660,6 @@ void MainComponent::audioDeviceIOCallbackWithContext(
 #ifdef _WIN32
   FanfareLog::t_isRealtimeAudioThread = true;
   if constexpr (FanfareConstants::kCpuShelterEnabled) {
-    const DWORD_PTR wantedProcMask =
-        processShelterMask.load(std::memory_order_relaxed);
-    if (wantedProcMask != 0) {
-      DWORD_PTR procMask = 0, sysMask = 0;
-      if (GetProcessAffinityMask(GetCurrentProcess(), &procMask, &sysMask) &&
-          procMask != wantedProcMask) {
-        LOG_WARN("Process affinity was modified to 0x" +
-                 juce::String::toHexString((juce::int64)procMask) +
-                 " - re-applying process shelter mask 0x" +
-                 juce::String::toHexString((juce::int64)wantedProcMask));
-        SetProcessAffinityMask(GetCurrentProcess(), wantedProcMask);
-      }
-    }
-
     const DWORD_PTR wantedDspMask =
         dspThreadAffinityMask.load(std::memory_order_relaxed);
     thread_local DWORD lastConfiguredTid = 0;
@@ -663,60 +683,57 @@ void MainComponent::audioDeviceIOCallbackWithContext(
         DWORD taskIndex = 0;
         if (HANDLE h = avSetMmThreadFn("Pro Audio", &taskIndex)) {
           mmcssThreadId = ::GetCurrentThreadId();
-          LOG_INFO(
-              "Audio thread registered with MMCSS Pro Audio characteristics");
+          rtMmcssStatus.store(1, std::memory_order_relaxed);
         } else {
-          // Log the reason - MMCSS refusals were previously invisible.
           DWORD err = ::GetLastError();
           if (err ==
               1552 /* ERROR_INVALID_THREAD_ID: "already joining a task" */) {
-            // Not a failure: ASIO drivers like Yamaha Steinberg USB join their
-            // callback thread to the MMCSS Pro Audio task before we run, so the
-            // thread already has Pro Audio priority. Don't touch it.
             mmcssThreadId = ::GetCurrentThreadId();
-            LOG_INFO("Audio thread already MMCSS-registered by the audio "
-                     "driver - Pro Audio priority active");
+            rtMmcssStatus.store(2, std::memory_order_relaxed);
           } else {
-            // Fallback HIGHEST, not TIME_CRITICAL - TIME_CRITICAL can starve
-            // the OS when combined with the audio spin-wait barrier.
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
             mmcssThreadId = ::GetCurrentThreadId();
-            LOG_WARN("MMCSS unavailable (error " + juce::String((int)err) +
-                     ") - audio thread set to THREAD_PRIORITY_HIGHEST");
+            rtMmcssErrorCode.store((juce::uint32)err,
+                                   std::memory_order_relaxed);
+            rtMmcssStatus.store(3, std::memory_order_relaxed);
           }
         }
       } else {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
         mmcssThreadId = ::GetCurrentThreadId();
-        LOG_WARN("avrt.dll not loaded - audio thread set to "
-                 "THREAD_PRIORITY_HIGHEST");
+        rtMmcssStatus.store(4, std::memory_order_relaxed);
       }
     }
   } else {
-    // When MMCSS is disabled (avoiding Windows 80% MMCSS throttling),
-    // explicitly boost the ASIO callback thread to Kernel Priority 15 so it
-    // matches dspWorkers and can never be preempted by Priority 9-12 plugin/UI
-    // threads or DSP helpers.
     thread_local DWORD lastBoostedAudioTid = 0;
     const DWORD curAudioTid = ::GetCurrentThreadId();
     if (curAudioTid != lastBoostedAudioTid) {
       lastBoostedAudioTid = curAudioTid;
       SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
-      LOG_INFO("Audio callback thread boosted to THREAD_PRIORITY_TIME_CRITICAL "
-               "(Priority 15)");
+      rtMmcssStatus.store(5, std::memory_order_relaxed);
     }
   }
 #endif
 
-  juce::MidiBuffer incomingMidi;
-  midiCollector.removeNextBlockOfMessages(incomingMidi, numSamples);
+  incomingMidiScratch.clear();
+  midiCollector.removeNextBlockOfMessages(incomingMidiScratch, numSamples);
   engine.processAudio(inputChannelData, numInputChannels, outputChannelData,
-                      numOutputChannels, numSamples, incomingMidi);
+                      numOutputChannels, numSamples, incomingMidiScratch);
 
-  lastCallbackDurationMs.store(
-      juce::Time::highResolutionTicksToSeconds(
-          juce::Time::getHighResolutionTicks() - nowTicks) *
-      1000.0);
+  const double callbackMs = juce::Time::highResolutionTicksToSeconds(
+                                juce::Time::getHighResolutionTicks() - nowTicks) *
+                            1000.0;
+  lastCallbackDurationMs.store(callbackMs, std::memory_order_relaxed);
+
+  const double blockMs =
+      (double)numSamples /
+      (engine.getCurrentSampleRate() > 0.0 ? engine.getCurrentSampleRate()
+                                           : 44100.0) *
+      1000.0;
+  if (callbackMs > blockMs * FanfareConstants::kHeavyCallbackLoad)
+    heavyCallbackCount.fetch_add(1, std::memory_order_relaxed);
+  if (callbackMs > maxCallbackDurationMs.load(std::memory_order_relaxed))
+    maxCallbackDurationMs.store(callbackMs, std::memory_order_relaxed);
 }
 
 void MainComponent::stripLegacyDirectSoundDeviceType() {
@@ -950,8 +967,14 @@ void MainComponent::checkAndRecoverAudioDevice() {
       (juce::int64)juce::Time::getMillisecondCounter();
   const bool topologyChanged =
       usbTopologyDirty.exchange(false, std::memory_order_acq_rel);
+  if (topologyChanged)
+    midiProbeUntilMs = nowCheckMs + FanfareConstants::kMidiHotplugProbeWindowMs;
 #ifdef _WIN32
-  const int winMmCount = (int)::midiInGetNumDevs();
+  // WinMM calls contend with composite USB ASIO drivers (measured: a single
+  // midiInGetNumDevs blocked for 65 ms), so the device count is only probed
+  // inside a short window after the OS reports a hardware change.
+  const bool probeWinMm = nowCheckMs < midiProbeUntilMs;
+  const int winMmCount = probeWinMm ? (int)::midiInGetNumDevs() : lastWinMmMidiInCount;
   const bool midiCountChanged = (winMmCount != lastWinMmMidiInCount);
 #else
   const bool midiCountChanged = false;
@@ -1404,7 +1427,7 @@ void MainComponent::applyEngineTuningSettings() {
 
   DWORD_PTR audioThreadMask = rtDspMask;
   DWORD_PTR primaryHelperMask = rtDspMask;
-  if (pCoreSlices.size() >= 2) {
+  if (engineTuningSettings.pCoresOnly && pCoreSlices.size() >= 2) {
     // Give the ASIO master callback thread the last (unsheltered, full)
     // physical P-core, and assign each DSP helper its own separate physical
     // P-core slice.
@@ -1511,15 +1534,6 @@ void MainComponent::resetAudioDevice() {
       inAudioRecoveryMode = false;
       audioRecoveryAttemptCount = 0;
     }
-  }
-  if (false) {
-    if (!device)
-      return;
-    auto setup = deviceManager.getAudioDeviceSetup();
-    deviceManager.closeAudioDevice();
-    deviceManager.initialise(setup.inputChannels.countNumberOfSetBits(),
-                             setup.outputChannels.countNumberOfSetBits(),
-                             nullptr, true, "", &setup);
   }
 }
 
@@ -2048,21 +2062,29 @@ void MainComponent::resized() {
   }
 
   if (channelStripOverlay)
-    channelStripOverlay->centreWithSize(980, 520);
+    channelStripOverlay->centreWithSize(juce::jmin(getWidth() - 28, 980),
+                                        juce::jmin(getHeight() - 28, 520));
   if (midiEffectsOverlay)
-    midiEffectsOverlay->centreWithSize(620, 410);
+    midiEffectsOverlay->centreWithSize(juce::jmin(getWidth() - 28, 620),
+                                       juce::jmin(getHeight() - 28, 410));
   if (samplerOverlay)
-    samplerOverlay->centreWithSize(720, 600);
+    samplerOverlay->centreWithSize(juce::jmin(getWidth() - 28, 720),
+                                   juce::jmin(getHeight() - 28, 600));
   if (synthOverlay)
     synthOverlay->updateForHostBounds(getLocalBounds());
   if (fmOverlay)
     fmOverlay->updateForHostBounds(getLocalBounds());
+  if (b3Overlay)
+    b3Overlay->updateForHostBounds(getLocalBounds());
   if (mp3Overlay)
-    mp3Overlay->centreWithSize(780, 580);
+    mp3Overlay->centreWithSize(juce::jmin(getWidth() - 28, 780),
+                               juce::jmin(getHeight() - 28, 580));
   if (setupBuilderOverlay)
-    setupBuilderOverlay->centreWithSize(400, 480);
+    setupBuilderOverlay->centreWithSize(juce::jmin(getWidth() - 28, 400),
+                                        juce::jmin(getHeight() - 28, 480));
   if (resourceInspectorOverlay)
-    resourceInspectorOverlay->centreWithSize(740, 520);
+    resourceInspectorOverlay->centreWithSize(juce::jmin(getWidth() - 28, 740),
+                                             juce::jmin(getHeight() - 28, 520));
   if (rigDoctorOverlay)
     rigDoctorOverlay->centreWithSize(juce::jmin(getWidth() - 28, 920),
                                      juce::jmin(getHeight() - 28, 620));
@@ -2070,8 +2092,9 @@ void MainComponent::resized() {
     engineTuningModal->centreWithSize(juce::jmin(getWidth() - 32, 640),
                                       juce::jmin(getHeight() - 32, 560));
   if (configOverlay)
-    configOverlay->centreWithSize(configOverlay->getWidth(),
-                                  configOverlay->getHeight());
+    configOverlay->centreWithSize(
+        juce::jmin(getWidth() - 28, configOverlay->getWidth()),
+        juce::jmin(getHeight() - 28, configOverlay->getHeight()));
   if (stageRemoteOverlay)
     stageRemoteOverlay->setBounds(getLocalBounds());
   if (welcomeOverlay)
@@ -2094,7 +2117,7 @@ void MainComponent::updateStripCollapseStates() {
     for (int c = 0; c < 3; ++c) {
       if (slot->getPluginInstance(c) != nullptr ||
           slot->isChainSlotMidiOut(c) || slot->isChainSlotSynth(c) ||
-          slot->isChainSlotFm(c)) {
+          slot->isChainSlotFm(c) || slot->isChainSlotB3(c)) {
         hasPlugins = true;
         break;
       }
@@ -2147,10 +2170,79 @@ void MainComponent::noteMidiStatus(const juce::MidiMessage &msg) {
   midiStatusText.swapWith(text);
 }
 
+void MainComponent::reassertProcessShelter() {
+#ifdef _WIN32
+  if constexpr (FanfareConstants::kCpuShelterEnabled) {
+    const DWORD_PTR wantedProcMask =
+        processShelterMask.load(std::memory_order_relaxed);
+    if (wantedProcMask == 0)
+      return;
+    DWORD_PTR procMask = 0, sysMask = 0;
+    if (GetProcessAffinityMask(GetCurrentProcess(), &procMask, &sysMask) &&
+        procMask != wantedProcMask) {
+      LOG_WARN("Process affinity was modified to 0x" +
+               juce::String::toHexString((juce::int64)procMask) +
+               " - re-applying process shelter mask 0x" +
+               juce::String::toHexString((juce::int64)wantedProcMask));
+      SetProcessAffinityMask(GetCurrentProcess(), wantedProcMask);
+    }
+  }
+#endif
+}
+
+void MainComponent::reportAudioJitter() {
+  const juce::int64 nowMs = (juce::int64)juce::Time::getMillisecondCounter();
+  if (nowMs - lastJitterReportMs < FanfareConstants::kJitterReportIntervalMs)
+    return;
+  lastJitterReportMs = nowMs;
+
+  const int late = lateCallbackCount.exchange(0, std::memory_order_relaxed);
+  const int heavy = heavyCallbackCount.exchange(0, std::memory_order_relaxed);
+  const double maxInterval =
+      maxCallbackIntervalMs.exchange(0.0, std::memory_order_relaxed);
+  const double maxDuration =
+      maxCallbackDurationMs.exchange(0.0, std::memory_order_relaxed);
+  if (late == 0 && heavy == 0)
+    return;
+
+  LOG_WARN("Audio timing (last " +
+           juce::String(FanfareConstants::kJitterReportIntervalMs / 1000) +
+           "s): late callbacks=" + juce::String(late) +
+           " (worst gap " + juce::String(maxInterval, 1) +
+           " ms), DSP-heavy callbacks=" + juce::String(heavy) +
+           " (worst callback " + juce::String(maxDuration, 2) + " ms)");
+}
+
 void MainComponent::timerCallback() {
+#ifdef _WIN32
+  if (const int mmcssCode =
+          rtMmcssStatus.exchange(0, std::memory_order_relaxed)) {
+    if (mmcssCode == 1)
+      LOG_INFO("Audio thread registered with MMCSS Pro Audio characteristics");
+    else if (mmcssCode == 2)
+      LOG_INFO("Audio thread already MMCSS-registered by the audio driver - "
+               "Pro Audio priority active");
+    else if (mmcssCode == 3)
+      LOG_WARN("MMCSS unavailable (error " +
+               juce::String((int)rtMmcssErrorCode.load(std::memory_order_relaxed)) +
+               ") - audio thread set to THREAD_PRIORITY_HIGHEST");
+    else if (mmcssCode == 4)
+      LOG_WARN("avrt.dll not loaded - audio thread set to THREAD_PRIORITY_HIGHEST");
+    else if (mmcssCode == 5)
+      LOG_INFO("Audio callback thread boosted to THREAD_PRIORITY_TIME_CRITICAL "
+               "(Priority 15)");
+  }
+#endif
+
   // Left status segment: last MIDI event, drained from the MIDI-thread stash.
   if (juce::String midiText = takeMidiStatusText(); midiText.isNotEmpty())
     midiMonitorLabel.setText(midiText, juce::dontSendNotification);
+
+  if (stripWidthSavePending && ++stripWidthSaveTicks >= 10) {
+    stripWidthSavePending = false;
+    stripWidthSaveTicks = 0;
+    savePreferredStripWidth();
+  }
 
   double cpu = deviceManager.getCpuUsage() * 100.0;
   thermalMonitor.setAudioCpuLoadPercent(cpu);
@@ -2165,6 +2257,8 @@ void MainComponent::timerCallback() {
   static int memUpdateTicks = 19;
   if (++memUpdateTicks >= 20) {
     memUpdateTicks = 0;
+    reassertProcessShelter();
+    reportAudioJitter();
 #ifdef _WIN32
     if constexpr (FanfareConstants::kPriorityElevationEnabled) {
       const DWORD curPri = GetPriorityClass(GetCurrentProcess());

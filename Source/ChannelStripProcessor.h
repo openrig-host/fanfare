@@ -611,7 +611,7 @@ public:
     convolution.prepare(spec);
 
     // Regenerate active built-in IR natively if sample rate changed
-    if (hasIR && isBuiltinPath(loadedPath) &&
+    if (hasIR.load(std::memory_order_acquire) && isBuiltinPath(loadedPath) &&
         std::abs(synthesizedSr - sr) > 1.0) {
       loadBuiltinPreset(loadedPath, true);
     }
@@ -636,14 +636,14 @@ public:
   bool loadIR(const juce::File &f) {
     if (!f.existsAsFile())
       return false;
-    if (f.getFullPathName() == loadedPath && hasIR)
+    if (f.getFullPathName() == loadedPath && hasIR.load(std::memory_order_acquire))
       return true;
     convolution.loadImpulseResponse(f, juce::dsp::Convolution::Stereo::yes,
                                     juce::dsp::Convolution::Trim::yes, 0,
                                     juce::dsp::Convolution::Normalise::yes);
     loadedPath = f.getFullPathName();
     synthesizedSr = 0.0;
-    hasIR = true;
+    hasIR.store(true, std::memory_order_release);
     return true;
   }
 
@@ -653,8 +653,8 @@ public:
     if (idx < 0)
       return false;
     const double targetSr = (sr > 8000.0) ? sr : 48000.0;
-    if (!forceReload && hasIR && loadedPath == presetId &&
-        std::abs(synthesizedSr - targetSr) <= 1.0) {
+    if (!forceReload && hasIR.load(std::memory_order_acquire) &&
+        loadedPath == presetId && std::abs(synthesizedSr - targetSr) <= 1.0) {
       return true;
     }
 
@@ -668,11 +668,11 @@ public:
                                     juce::dsp::Convolution::Normalise::no);
     loadedPath = presetId;
     synthesizedSr = targetSr;
-    hasIR = true;
+    hasIR.store(true, std::memory_order_release);
     return true;
   }
 
-  bool hasIrLoaded() const { return hasIR; }
+  bool hasIrLoaded() const { return hasIR.load(std::memory_order_acquire); }
   const juce::String &getLoadedPath() const { return loadedPath; }
 
   juce::String getDisplayName() const {
@@ -685,7 +685,7 @@ public:
   }
 
   void processBlock(juce::AudioBuffer<float> &buffer, bool enabled, float mix) {
-    if (!enabled || !hasIR || mix <= 0.001f)
+    if (!enabled || !hasIR.load(std::memory_order_acquire) || mix <= 0.001f)
       return;
     const int n = juce::jmin(buffer.getNumSamples(), wetBuffer.getNumSamples());
     const int chans = buffer.getNumChannels();
@@ -714,7 +714,7 @@ public:
   void clear() {
     loadedPath.clear();
     synthesizedSr = 0.0;
-    hasIR = false;
+    hasIR.store(false, std::memory_order_release);
     reset();
   }
 
@@ -1222,7 +1222,7 @@ private:
   double sr = 48000.0;
   double synthesizedSr = 0.0;
   int blockSize = 512;
-  bool hasIR = false;
+  std::atomic<bool> hasIR{false};
   juce::String loadedPath;
 };
 
@@ -1286,7 +1286,7 @@ public:
   std::atomic<bool> musetteEnabled{false};
   std::atomic<float> musetteCents{6.0f};
   std::atomic<int> musetteMode{
-      0}; // 0 = 2-Reed MM, 1 = 3-Reed MMM, 2 = TEMU Musette
+      0}; // 0 = 2-Reed MM, 1 = 3-Reed MMM, 2 = Wide Musette
   std::atomic<bool> musette3Reed{false};
   std::atomic<float> musetteMix{0.25f};
 

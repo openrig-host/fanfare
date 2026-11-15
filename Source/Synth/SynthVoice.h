@@ -73,6 +73,7 @@ struct SynthVoiceUnit {
   int voiceCardIndex = 0;
   int midiNote = -1;
   float velocity = 0.0f;
+  double velocityCurveGain = 1.0;
   double baseFreq = DspConfig::kReferencePitchHz;
   float detuneCents = 0.0f;
   float panL = 0.70710678f;
@@ -129,6 +130,8 @@ struct SynthVoiceUnit {
     panR = 0.70710678f;
     ageSeconds = 0.0;
     gliding = false;
+    velocity = 0.0f;
+    velocityCurveGain = 1.0;
     lastOutputLevel = 0.0;
     stealFadeRemaining = 0;
     stealFadeTotal = 1;

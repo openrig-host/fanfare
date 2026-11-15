@@ -30,7 +30,7 @@ private:
     juce::String sessionToken;
 
     juce::TextButton closeBtn{"CLOSE"};
-    juce::TextButton helpBtn{"HAAALP!"};
+    juce::TextButton helpBtn{"Help"};
     
     // Wi-Fi Section
     juce::Label wifiTitleLabel;

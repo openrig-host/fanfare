@@ -337,7 +337,7 @@ html, body {
 .btn-fullscreen { min-width: 92px; }
 .btn-fullscreen:active { transform: translateY(1px); }
 
-/* HAAALP! — the one warm button on the panel */
+/* Help button - warm accent button on the panel */
 .btn-haalp {
   background: linear-gradient(180deg, #e8a52e, #c9861a);
   border-color: rgba(0, 0, 0, 0.35);

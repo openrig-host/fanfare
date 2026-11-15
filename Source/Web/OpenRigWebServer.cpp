@@ -15,6 +15,7 @@
 #include "../FanfareEngine.h"
 #include "../MainComponent.h"
 #include "../SetlistManager.h"
+#include "../Version.h"
 #include "../YoutubeDownloadManager.h"
 #include <sstream>
 #include <random>
@@ -410,7 +411,7 @@ WebServer::~WebServer() {
 }
 
 bool WebServer::startServer(int port) {
-    if (serverRunning.load())
+    if (serverRunning.load() || wsOutboundThread.joinable())
         stopServer();
 
     lifetime = std::make_shared<LifetimeState>();
@@ -447,7 +448,14 @@ bool WebServer::startServer(int port) {
     }
 
     listenSocket = (void*)(uintptr_t)sock;
+    {
+        std::lock_guard<std::mutex> lock(wsOutMutex);
+        hasPendingMeter = false;
+        pendingMeterFrame.clear();
+        wsOutQueue.clear();
+    }
     serverRunning.store(true, std::memory_order_release);
+    wsOutboundThread = std::thread(&WebServer::wsOutboundLoop, this);
 
     startThread(juce::Thread::Priority::normal);
     startTimerHz(30); // 30fps real-time VU and telemetry stream
@@ -459,6 +467,7 @@ void WebServer::stopServer() {
     if (lifetime)
         lifetime->alive.store(false, std::memory_order_release);
     serverRunning.store(false, std::memory_order_release);
+    wsOutCv.notify_all();
     stopTimer();
     stopPluginMirror();
 
@@ -485,6 +494,9 @@ void WebServer::stopServer() {
             SOCKET_SHUTDOWN_BOTH(cs);
         }
     }
+
+    if (wsOutboundThread.joinable())
+        wsOutboundThread.join();
 
     // Join all per-connection worker threads before returning (and before WSACleanup in ~WebServer)
     std::vector<std::shared_ptr<ClientWorker>> workersToJoin;
@@ -635,6 +647,7 @@ void WebServer::handleClientConnection(void* socketHandle) {
             std::lock_guard<std::mutex> lock(clientSocketsMutex);
             activeHttpSockets.erase(socketHandle);
             activeWsClients.erase(socketHandle);
+            activeWsClientCount.store((int)activeWsClients.size(), std::memory_order_release);
             mirrorSubscribers.erase(socketHandle);
             mirrorSubscriberCount.store((int)mirrorSubscribers.size(), std::memory_order_release);
         }
@@ -665,12 +678,13 @@ void WebServer::handleClientConnection(void* socketHandle) {
 
         const juce::String secKey = extractHeaderValue(headers, "Sec-WebSocket-Key");
         if (secKey.isNotEmpty() && handleWebSocketHandshake(socketHandle, secKey)) {
-            setSocketTimeoutsMs(sock, 2000, 5000);
+            setSocketTimeoutsMs(sock, 2000, 500);
             setTcpNoDelay(sock); // low-latency frame delivery for the mirror stream
             {
                 std::lock_guard<std::mutex> lock(clientSocketsMutex);
                 activeHttpSockets.erase(socketHandle);
                 activeWsClients.insert(socketHandle);
+                activeWsClientCount.store((int)activeWsClients.size(), std::memory_order_release);
             }
             handleWebSocketSession(socketHandle);
         }
@@ -789,12 +803,16 @@ void WebServer::handleWebSocketSession(void* socketHandle) {
     SocketType sock = (SocketType)(uintptr_t)socketHandle;
 
     try {
-        // Send initial status packet upon connect
-        juce::DynamicObject::Ptr root = new juce::DynamicObject();
-        root->setProperty("type", "status");
-        root->setProperty("data", buildStatusJson());
-        juce::String initMsg = juce::JSON::toString(juce::var(root.get()));
-        broadcastWebSocket(initMsg);
+        // Send initial status packet to the newly connected client only
+        auto life = lifetime;
+        juce::MessageManager::callAsync([this, life, socketHandle]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            juce::DynamicObject::Ptr root = new juce::DynamicObject();
+            root->setProperty("type", "status");
+            root->setProperty("data", buildStatusJson());
+            sendWebSocketTextToClient(socketHandle, juce::JSON::toString(juce::var(root.get())));
+        });
 
         // Frame reader loop
         while (serverRunning.load(std::memory_order_acquire)) {
@@ -862,103 +880,111 @@ void WebServer::handleWebSocketSession(void* socketHandle) {
     }
 }
 
-void WebServer::broadcastWebSocket(const juce::String& jsonMessage) {
-    std::lock_guard<std::mutex> lock(clientSocketsMutex);
-    if (activeWsClients.empty()) return;
-
-    size_t payloadLen = (size_t)jsonMessage.getNumBytesAsUTF8();
+std::vector<uint8_t> WebServer::buildWsFrame(uint8_t finOpcode, const void* data, size_t size) {
     std::vector<uint8_t> frame;
-    frame.reserve(payloadLen + 10);
+    frame.reserve(size + 10);
+    frame.push_back(finOpcode);
 
-    frame.push_back(0x81); // FIN + Text opcode
-
-    if (payloadLen <= 125) {
-        frame.push_back((uint8_t)payloadLen);
-    } else if (payloadLen <= 65535) {
+    if (size <= 125) {
+        frame.push_back(static_cast<uint8_t>(size));
+    } else if (size <= 65535) {
         frame.push_back(126);
-        frame.push_back((uint8_t)((payloadLen >> 8) & 0xFF));
-        frame.push_back((uint8_t)(payloadLen & 0xFF));
+        frame.push_back(static_cast<uint8_t>((size >> 8) & 0xFF));
+        frame.push_back(static_cast<uint8_t>(size & 0xFF));
     } else {
         frame.push_back(127);
         for (int i = 7; i >= 0; --i)
-            frame.push_back((uint8_t)((payloadLen >> (i * 8)) & 0xFF));
+            frame.push_back(static_cast<uint8_t>((size >> (i * 8)) & 0xFF));
     }
 
-    const char* rawUtf8 = jsonMessage.toRawUTF8();
-    frame.insert(frame.end(), rawUtf8, rawUtf8 + payloadLen);
-
-    for (void* client : activeWsClients) {
-        SocketType cs = (SocketType)(uintptr_t)client;
-        sendAll(cs, frame.data(), frame.size());
+    if (data != nullptr && size > 0) {
+        const auto* bytes = static_cast<const uint8_t*>(data);
+        frame.insert(frame.end(), bytes, bytes + size);
     }
+    return frame;
+}
+
+void WebServer::enqueueWsFrame(std::vector<uint8_t> frame, void* singleClient, bool isMeter, bool mirrorOnly) {
+    if (!serverRunning.load(std::memory_order_acquire) || frame.empty())
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(wsOutMutex);
+        if (isMeter) {
+            pendingMeterFrame = std::move(frame);
+            hasPendingMeter = true;
+        } else {
+            while (wsOutQueue.size() >= 128)
+                wsOutQueue.pop_front();
+            OutboundWsItem item;
+            item.frame = std::move(frame);
+            item.singleClient = singleClient;
+            item.mirrorOnly = mirrorOnly;
+            wsOutQueue.push_back(std::move(item));
+        }
+    }
+    wsOutCv.notify_one();
+}
+
+void WebServer::wsOutboundLoop() {
+    for (;;) {
+        OutboundWsItem item;
+        {
+            std::unique_lock<std::mutex> lock(wsOutMutex);
+            wsOutCv.wait(lock, [this]() {
+                return !serverRunning.load(std::memory_order_acquire)
+                    || hasPendingMeter
+                    || !wsOutQueue.empty();
+            });
+            if (!serverRunning.load(std::memory_order_acquire))
+                break;
+
+            if (!wsOutQueue.empty()) {
+                item = std::move(wsOutQueue.front());
+                wsOutQueue.pop_front();
+            } else if (hasPendingMeter) {
+                item.frame = std::move(pendingMeterFrame);
+                hasPendingMeter = false;
+            }
+        }
+
+        if (item.frame.empty())
+            continue;
+
+        std::lock_guard<std::mutex> lock(clientSocketsMutex);
+        if (item.singleClient != nullptr) {
+            if (activeWsClients.count(item.singleClient) != 0) {
+                SocketType cs = (SocketType)(uintptr_t)item.singleClient;
+                sendAll(cs, item.frame.data(), item.frame.size());
+            }
+        } else {
+            const auto& targets = item.mirrorOnly ? mirrorSubscribers : activeWsClients;
+            for (void* client : targets) {
+                SocketType cs = (SocketType)(uintptr_t)client;
+                sendAll(cs, item.frame.data(), item.frame.size());
+            }
+        }
+    }
+}
+
+void WebServer::broadcastWebSocket(const juce::String& jsonMessage) {
+    if (activeWsClientCount.load(std::memory_order_acquire) == 0)
+        return;
+    const size_t payloadLen = static_cast<size_t>(jsonMessage.getNumBytesAsUTF8());
+    enqueueWsFrame(buildWsFrame(0x81, jsonMessage.toRawUTF8(), payloadLen), nullptr, false, false);
 }
 
 void WebServer::sendWebSocketTextToClient(void* socketHandle, const juce::String& jsonMessage) {
-    std::lock_guard<std::mutex> lock(clientSocketsMutex);
-    if (activeWsClients.count(socketHandle) == 0)
+    if (socketHandle == nullptr || activeWsClientCount.load(std::memory_order_acquire) == 0)
         return;
-
-    size_t payloadLen = (size_t)jsonMessage.getNumBytesAsUTF8();
-    std::vector<uint8_t> frame;
-    frame.reserve(payloadLen + 10);
-
-    frame.push_back(0x81); // FIN + Text opcode
-
-    if (payloadLen <= 125) {
-        frame.push_back((uint8_t)payloadLen);
-    } else if (payloadLen <= 65535) {
-        frame.push_back(126);
-        frame.push_back((uint8_t)((payloadLen >> 8) & 0xFF));
-        frame.push_back((uint8_t)(payloadLen & 0xFF));
-    } else {
-        frame.push_back(127);
-        for (int i = 7; i >= 0; --i)
-            frame.push_back((uint8_t)((payloadLen >> (i * 8)) & 0xFF));
-    }
-
-    const char* rawUtf8 = jsonMessage.toRawUTF8();
-    frame.insert(frame.end(), rawUtf8, rawUtf8 + payloadLen);
-
-    SocketType cs = (SocketType)(uintptr_t)socketHandle;
-    sendAll(cs, frame.data(), frame.size());
+    const size_t payloadLen = static_cast<size_t>(jsonMessage.getNumBytesAsUTF8());
+    enqueueWsFrame(buildWsFrame(0x81, jsonMessage.toRawUTF8(), payloadLen), socketHandle, false, false);
 }
 
 void WebServer::broadcastBinaryToMirrorSubscribers(const void* data, size_t size) {
-    if (data == nullptr || size == 0)
+    if (data == nullptr || size == 0 || mirrorSubscriberCount.load(std::memory_order_acquire) == 0)
         return;
-
-    // PROTOTYPE NOTE: frames are written synchronously under clientSocketsMutex
-    // (same pattern as broadcastWebSocket) so a socket can never be closed
-    // mid-send. A production deployment should move to per-client outbound
-    // queues so one slow tablet cannot stall the encoder thread.
-    std::lock_guard<std::mutex> lock(clientSocketsMutex);
-    if (mirrorSubscribers.empty())
-        return;
-
-    std::vector<uint8_t> frame;
-    frame.reserve(size + 10);
-
-    frame.push_back(0x82); // FIN + Binary opcode (JPEG payload)
-
-    if (size <= 125) {
-        frame.push_back((uint8_t)size);
-    } else if (size <= 65535) {
-        frame.push_back(126);
-        frame.push_back((uint8_t)((size >> 8) & 0xFF));
-        frame.push_back((uint8_t)(size & 0xFF));
-    } else {
-        frame.push_back(127);
-        for (int i = 7; i >= 0; --i)
-            frame.push_back((uint8_t)((size >> (i * 8)) & 0xFF));
-    }
-
-    const uint8_t* bytes = static_cast<const uint8_t*>(data);
-    frame.insert(frame.end(), bytes, bytes + size);
-
-    for (void* client : mirrorSubscribers) {
-        SocketType cs = (SocketType)(uintptr_t)client;
-        sendAll(cs, frame.data(), frame.size());
-    }
+    enqueueWsFrame(buildWsFrame(0x82, data, size), nullptr, false, true);
 }
 
 bool WebServer::hasMirrorSubscribers() {
@@ -1091,73 +1117,117 @@ void WebServer::processIncomingWsMessage(void* socketHandle, const juce::String&
         float val = 0.0f;
         if (!tryJsonFloat(json["value"], val, 0.0f, 1.0f))
             return;
-        if (fader == "masterFoh") engine.setFohMasterLevel(val);
-        else if (fader == "masterIem") engine.setIemMasterLevel(val);
+        juce::MessageManager::callAsync([this, life, fader, val]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            if (fader == "masterFoh") engine.setFohMasterLevel(val);
+            else if (fader == "masterIem") engine.setIemMasterLevel(val);
+        });
     } else if (type == "set_slot_fader") {
         int slotIdx = 0;
         float val = 0.0f;
-        if (!tryJsonInt(json["slot"], slotIdx, 0, engine.getNumSlots() - 1))
+        if (!tryJsonInt(json["slot"], slotIdx, 0, 128))
             return;
         if (!tryJsonFloat(json["value"], val, 0.0f, 1.0f))
             return;
         juce::String ch = json["channel"].toString();
-        if (auto* slot = engine.getSlot(slotIdx)) {
-            if (ch == "foh") slot->setFohLevel(val);
-            else if (ch == "iem") slot->setIemOffset(val * 2.0f);
-        }
+        juce::MessageManager::callAsync([this, life, slotIdx, ch, val]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            if (slotIdx < 0 || slotIdx >= engine.getNumSlots())
+                return;
+            if (auto* slot = engine.getSlot(slotIdx)) {
+                if (ch == "foh") slot->setFohLevel(val);
+                else if (ch == "iem") slot->setIemOffset(val * 2.0f);
+            }
+        });
     } else if (type == "set_slot_mute") {
         int slotIdx = 0;
-        if (!tryJsonInt(json["slot"], slotIdx, 0, engine.getNumSlots() - 1))
+        if (!tryJsonInt(json["slot"], slotIdx, 0, 128))
             return;
         juce::String ch = json["channel"].toString();
         bool enabled = static_cast<bool>(json["enabled"]);
-        if (auto* slot = engine.getSlot(slotIdx)) {
-            if (ch == "foh") slot->setFohEnabled(enabled);
-            else if (ch == "iem") slot->setIemEnabled(enabled);
-        }
+        juce::MessageManager::callAsync([this, life, slotIdx, ch, enabled]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            if (slotIdx < 0 || slotIdx >= engine.getNumSlots())
+                return;
+            if (auto* slot = engine.getSlot(slotIdx)) {
+                if (ch == "foh") slot->setFohEnabled(enabled);
+                else if (ch == "iem") slot->setIemEnabled(enabled);
+            }
+        });
     } else if (type == "set_notepad_tab") {
         int idx = 0;
         if (!tryJsonInt(json["index"], idx, 0, 15))
             return;
-        const int maxTab = std::max(0, (int)engine.getNotes().size() - 1);
-        engine.setActiveNoteTabIndex(juce::jlimit(0, maxTab, idx));
-        engine.broadcastNotesChanged();
+        juce::MessageManager::callAsync([this, life, idx]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            const int maxTab = std::max(0, (int)engine.getNotes().size() - 1);
+            engine.setActiveNoteTabIndex(juce::jlimit(0, maxTab, idx));
+            engine.broadcastNotesChanged();
+        });
     } else if (type == "set_notepad_font_size") {
         float sz = 20.0f;
         if (!tryJsonFloat(json["size"], sz, 10.0f, 72.0f))
             return;
-        engine.setNoteFontSize(sz);
-        engine.broadcastNotesChanged();
+        juce::MessageManager::callAsync([this, life, sz]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            engine.setNoteFontSize(sz);
+            engine.broadcastNotesChanged();
+        });
     } else if (type == "set_notepad_monospace") {
         bool mono = static_cast<bool>(json["isMonospace"]);
-        engine.setNoteIsMonospace(mono);
-        engine.broadcastNotesChanged();
+        juce::MessageManager::callAsync([this, life, mono]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            engine.setNoteIsMonospace(mono);
+            engine.broadcastNotesChanged();
+        });
     } else if (type == "update_notepad_content") {
         int idx = 0;
         if (!tryJsonInt(json["index"], idx, 0, 15))
             return;
         juce::String content = json["content"].toString();
-        auto notes = engine.getNotes();
-        if (idx >= 0 && idx < (int)notes.size()) {
-            notes[idx].content = content;
-            engine.setNotes(notes);
-            engine.broadcastNotesChanged();
-        }
+        juce::MessageManager::callAsync([this, life, idx, content]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            auto notes = engine.getNotes();
+            if (idx >= 0 && idx < (int)notes.size()) {
+                notes[idx].content = content;
+                engine.setNotes(notes);
+                engine.broadcastNotesChanged();
+            }
+        });
     } else if (type == "get_status") {
-        juce::DynamicObject::Ptr root = new juce::DynamicObject();
-        root->setProperty("type", "status");
-        root->setProperty("data", buildStatusJson());
-        broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
+        juce::MessageManager::callAsync([this, life, socketHandle]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            juce::DynamicObject::Ptr root = new juce::DynamicObject();
+            root->setProperty("type", "status");
+            root->setProperty("data", buildStatusJson());
+            sendWebSocketTextToClient(socketHandle, juce::JSON::toString(juce::var(root.get())));
+        });
     } else if (type == "get_notepad") {
-        juce::DynamicObject::Ptr root = new juce::DynamicObject();
-        root->setProperty("type", "notepad");
-        root->setProperty("data", buildNotepadJson());
-        broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
+        juce::MessageManager::callAsync([this, life, socketHandle]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            juce::DynamicObject::Ptr root = new juce::DynamicObject();
+            root->setProperty("type", "notepad");
+            root->setProperty("data", buildNotepadJson());
+            sendWebSocketTextToClient(socketHandle, juce::JSON::toString(juce::var(root.get())));
+        });
     } else if (type == "get_mixer") {
-        juce::DynamicObject::Ptr root = new juce::DynamicObject();
-        root->setProperty("type", "mixer");
-        root->setProperty("data", buildMixerJson());
-        broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
+        juce::MessageManager::callAsync([this, life, socketHandle]() {
+            if (!life || !life->alive.load(std::memory_order_acquire))
+                return;
+            juce::DynamicObject::Ptr root = new juce::DynamicObject();
+            root->setProperty("type", "mixer");
+            root->setProperty("data", buildMixerJson());
+            sendWebSocketTextToClient(socketHandle, juce::JSON::toString(juce::var(root.get())));
+        });
     } else if (type == "mirror_subscribe") {
         handleMirrorSubscribe(socketHandle);
     } else if (type == "mirror_unsubscribe") {
@@ -1175,11 +1245,14 @@ void WebServer::processIncomingWsMessage(void* socketHandle, const juce::String&
         root->setProperty("type", "pong");
         root->setProperty("time", json["time"]);
         if (json.hasProperty("cid")) root->setProperty("cid", json["cid"]);
-        broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
+        sendWebSocketTextToClient(socketHandle, juce::JSON::toString(juce::var(root.get())));
     }
 }
 
 void WebServer::timerCallback() {
+    if (activeWsClientCount.load(std::memory_order_acquire) == 0)
+        return;
+
     // 30Hz high-frequency VU and telemetry broadcast (calibrated logarithmic dB scale)
     juce::DynamicObject::Ptr root = new juce::DynamicObject();
     root->setProperty("type", "meter");
@@ -1198,7 +1271,9 @@ void WebServer::timerCallback() {
             root->setProperty("thermalText", mainComponent->getThermalBadgeText());
     }
 
-    broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
+    const juce::String meterJson = juce::JSON::toString(juce::var(root.get()));
+    const size_t payloadLen = static_cast<size_t>(meterJson.getNumBytesAsUTF8());
+    enqueueWsFrame(buildWsFrame(0x81, meterJson.toRawUTF8(), payloadLen), nullptr, true, false);
 }
 
 void WebServer::notifySceneChanged(int sceneIndex, const juce::String& sceneName) {
@@ -1572,6 +1647,7 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
 juce::var WebServer::buildStatusJson() {
     juce::DynamicObject::Ptr obj = new juce::DynamicObject();
     obj->setProperty("ok", true);
+    obj->setProperty("hostVersion", OPENRIG_VERSION_STRING);
 
     auto& sm = Fanfare::SetlistManager::getInstance();
     juce::String activeName = sm.getActiveFile().existsAsFile() ? sm.getActiveFile().getFileNameWithoutExtension() : "DEFAULT SONG";
@@ -1868,6 +1944,17 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
         cleanPath = "/index.html";
     }
 
+    juce::String staticExtraHeader = extraHeader;
+    if (!staticExtraHeader.containsIgnoreCase("Cache-Control:")) {
+        if (cleanPath.startsWithIgnoreCase("/assets-readonly/")
+            || cleanPath.equalsIgnoreCase("/Fanfare_Icon.png")) {
+            staticExtraHeader << "Cache-Control: public, max-age=86400\r\n";
+        } else if (cleanPath == "/style.css" || cleanPath == "/app.js"
+                   || cleanPath.equalsIgnoreCase("/manual.html")) {
+            staticExtraHeader << "Cache-Control: public, max-age=60\r\n";
+        }
+    }
+
     // Strict traversal & absolute-path rejection (C1 + M6)
     if (cleanPath.contains("..")
         || cleanPath.containsChar(':')
@@ -1902,7 +1989,7 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
                 && targetFile.isAChildOf(dir)) {
                 juce::MemoryBlock block;
                 if (targetFile.loadFileAsData(block)) {
-                    sendHttpDataResponse(socketHandle, 200, getMimeType(cleanPath), block.getData(), block.getSize(), extraHeader);
+                    sendHttpDataResponse(socketHandle, 200, getMimeType(cleanPath), block.getData(), block.getSize(), staticExtraHeader);
                     return true;
                 }
             }
@@ -1929,16 +2016,16 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
 
     // 2. Compiled-in HUD Production Fallback (never shadowed by docs/index.html!)
     if (cleanPath == "/index.html") {
-        sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", EmbeddedWebAssets::INDEX_HTML_DATA, EmbeddedWebAssets::INDEX_HTML_DATA_LEN, extraHeader);
+        sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", EmbeddedWebAssets::INDEX_HTML_DATA, EmbeddedWebAssets::INDEX_HTML_DATA_LEN, staticExtraHeader);
         return true;
     } else if (cleanPath == "/style.css") {
-        sendHttpDataResponse(socketHandle, 200, "text/css; charset=utf-8", EmbeddedWebAssets::STYLE_CSS_DATA, EmbeddedWebAssets::STYLE_CSS_DATA_LEN, extraHeader);
+        sendHttpDataResponse(socketHandle, 200, "text/css; charset=utf-8", EmbeddedWebAssets::STYLE_CSS_DATA, EmbeddedWebAssets::STYLE_CSS_DATA_LEN, staticExtraHeader);
         return true;
     } else if (cleanPath == "/app.js") {
-        sendHttpDataResponse(socketHandle, 200, "application/javascript; charset=utf-8", EmbeddedWebAssets::APP_JS_DATA, EmbeddedWebAssets::APP_JS_DATA_LEN, extraHeader);
+        sendHttpDataResponse(socketHandle, 200, "application/javascript; charset=utf-8", EmbeddedWebAssets::APP_JS_DATA, EmbeddedWebAssets::APP_JS_DATA_LEN, staticExtraHeader);
         return true;
     } else if (cleanPath == "/plugin_mirror.html") {
-        sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", EmbeddedWebAssets::PLUGIN_MIRROR_HTML_DATA, EmbeddedWebAssets::PLUGIN_MIRROR_HTML_DATA_LEN, extraHeader);
+        sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", EmbeddedWebAssets::PLUGIN_MIRROR_HTML_DATA, EmbeddedWebAssets::PLUGIN_MIRROR_HTML_DATA_LEN, staticExtraHeader);
         return true;
     }
 
@@ -1965,7 +2052,7 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
         if (!directManual.isSymbolicLink() && directManual.existsAsFile()) {
             juce::MemoryBlock block;
             if (directManual.loadFileAsData(block)) {
-                sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", block.getData(), block.getSize(), extraHeader);
+                sendHttpDataResponse(socketHandle, 200, "text/html; charset=utf-8", block.getData(), block.getSize(), staticExtraHeader);
                 return true;
             }
         }
@@ -1993,7 +2080,7 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
     };
     for (const auto& asset : kEmbeddedManualAssets) {
         if (cleanPath.equalsIgnoreCase(asset.path)) {
-            sendHttpDataResponse(socketHandle, 200, asset.mime, asset.data, asset.len, extraHeader);
+            sendHttpDataResponse(socketHandle, 200, asset.mime, asset.data, asset.len, staticExtraHeader);
             return true;
         }
     }
@@ -2053,7 +2140,8 @@ void WebServer::sendHttpDataResponse(void* socketHandle, int statusCode, const j
     ss << "HTTP/1.1 " << statusCode << " " << statusText << "\r\n";
     ss << "Content-Type: " << contentType.toStdString() << "\r\n";
     ss << "Content-Length: " << dataSize << "\r\n";
-    ss << "Cache-Control: no-store, no-cache, must-revalidate\r\n";
+    if (!extraHeader.containsIgnoreCase("Cache-Control:"))
+        ss << "Cache-Control: no-store, no-cache, must-revalidate\r\n";
     ss << "X-Content-Type-Options: nosniff\r\n";
     if (extraHeader.isNotEmpty())
         ss << extraHeader.toStdString();

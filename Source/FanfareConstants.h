@@ -92,6 +92,16 @@ constexpr int kMidiMaxCCValue = 127;
 // --- Reliability Configuration ---
 constexpr int kMaxPluginExceptionsBeforeBypass = 5;
 
+// --- Audio Callback Timing Telemetry ---
+// Ratios are (time between callbacks) / (block duration); a ratio of 1.0 is
+// a perfectly regular driver.
+constexpr double kLateCallbackRatio = 1.5;      // audibly late, below the XRUN threshold
+constexpr double kUnderrunCallbackRatio = 2.2;  // counted as an XRUN on the status bar
+constexpr double kHeavyCallbackLoad = 0.7;      // callback used >70% of its block: DSP-bound
+constexpr int kJitterReportIntervalMs = 30000;
+constexpr int kMidiScratchBytes = 4096;
+constexpr int kMidiHotplugProbeWindowMs = 8000; // keep polling WinMM briefly after a USB event
+
 // --- CK88 (Roland) Default CCs ---
 // Pre-configured CC numbers for the CK88's physical knobs/sliders so the
 // host can auto-allow them without requiring the user to discover each one.

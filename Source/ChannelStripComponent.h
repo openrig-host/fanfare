@@ -20,6 +20,7 @@ public:
 class GainReductionMeter : public juce::Component, public juce::Timer {
 public:
   GainReductionMeter(FanfareDSP::SimpleComp &c) : comp(c) { startTimer(30); }
+  ~GainReductionMeter() override { stopTimer(); }
 
   void timerCallback() override {
     float targetGr = comp.getGainReductionDb();
@@ -89,7 +90,7 @@ public:
 
     // Close & Help Buttons
     addAndMakeVisible(closeBtn);
-    Fanfare::styleHelpButton(helpBtn, "#channel-strip-dsp", "HAAALP! Open the Strip DSP section of the User's Manual");
+    Fanfare::styleHelpButton(helpBtn, "#channel-strip-dsp", "Open the Strip DSP section of the User's Manual");
     addAndMakeVisible(helpBtn);
     closeBtn.setButtonText("CLOSE");
     Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Danger);
@@ -819,9 +820,9 @@ public:
         musetteModeToggle.setTooltip("Musette Mode: 3-Reed MMM (+cents sharp & -4ct flat terzetti)");
         break;
       case 2:
-        musetteModeToggle.setButtonText("TEMU MUSETTE");
+        musetteModeToggle.setButtonText("WIDE MUSETTE");
         Fanfare::setButtonRole(musetteModeToggle, Fanfare::ButtonRole::Help);
-        musetteModeToggle.setTooltip("Musette Mode: TEMU Musette (wild bargain-bin extreme detuning for comedic wobble)");
+        musetteModeToggle.setTooltip("Musette Mode: Wide Musette (extreme 42ct multi-reed theatre/folk detune)");
         break;
       default:
         musetteModeToggle.setButtonText("2-REED MM");
@@ -1084,7 +1085,7 @@ private:
   RackSlot &slot;
   std::function<void()> onCloseRequest;
   juce::TextButton closeBtn;
-  juce::TextButton helpBtn{"HAAALP!"};
+  juce::TextButton helpBtn{"Help"};
   juce::GroupComponent gateGroup;
   juce::TextButton gateToggle;
   BigKnob gateThreshKnob{" dB"};

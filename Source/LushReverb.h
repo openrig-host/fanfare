@@ -29,6 +29,8 @@ public:
     StripMorph = 3
   };
 
+  LushReverb() { prepare(48000.0); }
+
   void prepare(double sampleRate) {
     sr = juce::jmax(8000.0, sampleRate);
     rateScale = sr / kReferenceRate;
@@ -81,6 +83,7 @@ public:
     tankFeedR = 0.0f;
     lfoPhase1 = 0.0;
     lfoPhase2 = 0.37;
+    paramsInitialized = false;
   }
 
   void processStereo(float *left, float *right, int numSamples, int character,
@@ -200,13 +203,38 @@ public:
 
     const double lfoInc1 = 0.83 / sr;
     const double lfoInc2 = 0.59 / sr;
-    const float decayDiff2 = juce::jlimit(0.25f, 0.52f, decay + 0.12f);
+    if (!paramsInitialized) {
+      curDecay = decay;
+      curDamp = damp;
+      curModAmount = modAmount;
+      paramsInitialized = true;
+    }
+
+    const float paramAlpha = 1.0f - mixSmoothCoef;
+    const double twoPi = juce::MathConstants<double>::twoPi;
+    double sin1 = std::sin(lfoPhase1 * twoPi);
+    double cos1 = std::cos(lfoPhase1 * twoPi);
+    double sin2 = std::sin(lfoPhase2 * twoPi);
+    double cos2 = std::cos(lfoPhase2 * twoPi);
+    const double dSin1 = std::sin(lfoInc1 * twoPi);
+    const double dCos1 = std::cos(lfoInc1 * twoPi);
+    const double dSin2 = std::sin(lfoInc2 * twoPi);
+    const double dCos2 = std::cos(lfoInc2 * twoPi);
+    const double modScale1 = 15.0 * rateScale;
+    const double modScale2 = 11.0 * rateScale;
 
     for (int i = 0; i < numSamples; ++i) {
       const float inL = left[i];
       const float inR = (right != nullptr) ? right[i] : inL;
       const float monoIn = 0.5f * (inL + inR);
       const float sideIn = 0.18f * (inL - inR);
+
+      curDecay += paramAlpha * (decay - curDecay);
+      curDamp += paramAlpha * (damp - curDamp);
+      curModAmount += paramAlpha * (modAmount - curModAmount);
+      const float decayDiff2 = juce::jlimit(0.25f, 0.52f, curDecay + 0.12f);
+      const double exc1Now = modScale1 * (double)curModAmount;
+      const double exc2Now = modScale2 * (double)curModAmount;
 
       // 1. Input low-cut + high-frequency bandwidth conditioning
       inHpState += hpCoef * (monoIn - inHpState);
@@ -223,46 +251,40 @@ public:
       diffused = inDiffusers[2].processAllpass(diffused, apInSamp[2], inDiff2);
       diffused = inDiffusers[3].processAllpass(diffused, apInSamp[3], inDiff2);
 
-      // Quadrature dual-rate LFOs for tank modulation
-      lfoPhase1 += lfoInc1;
-      if (lfoPhase1 >= 1.0)
-        lfoPhase1 -= 1.0;
-      lfoPhase2 += lfoInc2;
-      if (lfoPhase2 >= 1.0)
-        lfoPhase2 -= 1.0;
+      // Advance quadrature dual-rate LFOs via complex rotation phasors
+      const double nextSin1 = sin1 * dCos1 + cos1 * dSin1;
+      cos1 = cos1 * dCos1 - sin1 * dSin1;
+      sin1 = nextSin1;
 
-      const double ang1 = lfoPhase1 * juce::MathConstants<double>::twoPi;
-      const double ang2 = lfoPhase2 * juce::MathConstants<double>::twoPi;
-      const double sin1 = std::sin(ang1);
-      const double cos1 = std::cos(ang1);
-      const double sin2 = std::sin(ang2);
-      const double cos2 = std::cos(ang2);
+      const double nextSin2 = sin2 * dCos2 + cos2 * dSin2;
+      cos2 = cos2 * dCos2 - sin2 * dSin2;
+      sin2 = nextSin2;
 
       // 4A. Left half of Figure-8 tank (receives cross-coupled right tail)
-      float sigL = softLimit(diffused + sideIn + decay * tankFeedR);
-      sigL = modApL1.processModAllpass(sigL, modBaseL1 + exc1 * sin1, -0.70f);
+      float sigL = softLimit(diffused + sideIn + curDecay * tankFeedR);
+      sigL = modApL1.processModAllpass(sigL, modBaseL1 + exc1Now * sin1, -0.70f);
       delayL1.write(sigL);
       sigL = delayL1.readInt(dlyLenL1);
 
-      dampStateL = sigL * (1.0f - damp) + dampStateL * damp;
+      dampStateL = sigL * (1.0f - curDamp) + dampStateL * curDamp;
       dcStateL += dcCoef * (dampStateL - dcStateL);
-      sigL = (dampStateL - dcStateL) * decay;
+      sigL = (dampStateL - dcStateL) * curDecay;
 
-      sigL = modApL2.processModAllpass(sigL, modBaseL2 + exc2 * cos2, decayDiff2);
+      sigL = modApL2.processModAllpass(sigL, modBaseL2 + exc2Now * cos2, decayDiff2);
       delayL2.write(sigL);
       const float nextFeedL = delayL2.readInt(dlyLenL2);
 
       // 4B. Right half of Figure-8 tank (receives cross-coupled left tail)
-      float sigR = softLimit(diffused - sideIn + decay * tankFeedL);
-      sigR = modApR1.processModAllpass(sigR, modBaseR1 + exc1 * cos1, -0.70f);
+      float sigR = softLimit(diffused - sideIn + curDecay * tankFeedL);
+      sigR = modApR1.processModAllpass(sigR, modBaseR1 + exc1Now * cos1, -0.70f);
       delayR1.write(sigR);
       sigR = delayR1.readInt(dlyLenR1);
 
-      dampStateR = sigR * (1.0f - damp) + dampStateR * damp;
+      dampStateR = sigR * (1.0f - curDamp) + dampStateR * curDamp;
       dcStateR += dcCoef * (dampStateR - dcStateR);
-      sigR = (dampStateR - dcStateR) * decay;
+      sigR = (dampStateR - dcStateR) * curDecay;
 
-      sigR = modApR2.processModAllpass(sigR, modBaseR2 - exc2 * sin2, decayDiff2);
+      sigR = modApR2.processModAllpass(sigR, modBaseR2 - exc2Now * sin2, decayDiff2);
       delayR2.write(sigR);
       const float nextFeedR = delayR2.readInt(dlyLenR2);
 
@@ -285,12 +307,18 @@ public:
       currentWet = targetWet + mixSmoothCoef * (currentWet - targetWet);
       currentDry = targetDry + mixSmoothCoef * (currentDry - targetDry);
 
-      left[i] = inL * currentDry + wetL * currentWet;
-      if (right != nullptr)
+      if (right != nullptr) {
+        left[i] = inL * currentDry + wetL * currentWet;
         right[i] = inR * currentDry + wetR * currentWet;
-      else
+      } else {
         left[i] = inL * currentDry + 0.5f * (wetL + wetR) * currentWet;
+      }
     }
+
+    lfoPhase1 += lfoInc1 * (double)numSamples;
+    lfoPhase1 -= std::floor(lfoPhase1);
+    lfoPhase2 += lfoInc2 * (double)numSamples;
+    lfoPhase2 -= std::floor(lfoPhase2);
   }
 
   void processMono(float *mono, int numSamples, int character, float sizeNorm,
@@ -420,6 +448,11 @@ private:
   float currentDry = 1.0f;
   float targetDry = 1.0f;
   float mixSmoothCoef = 0.99f;
+
+  bool paramsInitialized = false;
+  float curDecay = 0.72f;
+  float curDamp = 0.32f;
+  float curModAmount = 1.0f;
 };
 
 } // namespace FanfareDSP

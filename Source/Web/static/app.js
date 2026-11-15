@@ -31,8 +31,10 @@
   // --- State ---
   let ws = null;
   let wsConnected = false;
-  let reconnectInterval = 2000;
+  let reconnectDelayMs = 1000;
+  let reconnectTimerId = null;
   let pingIntervalId = null;
+  let activeDragKey = null;
   const clientId = Math.random().toString(36).slice(2, 10);
 
   let authToken = '';
@@ -169,20 +171,45 @@
   const masterIemVal = document.getElementById('masterIemVal');
 
   // --- WebSocket Connection ---
+  function scheduleReconnect() {
+    if (reconnectTimerId !== null) return;
+    const delay = reconnectDelayMs;
+    reconnectDelayMs = Math.min(8000, Math.round(reconnectDelayMs * 1.5));
+    reconnectTimerId = setTimeout(() => {
+      reconnectTimerId = null;
+      connectWebSocket();
+    }, delay);
+  }
+
   function connectWebSocket() {
+    if (reconnectTimerId !== null) {
+      clearTimeout(reconnectTimerId);
+      reconnectTimerId = null;
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host || 'localhost:8080';
     const wsUrl = `${protocol}//${host}/ws` + (authToken ? `?token=${encodeURIComponent(authToken)}` : '');
+
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      try {
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.close();
+      } catch (e) {}
+    }
 
     try {
       ws = new WebSocket(wsUrl);
     } catch (e) {
       handleDisconnect();
+      scheduleReconnect();
       return;
     }
 
     ws.onopen = () => {
       wsConnected = true;
+      reconnectDelayMs = 1000;
       if (banner) banner.className = 'connection-banner connected';
       if (connectionText) connectionText.innerText = 'CONNECTED TO FANFARE';
       if (latencyIndicator) latencyIndicator.innerText = 'WS: CONNECTED';
@@ -213,12 +240,13 @@
 
     ws.onclose = () => {
       handleDisconnect();
-      setTimeout(connectWebSocket, reconnectInterval);
+      scheduleReconnect();
     };
   }
 
   function handleDisconnect() {
     wsConnected = false;
+    activeDragKey = null;
     if (banner) banner.className = 'connection-banner disconnected';
     if (connectionText) connectionText.innerText = 'DISCONNECTED \u00b7 RECONNECTING TO FANFARE...';
     if (latencyIndicator) latencyIndicator.innerText = 'WS: OFFLINE';
@@ -299,9 +327,13 @@
     if (!status) return;
     currentStatus = { ...currentStatus, ...status };
 
-    // 1. Current Song Hero Title
+    // 1. Current Song Hero Title & Host Version
     if (currentSongTitle) {
       currentSongTitle.innerText = currentStatus.activePreset || "DEFAULT SONG";
+    }
+    const hostVersionPill = document.getElementById('hostVersionPill');
+    if (hostVersionPill && currentStatus.hostVersion) {
+      hostVersionPill.innerText = `Fanfare v${currentStatus.hostVersion}`;
     }
 
     if (cpuVal) cpuVal.innerText = `${Math.round(currentStatus.cpuLoad || 0)}%`;
@@ -353,6 +385,7 @@
       } else {
         nextSongName.innerText = "- NO SETLIST LOADED -";
         upNextPill.className = "up-next-pill";
+        if (upNextLabel) upNextLabel.innerText = "STATUS:";
       }
     }
 
@@ -989,111 +1022,175 @@
   }
 
   // --- Mixer Handling ---
+  function bindTrackPointerHandlers(track) {
+    if (!track || track.dataset.bound === '1') return;
+    track.dataset.bound = '1';
+
+    const faderType = track.getAttribute('data-fader');
+    const slotIdx = track.getAttribute('data-slot');
+    const channelType = track.getAttribute('data-type');
+    const dragKey = faderType ? faderType : `slot:${slotIdx}:${channelType}`;
+
+    const handlePointer = (e) => {
+      const rect = track.getBoundingClientRect();
+      if (rect.height <= 0) return;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      const normalized = 1.0 - Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+
+      if (faderType) {
+        sendWsMessage({ type: 'set_fader', fader: faderType, value: normalized });
+        if (faderType === 'masterFoh' && masterFohFill && masterFohHandle && masterFohVal) {
+          masterFohFill.style.height = `${normalized * 100}%`;
+          masterFohHandle.style.bottom = `${normalized * 100}%`;
+          masterFohVal.innerText = normalized.toFixed(2);
+        } else if (faderType === 'masterIem' && masterIemFill && masterIemHandle && masterIemVal) {
+          masterIemFill.style.height = `${normalized * 100}%`;
+          masterIemHandle.style.bottom = `${normalized * 100}%`;
+          masterIemVal.innerText = normalized.toFixed(2);
+        }
+      } else if (slotIdx !== null) {
+        sendWsMessage({ type: 'set_slot_fader', slot: parseInt(slotIdx), channel: channelType, value: normalized });
+        const fill = track.querySelector('.fader-fill');
+        const handle = track.querySelector('.fader-handle');
+        const valLabel = track.parentElement.querySelector('.fader-val');
+        if (fill) fill.style.height = `${normalized * 100}%`;
+        if (handle) handle.style.bottom = `${normalized * 100}%`;
+        if (valLabel) valLabel.innerText = (channelType === 'iem') ? `${(normalized * 2.0).toFixed(2)}x` : normalized.toFixed(2);
+      }
+    };
+
+    const endDrag = () => {
+      if (activeDragKey === dragKey) activeDragKey = null;
+      track.onpointermove = null;
+      track.onpointerup = null;
+      track.onpointercancel = null;
+    };
+
+    track.onpointerdown = (e) => {
+      activeDragKey = dragKey;
+      try { track.setPointerCapture(e.pointerId); } catch (_) {}
+      handlePointer(e);
+      track.onpointermove = handlePointer;
+      track.onpointerup = endDrag;
+      track.onpointercancel = endDrag;
+    };
+  }
+
   function updateMixer(data) {
     if (!data) return;
     mixerData = { ...mixerData, ...data };
 
-    if (data.masterFoh !== undefined && masterFohFill && masterFohHandle && masterFohVal) {
+    if (activeDragKey !== 'masterFoh' && data.masterFoh !== undefined && masterFohFill && masterFohHandle && masterFohVal) {
       masterFohFill.style.height = `${data.masterFoh * 100}%`;
       masterFohHandle.style.bottom = `${data.masterFoh * 100}%`;
       masterFohVal.innerText = Number(data.masterFoh).toFixed(2);
     }
-    if (data.masterIem !== undefined && masterIemFill && masterIemHandle && masterIemVal) {
+    if (activeDragKey !== 'masterIem' && data.masterIem !== undefined && masterIemFill && masterIemHandle && masterIemVal) {
       masterIemFill.style.height = `${data.masterIem * 100}%`;
       masterIemHandle.style.bottom = `${data.masterIem * 100}%`;
       masterIemVal.innerText = Number(data.masterIem).toFixed(2);
     }
 
     if (mixerStrips) {
-      mixerStrips.innerHTML = '';
-      (mixerData.slots || []).forEach((slot) => {
-        const strip = document.createElement('div');
-        strip.className = 'channel-strip';
-        const safeSlotName = escapeHtml(slot.name);
-        const fohNorm = (slot.fohLevel !== undefined) ? slot.fohLevel : 0.8;
-        const iemOffsetVal = (slot.iemOffset !== undefined)
-          ? Number(slot.iemOffset)
-          : ((slot.iemLevel !== undefined) ? Number(slot.iemLevel) * 2.0 : 1.0);
-        const iemNorm = Math.max(0, Math.min(1, iemOffsetVal * 0.5));
-        strip.innerHTML = `
-          <span class="strip-name" title="${safeSlotName}">${safeSlotName}</span>
-          <div class="strip-faders-area">
-            <div class="fader-column">
-              <span class="fader-name">FOH</span>
-              <div class="touch-fader-track" data-slot="${slot.index}" data-type="foh">
-                <div class="fader-fill" style="height: ${fohNorm * 100}%;"></div>
-                <div class="fader-handle" style="bottom: ${fohNorm * 100}%;"></div>
+      const slots = mixerData.slots || [];
+      const existingStrips = mixerStrips.querySelectorAll('.channel-strip');
+      const canPatchInPlace = existingStrips.length === slots.length &&
+        slots.every((s, idx) => existingStrips[idx].dataset.slotIndex === String(s.index));
+
+      if (!canPatchInPlace) {
+        if (activeDragKey && activeDragKey.startsWith('slot:'))
+          return; // never tear down DOM under an active touch drag
+
+        mixerStrips.innerHTML = '';
+        slots.forEach((slot) => {
+          const strip = document.createElement('div');
+          strip.className = 'channel-strip';
+          strip.dataset.slotIndex = String(slot.index);
+          const safeSlotName = escapeHtml(slot.name);
+          const fohNorm = (slot.fohLevel !== undefined) ? slot.fohLevel : 0.8;
+          const iemOffsetVal = (slot.iemOffset !== undefined)
+            ? Number(slot.iemOffset)
+            : ((slot.iemLevel !== undefined) ? Number(slot.iemLevel) * 2.0 : 1.0);
+          const iemNorm = Math.max(0, Math.min(1, iemOffsetVal * 0.5));
+          strip.innerHTML = `
+            <span class="strip-name" title="${safeSlotName}">${safeSlotName}</span>
+            <div class="strip-faders-area">
+              <div class="fader-column">
+                <span class="fader-name">FOH</span>
+                <div class="touch-fader-track" data-slot="${slot.index}" data-type="foh">
+                  <div class="fader-fill" style="height: ${fohNorm * 100}%;"></div>
+                  <div class="fader-handle" style="bottom: ${fohNorm * 100}%;"></div>
+                </div>
+                <span class="fader-val">${Number(fohNorm).toFixed(2)}</span>
               </div>
-              <span class="fader-val">${Number(fohNorm).toFixed(2)}</span>
-            </div>
-            <div class="fader-column">
-              <span class="fader-name">IEM</span>
-              <div class="touch-fader-track" data-slot="${slot.index}" data-type="iem">
-                <div class="fader-fill" style="height: ${iemNorm * 100}%;"></div>
-                <div class="fader-handle" style="bottom: ${iemNorm * 100}%;"></div>
+              <div class="fader-column">
+                <span class="fader-name">IEM</span>
+                <div class="touch-fader-track" data-slot="${slot.index}" data-type="iem">
+                  <div class="fader-fill" style="height: ${iemNorm * 100}%;"></div>
+                  <div class="fader-handle" style="bottom: ${iemNorm * 100}%;"></div>
+                </div>
+                <span class="fader-val">${iemOffsetVal.toFixed(2)}x</span>
               </div>
-              <span class="fader-val">${iemOffsetVal.toFixed(2)}x</span>
             </div>
-          </div>
-          <div class="strip-btn-row">
-            <button class="btn-mute ${!slot.fohEnabled ? 'muted' : ''}" data-slot="${slot.index}" data-type="foh">
-              FOH
-            </button>
-            <button class="btn-mute ${!slot.iemEnabled ? 'muted' : ''}" data-slot="${slot.index}" data-type="iem">
-              IEM
-            </button>
-          </div>
-        `;
-        mixerStrips.appendChild(strip);
-      });
-      setupFaderTouchListeners();
+            <div class="strip-btn-row">
+              <button class="btn-mute ${!slot.fohEnabled ? 'muted' : ''}" data-slot="${slot.index}" data-type="foh">
+                FOH
+              </button>
+              <button class="btn-mute ${!slot.iemEnabled ? 'muted' : ''}" data-slot="${slot.index}" data-type="iem">
+                IEM
+              </button>
+            </div>
+          `;
+          mixerStrips.appendChild(strip);
+        });
+        setupFaderTouchListeners();
+      } else {
+        slots.forEach((slot, idx) => {
+          const strip = existingStrips[idx];
+          const nameEl = strip.querySelector('.strip-name');
+          if (nameEl && nameEl.innerText !== (slot.name || '')) {
+            nameEl.innerText = slot.name || '';
+            nameEl.title = slot.name || '';
+          }
+          const fohNorm = (slot.fohLevel !== undefined) ? slot.fohLevel : 0.8;
+          const iemOffsetVal = (slot.iemOffset !== undefined)
+            ? Number(slot.iemOffset)
+            : ((slot.iemLevel !== undefined) ? Number(slot.iemLevel) * 2.0 : 1.0);
+          const iemNorm = Math.max(0, Math.min(1, iemOffsetVal * 0.5));
+
+          if (activeDragKey !== `slot:${slot.index}:foh`) {
+            const fohTrack = strip.querySelector('.touch-fader-track[data-type="foh"]');
+            if (fohTrack) {
+              const fill = fohTrack.querySelector('.fader-fill');
+              const handle = fohTrack.querySelector('.fader-handle');
+              const val = fohTrack.parentElement.querySelector('.fader-val');
+              if (fill) fill.style.height = `${fohNorm * 100}%`;
+              if (handle) handle.style.bottom = `${fohNorm * 100}%`;
+              if (val) val.innerText = Number(fohNorm).toFixed(2);
+            }
+          }
+          if (activeDragKey !== `slot:${slot.index}:iem`) {
+            const iemTrack = strip.querySelector('.touch-fader-track[data-type="iem"]');
+            if (iemTrack) {
+              const fill = iemTrack.querySelector('.fader-fill');
+              const handle = iemTrack.querySelector('.fader-handle');
+              const val = iemTrack.parentElement.querySelector('.fader-val');
+              if (fill) fill.style.height = `${iemNorm * 100}%`;
+              if (handle) handle.style.bottom = `${iemNorm * 100}%`;
+              if (val) val.innerText = `${iemOffsetVal.toFixed(2)}x`;
+            }
+          }
+          const fohBtn = strip.querySelector('.btn-mute[data-type="foh"]');
+          const iemBtn = strip.querySelector('.btn-mute[data-type="iem"]');
+          if (fohBtn) fohBtn.classList.toggle('muted', !slot.fohEnabled);
+          if (iemBtn) iemBtn.classList.toggle('muted', !slot.iemEnabled);
+        });
+      }
     }
   }
 
   function setupFaderTouchListeners() {
-    const tracks = document.querySelectorAll('.touch-fader-track');
-    tracks.forEach((track) => {
-      const handlePointer = (e) => {
-        const rect = track.getBoundingClientRect();
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        const normalized = 1.0 - Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-        
-        const faderType = track.getAttribute('data-fader');
-        const slotIdx = track.getAttribute('data-slot');
-        const channelType = track.getAttribute('data-type');
-
-        if (faderType) {
-          sendWsMessage({ type: 'set_fader', fader: faderType, value: normalized });
-          if (faderType === 'masterFoh' && masterFohFill && masterFohHandle && masterFohVal) {
-            masterFohFill.style.height = `${normalized * 100}%`;
-            masterFohHandle.style.bottom = `${normalized * 100}%`;
-            masterFohVal.innerText = normalized.toFixed(2);
-          } else if (faderType === 'masterIem' && masterIemFill && masterIemHandle && masterIemVal) {
-            masterIemFill.style.height = `${normalized * 100}%`;
-            masterIemHandle.style.bottom = `${normalized * 100}%`;
-            masterIemVal.innerText = normalized.toFixed(2);
-          }
-        } else if (slotIdx !== null) {
-          sendWsMessage({ type: 'set_slot_fader', slot: parseInt(slotIdx), channel: channelType, value: normalized });
-          const fill = track.querySelector('.fader-fill');
-          const handle = track.querySelector('.fader-handle');
-          const valLabel = track.parentElement.querySelector('.fader-val');
-          if (fill) fill.style.height = `${normalized * 100}%`;
-          if (handle) handle.style.bottom = `${normalized * 100}%`;
-          if (valLabel) valLabel.innerText = (channelType === 'iem') ? `${(normalized * 2.0).toFixed(2)}x` : normalized.toFixed(2);
-        }
-      };
-
-      track.onpointerdown = (e) => {
-        track.setPointerCapture(e.pointerId);
-        handlePointer(e);
-        track.onpointermove = handlePointer;
-        track.onpointerup = () => {
-          track.onpointermove = null;
-          track.onpointerup = null;
-        };
-      };
-    });
+    document.querySelectorAll('.touch-fader-track').forEach(bindTrackPointerHandlers);
 
     document.querySelectorAll('.btn-mute').forEach((btn) => {
       btn.onclick = () => {
@@ -1132,13 +1229,15 @@
   // Fullscreen Button
   const fullscreenBtn = document.getElementById('fullscreenBtn');
   if (fullscreenBtn) {
+    const syncFullscreenLabel = () => {
+      fullscreenBtn.innerText = document.fullscreenElement ? 'EXIT FULL' : 'FULLSCREEN';
+    };
+    document.addEventListener('fullscreenchange', syncFullscreenLabel);
     fullscreenBtn.onclick = () => {
       if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(err => console.warn(err));
-        fullscreenBtn.innerText = 'EXIT FULL';
+        document.documentElement.requestFullscreen().then(syncFullscreenLabel).catch(err => console.warn(err));
       } else {
-        document.exitFullscreen().catch(err => console.warn(err));
-        fullscreenBtn.innerText = 'FULLSCREEN';
+        document.exitFullscreen().then(syncFullscreenLabel).catch(err => console.warn(err));
       }
     };
   }
@@ -1195,12 +1294,13 @@
         const sent = sendWsMessage({ type: 'panic' });
         if (!sent) {
           // Fallback to HTTP /api/panic if WS is mid-reconnect, and report honest status
+          if (panicLabel) panicLabel.innerText = 'SENDING...';
           apiFetch('/api/panic', { method: 'POST' }).then((res) => {
+            if (res.ok) panicBtn.classList.add('fired');
             if (panicLabel) panicLabel.innerText = res.ok ? 'KILLED' : 'OFFLINE';
           }).catch(() => {
             if (panicLabel) panicLabel.innerText = 'OFFLINE';
           });
-          if (panicLabel) panicLabel.innerText = 'OFFLINE';
         } else {
           panicBtn.classList.add('fired');
           if (panicLabel) panicLabel.innerText = 'KILLED';
@@ -1409,8 +1509,10 @@
     const lenS = len % 60;
     if (djTimeCurrent) djTimeCurrent.innerText = `${String(posM).padStart(2, '0')}:${String(posS).padStart(2, '0')}`;
     if (djTimeTotal) djTimeTotal.innerText = `${String(lenM).padStart(2, '0')}:${String(lenS).padStart(2, '0')}`;
-    if (djProgressFill && len > 0) {
-      djProgressFill.style.width = `${Math.min(100, (pos / len) * 100)}%`;
+    if (djProgressFill) {
+      djProgressFill.style.width = (len > 0)
+        ? `${Math.min(100, (pos / len) * 100)}%`
+        : '0%';
     }
 
     // 4. Play / Pause Button

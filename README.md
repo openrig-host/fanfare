@@ -57,7 +57,24 @@ It's not a DAW. It's an instrument.
 
 ---
 
-## What's New in v1.60: The 1984 Keyboard Rig Edition
+## What's New in v1.7: Tonewheel & Wavetable Edition
+
+![Fanfare B3 91-Tonewheel Organ & Dual Leslie 122](docs/fanfare_b3_organ.jpg)
+
+![BLEEP-216 20-Bank 64-Frame Wavetable Selector](docs/bleep_216_wavetables.jpg)
+
+- **Fanfare B3 Built-In 91-Tonewheel Organ & Dual Leslie 122 (`v1.7`).** Every channel strip slot can now host a full native Hammond B3 & Dual Leslie 122 simulation housed in a vintage walnut and brushed-bronze hardware console — synchronous tonewheel gear ratios with magnetic reluctance waveform shaping and 12-bin shaft micro-flutter, 9-busbar palladium contact stagger key-click, generator crosstalk (`LEAK`), single-trigger post-scanner Harmonic Percussion, 8-stage LC Scanner Vibrato/Chorus with inductor saturation, 4x-oversampled AO-28 tube preamp with 120 Hz B+ ripple, Dual Asynchronous Leslie 122 with mono-to-stereo `SPREAD` (mono rotor swish + stereo room), `WARMTH`, `CHORUS`, and `ROOM`, Studio Wood Room convolution IR + 10-band voicing, 301 ms Ping-Pong `DELAY`, external `SAT VST` / `LESLIE VST` insert slots (with automatic Mod Wheel forwarding), custom named Drawbar CC Learn (`+ Learn / Edit Drawbar Map...`), `+12` octave transpose, toggleable 61-key waterfall manual (OFF by default), and the **`vibe coda`** default preset (`C1`, `0.28` warble).
+- **BLEEP-216 20-Bank 64-Frame Wavetable Engine (`96 Presets`).** `OSC 1` and `OSC 2` in **BLEEP-216** now include **20 mipmapped 64-frame wavetable banks** (`CHOIR`, `GLASS`, `VSAIR`, `SHIMR`, `CELST`, `TINE`, `DX EP`, `CLAV`, `BELL`, `STEEL`, `FMCLG`, `SYNC`, `FOLD`, `RESO`, `SUPER`, `SUBGR`, `ORGAN`, `REED`, `FLUTE`, `BRASS`) with 7 Nyquist-safe mip levels, `PWM / SHAPE` wavetable morphing via `MAN`, `LFO`, `RATE`, or `ENV`, and **11 new Wavetable & Hybrid presets** (96 presets total).
+- **Web Remote Live Plugin Mirror & macOS Build Prep.** Added an experimental bidirectional touch-enabled Live Plugin Mirror prototype in the Web Remote HUD, plus cross-platform Clang/macOS build preparation.
+- **Recent Bugfixes & Strip UX Polish (v1.61–v1.7):**
+  - **Live Rack IEM Fader Fix:** `sumToIemBus` now multiplies `iemLevel * iemOffset` so the rack IEM fader controls base level while DYN `IEM TRIM` acts as relative trim, with MIDI-CC learn writing `iemLevel` cleanly.
+  - **Song JSON `extra` Preservation & Atomic Setlist Saves:** Unknown/newer top-level Song JSON fields survive save/load round-trips (`Song::extra`), and `SetlistManager::saveSetlist` now writes atomically via `.tmp` + `moveFileTo`.
+  - **Live MIDI Status Readout & `KEY` Strip Action:** Top status bar shows live decoded MIDI events (while song load messages show in the preload status area), `KEY` moved to the Studio strip button row with amber active indicators, and Transpose (`-48..+48` st) is integrated directly into the Note Range dialog.
+  - **Security, Stability & UI Fixes:** `yt-dlp` invocations hardened with `--` end-of-options separator, `fm` finished envelopes snap cleanly to zero without denormal grinding, dark-on-light library badge contrast fixed, 1 px keyboard focus ring added to Studio buttons, and passive `LAYER`/`8-WAVE` tags restyled cleanly in CoplanDX.
+
+---
+
+## Previous Highlights in v1.60: The 1984 Keyboard Rig Edition
 
 **(A superpowered Juno-106 + DX7, but better, native and onboard)**
 

@@ -369,7 +369,7 @@ private:
       activelyThrottledFlag.store(rawThrottled, std::memory_order_relaxed);
 
       const juce::int64 nowMs =
-          (juce::int64)juce::Time::getMillisecondCounter();
+          (juce::int64)juce::Time::getMillisecondCounterHiRes();
       if (rawThrottled) {
         latchedUntilMs.store(nowMs + kLatchDurationMs,
                              std::memory_order_relaxed);

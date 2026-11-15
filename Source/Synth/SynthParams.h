@@ -128,18 +128,18 @@ inline const std::array<ParamDef, kNumParams> &paramDefs() {
   using DspConfig::kUnassignedCC;
   static const std::array<ParamDef, kNumParams> defs = {{
       // id            short     full label            section     kind            min     max      def     skew  step  wheel   cc             choices                 unit  pct    bip
-      {"o1Wave",     "WAVE",   "OSC 1 Waveform",     SecDco,     KindEnum,       0.0f,   3.0f,    0.0f,   1.0f, 1.0f, 0.25f,  kUnassignedCC, "SAW,PUL,TRI,S+P",      "",   false, false},
+      {"o1Wave",     "WAVE",   "OSC 1 Waveform",     SecDco,     KindEnum,       0.0f,  23.0f,    0.0f,   1.0f, 1.0f, 0.0435f,kUnassignedCC, "SAW,PUL,TRI,S+P,CHOIR,GLASS,VSAIR,SHIMR,CELST,TINE,DX EP,CLAV,BELL,STEEL,FMCLG,SYNC,FOLD,RESO,SUPER,SUBGR,ORGAN,REED,FLUTE,BRASS", "", false, false},
       {"o1Oct",      "RANGE",  "OSC 1 Range",        SecDco,     KindEnum,      -2.0f,   2.0f,    0.0f,   1.0f, 1.0f, 0.25f,  kUnassignedCC, "32',16',8',4',2'",     "",   false, false},
       {"o1Detune",   "FINE",   "OSC 1 Fine Tune",    SecDco,     KindContinuous,-50.0f,  50.0f,   0.0f,   1.0f, 0.0f, 0.01f,  kUnassignedCC, nullptr,                "ct", false, true},
       {"o1Level",    "OSC 1",  "OSC 1 Level",        SecDco,     KindContinuous, 0.0f,   1.0f,    0.85f,  1.0f, 0.0f, 0.01f,  kUnassignedCC, nullptr,                "",   true,  false},
 
-      {"o2Wave",     "WAVE",   "OSC 2 Waveform",     SecDco,     KindEnum,       0.0f,   3.0f,    0.0f,   1.0f, 1.0f, 0.25f,  kUnassignedCC, "SAW,PUL,TRI,S+P",      "",   false, false},
+      {"o2Wave",     "WAVE",   "OSC 2 Waveform",     SecDco,     KindEnum,       0.0f,  23.0f,    0.0f,   1.0f, 1.0f, 0.0435f,kUnassignedCC, "SAW,PUL,TRI,S+P,CHOIR,GLASS,VSAIR,SHIMR,CELST,TINE,DX EP,CLAV,BELL,STEEL,FMCLG,SYNC,FOLD,RESO,SUPER,SUBGR,ORGAN,REED,FLUTE,BRASS", "", false, false},
       {"o2Oct",      "RANGE",  "OSC 2 Range",        SecDco,     KindEnum,      -2.0f,   2.0f,    0.0f,   1.0f, 1.0f, 0.25f,  kUnassignedCC, "32',16',8',4',2'",     "",   false, false},
       {"o2Semi",     "SEMI",   "OSC 2 Semitone",     SecDco,     KindContinuous,-12.0f,  12.0f,   0.0f,   1.0f, 1.0f, 0.0417f,kUnassignedCC, nullptr,                "st", false, true},
       {"o2Detune",   "FINE",   "OSC 2 Fine Tune",    SecDco,     KindContinuous,-50.0f,  50.0f,   0.0f,   1.0f, 0.0f, 0.01f,  kUnassignedCC, nullptr,                "ct", false, true},
       {"o2Level",    "OSC 2",  "OSC 2 Level",        SecDco,     KindContinuous, 0.0f,   1.0f,    0.0f,   1.0f, 0.0f, 0.01f,  kUnassignedCC, nullptr,                "",   true,  false},
 
-      {"pwmSource",  "PWM SRC","PWM Mod Source",     SecDco,     KindEnum,       0.0f,   2.0f,    0.0f,   1.0f, 1.0f, 0.5f,   kUnassignedCC, "MAN,LFO,RATE",         "",   false, false},
+      {"pwmSource",  "PWM SRC","PWM / Wave Mod Src", SecDco,     KindEnum,       0.0f,   3.0f,    0.0f,   1.0f, 1.0f, 0.34f,  kUnassignedCC, "MAN,LFO,RATE,ENV",     "",   false, false},
       {"pwmManual",  "PW",     "Pulse Width",        SecDco,     KindContinuous, 0.05f,  0.95f,   0.50f,  1.0f, 0.0f, 0.01f,  kUnassignedCC, nullptr,                "",   true,  true},
       {"pwmRate",    "PWM RT", "PWM Mod Rate",       SecDco,     KindContinuous, 0.05f,  20.0f,   0.80f,  0.45f,0.0f, 0.015f, kUnassignedCC, nullptr,                "Hz", false, false},
       {"pwmDepth",   "PWM",    "PWM Mod Depth",      SecDco,     KindContinuous, 0.0f,   1.0f,    0.0f,   1.0f, 0.0f, 0.01f,  kUnassignedCC, nullptr,                "",   true,  false},

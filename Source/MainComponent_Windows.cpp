@@ -70,10 +70,13 @@ void MainComponent::showSlotMidiOutDialog(int slotIdx, int chainIdx) {
   w->addButton("OK", 1, juce::KeyPress(juce::KeyPress::returnKey));
   w->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
+  juce::Component::SafePointer<MainComponent> safeThis(this);
   juce::Component::SafePointer<juce::AlertWindow> safeW(w);
   w->enterModalState(
-      true, juce::ModalCallbackFunction::create([this, slotIdx, chainIdx,
+      true, juce::ModalCallbackFunction::create([safeThis, slotIdx, chainIdx,
                                                  deviceIds, safeW](int result) {
+        if (safeThis == nullptr)
+          return;
         if (safeW != nullptr && result == 1) {
           int devSel =
               safeW->getComboBoxComponent("device")->getSelectedItemIndex();
@@ -81,17 +84,17 @@ void MainComponent::showSlotMidiOutDialog(int slotIdx, int chainIdx) {
               safeW->getComboBoxComponent("channel")->getSelectedItemIndex() +
               1;
           if (devSel <= 0) {
-            engine.clearSlotChainMidiOut(slotIdx, chainIdx);
+            safeThis->engine.clearSlotChainMidiOut(slotIdx, chainIdx);
           } else {
-            engine.setSlotChainMidiOut(slotIdx, chainIdx, deviceIds[devSel],
-                                       ch);
-            if (slotIdx >= 0 && slotIdx < rackSlotComponents.size() &&
-                rackSlotComponents[slotIdx]->getIsCollapsed()) {
-              rackSlotComponents[slotIdx]->setCollapsed(false);
-              resized();
+            safeThis->engine.setSlotChainMidiOut(slotIdx, chainIdx,
+                                                 deviceIds[devSel], ch);
+            if (slotIdx >= 0 && slotIdx < safeThis->rackSlotComponents.size() &&
+                safeThis->rackSlotComponents[slotIdx]->getIsCollapsed()) {
+              safeThis->rackSlotComponents[slotIdx]->setCollapsed(false);
+              safeThis->resized();
             }
           }
-          repaint();
+          safeThis->repaint();
         }
         if (safeW != nullptr)
           delete safeW.getComponent();
@@ -168,6 +171,13 @@ void MainComponent::openMasterPluginEditor(bool isFoh, int chainIndex) {
   if (plugin && plugin->hasEditor()) {
     juce::String name = (isFoh ? "FOH Master " : "IEM Master ") +
                         juce::String(chainIndex + 1) + ": " + plugin->getName();
+    openExternalPluginEditor(plugin, name);
+  }
+}
+
+void MainComponent::openExternalPluginEditor(juce::AudioPluginInstance *plugin,
+                                             const juce::String &name) {
+  if (plugin && plugin->hasEditor()) {
     for (auto *w : activePluginWindows) {
       if (auto *pw = dynamic_cast<PluginWindow *>(w)) {
         if (pw->pluginInstance == plugin) {
@@ -180,17 +190,34 @@ void MainComponent::openMasterPluginEditor(bool isFoh, int chainIndex) {
     juce::AudioProcessorEditor *editor = nullptr;
     bool ok = FanfareLog::safeExecutePluginCall(
         [&]() { editor = plugin->createEditor(); },
-        "createEditor (Master " + plugin->getName() + ")");
+        "createEditor (" + plugin->getName() + ")");
     if (ok && editor != nullptr) {
       auto *w = new PluginWindow(name, editor, plugin);
-      w->onWindowClosed = [this, w] {
-        if (activePluginWindows.contains(w)) {
-          activePluginWindows.removeObject(w, false);
-          w->destroyEditorNow();
-          juce::MessageManager::callAsync([w]() { delete w; });
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::Component::SafePointer<PluginWindow> safeW(w);
+      w->onWindowClosed = [safeThis, safeW] {
+        if (safeThis != nullptr && safeW != nullptr &&
+            safeThis->activePluginWindows.contains(safeW.getComponent())) {
+          auto *rawW = safeW.getComponent();
+          safeThis->activePluginWindows.removeObject(rawW, false);
+          safeThis->openPluginWindowCount.store(
+              safeThis->activePluginWindows.size(), std::memory_order_release);
+          rawW->destroyEditorNow();
+          juce::MessageManager::callAsync([safeW]() {
+            if (safeW != nullptr)
+              delete safeW.getComponent();
+          });
+        } else if (safeW != nullptr) {
+          safeW->destroyEditorNow();
+          juce::MessageManager::callAsync([safeW]() {
+            if (safeW != nullptr)
+              delete safeW.getComponent();
+          });
         }
       };
       activePluginWindows.add(w);
+      openPluginWindowCount.store(activePluginWindows.size(),
+                                  std::memory_order_release);
       if (webServer != nullptr)
         webServer->registerPluginMirrorSource(
             editor, w->getPeer() ? w->getPeer()->getNativeHandle() : nullptr, name);
@@ -207,10 +234,16 @@ void MainComponent::closePluginWindowForInstance(
       if (pw->pluginInstance == instance) {
         pw->destroyEditorNow();
         auto *w = activePluginWindows.removeAndReturn(i);
-        juce::MessageManager::callAsync([w]() { delete w; });
+        juce::Component::SafePointer<juce::DocumentWindow> safeW(w);
+        juce::MessageManager::callAsync([safeW]() {
+          if (safeW != nullptr)
+            delete safeW.getComponent();
+        });
       }
     }
   }
+  openPluginWindowCount.store(activePluginWindows.size(),
+                              std::memory_order_release);
 }
 
 void MainComponent::closePluginWindowsForSlot(RackSlot *slot) {
@@ -219,6 +252,13 @@ void MainComponent::closePluginWindowsForSlot(RackSlot *slot) {
   for (int c = 0; c < 3; ++c) {
     if (auto *pi = slot->getPluginInstance(c))
       closePluginWindowForInstance(pi);
+    if (slot->isChainSlotB3(c)) {
+      auto &b3 = slot->getB3Organ(c);
+      for (int e = 0; e < B3OrganProcessor::kNumExtSlots; ++e) {
+        if (auto *epi = b3.getExtPluginInstance(e))
+          closePluginWindowForInstance(epi);
+      }
+    }
   }
 }
 
@@ -254,10 +294,16 @@ void MainComponent::closeOrphanedPluginWindows() {
       if (!found) {
         pw->destroyEditorNow();
         auto *w = activePluginWindows.removeAndReturn(i);
-        juce::MessageManager::callAsync([w]() { delete w; });
+        juce::Component::SafePointer<juce::DocumentWindow> safeW(w);
+        juce::MessageManager::callAsync([safeW]() {
+          if (safeW != nullptr)
+            delete safeW.getComponent();
+        });
       }
     }
   }
+  openPluginWindowCount.store(activePluginWindows.size(),
+                              std::memory_order_release);
 }
 
 void MainComponent::closeAllPluginWindows() {
@@ -267,5 +313,6 @@ void MainComponent::closeAllPluginWindows() {
       pw->destroyEditorNow();
     tempArray->add(activePluginWindows.removeAndReturn(i));
   }
+  openPluginWindowCount.store(0, std::memory_order_release);
   juce::MessageManager::callAsync([tempArray]() { delete tempArray; });
 }

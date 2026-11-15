@@ -31,7 +31,8 @@ public:
     activeSocket = 0;
     for (int i = 0; i < 3; ++i) {
       if (slot.isChainSlotSynth(i) || slot.isChainSlotFm(i) ||
-          slot.isChainSlotMidiOut(i) || (slot.getPluginInstance(i) != nullptr)) {
+          slot.isChainSlotB3(i) || slot.isChainSlotMidiOut(i) ||
+          (slot.getPluginInstance(i) != nullptr)) {
         activeSocket = i;
         break;
       }
@@ -404,7 +405,7 @@ private:
 
   juce::TextButton doneButton;
   juce::TextButton resetAllButton;
-  juce::TextButton helpButton{"HAAALP!"};
+  juce::TextButton helpButton{"Help"};
 
   juce::Slider transposeSlider;
   juce::TextButton trspBtns[5];
@@ -497,7 +498,8 @@ private:
     for (int i = 0; i < 3; ++i) {
       const auto &cs = slot.getChainSlotSettings(i);
       const bool hasInst = slot.isChainSlotSynth(i) || slot.isChainSlotFm(i) ||
-                           slot.isChainSlotMidiOut(i) || (slot.getPluginInstance(i) != nullptr);
+                           slot.isChainSlotB3(i) || slot.isChainSlotMidiOut(i) ||
+                           (slot.getPluginInstance(i) != nullptr);
       if (hasInst && cs.enabled.load()) {
         minLow = std::min(minLow, cs.lowNote.load());
         maxHigh = std::max(maxHigh, cs.highNote.load());
