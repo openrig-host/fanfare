@@ -36,7 +36,7 @@ param(
     # Microsoft Store Partner Center -> Product Management -> Product Identity values (for .msix)
     [string]$StoreIdentityName = "Opencore-Fanfare.FanfareLive",
     [string]$StorePublisher = "CN=A76869A3-8B0D-4577-92CE-2773C2EE9141",
-    [string]$StoreDisplayName = "Fanfare",
+    [string]$StoreDisplayName = "Fanfare Live",
     [string]$StorePublisherDisplayName = "Opencore-Fanfare",
 
     # Optional Authenticode signing (required by Partner Center for external Win32 .msi/.exe URLs;
