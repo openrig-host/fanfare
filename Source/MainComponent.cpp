@@ -1462,8 +1462,14 @@ void MainComponent::suppressGlitchDetectionForMs(int durationMs) noexcept {
 void MainComponent::applyEngineTuningSettings() {
 #ifdef _WIN32
   const CpuTopologyMasks topo = queryCpuTopology();
+  int totalPhysicalPCores = 0;
+  for (DWORD_PTR coreMask : topo.physicalCoreMasks) {
+    if ((coreMask & topo.pCoreMask) == coreMask)
+      ++totalPhysicalPCores;
+  }
   if (!hasExplicitPCoresSetting &&
-      (topo.eCoreMask == 0 || topo.physicalCoreMasks.size() <= 4)) {
+      (topo.eCoreMask == 0 || topo.physicalCoreMasks.size() <= 4 ||
+       totalPhysicalPCores <= 2)) {
     engineTuningSettings.pCoresOnly = false;
   }
   const DWORD_PTR fullSysMask =

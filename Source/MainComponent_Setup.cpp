@@ -400,7 +400,7 @@ void MainComponent::setupSlotComponents() {
     };
 
     // Editor open callback
-    comp->onOpenEditor = [this, slot, comp](int chainIndex) {
+    comp->onOpenEditor = [this, slot, comp, wireB3Ext](int chainIndex) {
       if (slot != nullptr && slot->isChainSlotSynth(chainIndex)) {
         synthOverlay.reset(new FanfareSynthComponent(
             *slot,
@@ -455,6 +455,7 @@ void MainComponent::setupSlotComponents() {
           box.setDismissalMouseClicksAreAlwaysConsumed(true);
         };
         b3Overlay->onOpenMidiEffects = comp->onShowArpeggiator;
+        wireB3Ext(chainIndex);
         addAndMakeVisible(b3Overlay.get());
         b3Overlay->updateForHostBounds(getLocalBounds());
         return;

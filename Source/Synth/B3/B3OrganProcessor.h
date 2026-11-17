@@ -54,6 +54,10 @@ public:
   };
 
   B3OrganProcessor() {
+    // C++17 std::atomic default-init leaves indeterminate values; seed the
+    // custom drawbar-CC slots to "unassigned" before any map could be applied.
+    for (auto &a : customDrawbarCc)
+      a.store(-1, std::memory_order_relaxed);
     uiMidiQueue.ensureSize(2048);
     mergedMidi.ensureSize(4096);
     loadPresetByName("vibe coda");
@@ -70,15 +74,21 @@ public:
     preamp.prepare(sr);
     leslie.prepare(sr);
     masterFx.prepare(sr);
-    const int scratchLen = juce::jmax(maxBlock, 4096);
+    const int scratchLen = juce::jmax(maxBlock, 8192);
+    scratchCapacity = scratchLen;
     woodRoomIr.prepare(sr, scratchLen);
     woodRoomIr.loadPresetByIndex(0); // Built-In: Studio Wood Room (0.55s)
     woodIrScratch.setSize(2, scratchLen, false, false, true);
+    // Reserve 2x headroom so the defensive resize in processBlock stays within
+    // capacity and never mallocs on the audio thread for realistic block sizes.
+    scratch.reserve((size_t)scratchLen * 2);
+    scratchR.reserve((size_t)scratchLen * 2);
+    scratchPerc.reserve((size_t)scratchLen * 2);
     scratch.assign((size_t)scratchLen, 0.0f);
     scratchR.assign((size_t)scratchLen, 0.0f);
     scratchPerc.assign((size_t)scratchLen, 0.0f);
-    extStereoBuf.setSize(2, scratchLen, false, false, true);
-    extMidiScratch.ensureSize(512);
+    extStereoBuf.setSize(extBufChannels, scratchLen, false, false, true);
+    extMidiScratch.ensureSize(2048);
     for (int i = 0; i < kNumExtSlots; ++i) {
       juce::SpinLock::ScopedLockType sl(extLock);
       if (extSlots[i].plugin != nullptr)
@@ -145,7 +155,7 @@ public:
   juce::String getRegistrationString() const {
     juce::String s;
     for (int i = 0; i < 9; ++i) {
-      if (i == 2 || i == 6)
+      if (i == 3 || i == 6) // Hammond 3+3+3 registration grouping
         s << ' ';
       s << juce::String(juce::jlimit(0, 8, (int)std::lround(getDrawbar(i) * 8.0f)));
     }
@@ -264,7 +274,10 @@ public:
     const int m = juce::jlimit(0, 2, v);
     leslieMode.store(m);
     uiLeslieModePending.store(m, std::memory_order_release);
-    uiModWheelPending.store(m == 2 ? 127 : (m == 1 ? 64 : 0), std::memory_order_release);
+    // Brake has no standard CC: forward CC1=0 (stop/slow) to external rotary
+    // plugins so Brake isn't read as Fast (>=64). The native Leslie receives
+    // the true Brake mode via uiLeslieModePending above.
+    uiModWheelPending.store(m == 2 ? 127 : 0, std::memory_order_release);
     presetDirty.store(true);
     paramsDirty.store(true);
   }
@@ -379,6 +392,16 @@ public:
       newPlugin->prepareToPlay(sr, maxBlock);
     }
     juce::SpinLock::ScopedLockType sl(extLock);
+    // Pre-size the RT insert buffer for this plugin's channel count here on the
+    // message thread so runExtSlot never has to grow it on the audio thread.
+    if (newPlugin != nullptr) {
+      const int nCh = juce::jmax(2, juce::jmax(newPlugin->getTotalNumInputChannels(),
+                                               newPlugin->getTotalNumOutputChannels()));
+      if (nCh > extBufChannels || extStereoBuf.getNumSamples() < scratchCapacity) {
+        extBufChannels = juce::jmax(extBufChannels, nCh);
+        extStereoBuf.setSize(extBufChannels, scratchCapacity, false, false, true);
+      }
+    }
     auto old = std::move(extSlots[extSlot].plugin);
     extSlots[extSlot].plugin = std::move(newPlugin);
     extSlots[extSlot].path = path;
@@ -504,7 +527,7 @@ public:
   std::atomic<bool> octaveUp{false};
   std::atomic<bool> sustainControlsLeslie{false};
   std::atomic<int>  ccProfile{CcAuto};
-  std::array<std::atomic<int>, 9> customDrawbarCc;
+  std::array<std::atomic<int>, 9> customDrawbarCc{};
   std::atomic<uint32_t> lastCcSeq{0};
   std::atomic<int> lastCcNum{-1};
 
@@ -562,6 +585,8 @@ private:
 
   double sr = 44100.0;
   int maxBlock = 8192;
+  int scratchCapacity = 8192;
+  int extBufChannels = 2;
 
   B3::TonewheelEngine wheels;
   B3::ScannerChorus scanner;
@@ -831,24 +856,42 @@ inline juce::var B3OrganProcessor::getState() const {
   o->setProperty("ccProfile", ccProfile.load());
   if (customCcMapName.isNotEmpty())
     o->setProperty("customCcMapName", customCcMapName);
+  // Snapshot ext-slot metadata under the lock, then call the (potentially slow)
+  // plugin getStateInformation OUTSIDE extLock. Ext plugins are only swapped on
+  // the message thread -- the same thread that saves state -- so the raw pointers
+  // stay valid here, and the audio thread's runExtSlot trylock never fails during
+  // a save (which would otherwise momentarily substitute the native Leslie).
+  juce::AudioPluginInstance *extPlug[kNumExtSlots];
+  juce::String extPath[kNumExtSlots], extName[kNumExtSlots];
+  juce::String extPendPath[kNumExtSlots], extPendName[kNumExtSlots], extPendB64[kNumExtSlots];
+  bool extByp[kNumExtSlots];
   {
     juce::SpinLock::ScopedLockType sl(extLock);
     for (int i = 0; i < kNumExtSlots; ++i) {
-      const juce::String pfx = (i == ExtSat) ? "extSat" : "extLeslie";
-      o->setProperty(pfx + "Bypass", extSlots[i].bypassed.load());
-      if (extSlots[i].plugin != nullptr) {
-        o->setProperty(pfx + "Path", extSlots[i].path);
-        o->setProperty(pfx + "Name", extSlots[i].name);
-        juce::MemoryBlock mb;
-        extSlots[i].plugin->getStateInformation(mb);
-        if (mb.getSize() > 0)
-          o->setProperty(pfx + "State", mb.toBase64Encoding());
-      } else if (extSlots[i].pendingPath.isNotEmpty()) {
-        o->setProperty(pfx + "Path", extSlots[i].pendingPath);
-        o->setProperty(pfx + "Name", extSlots[i].pendingName);
-        if (extSlots[i].pendingStateB64.isNotEmpty())
-          o->setProperty(pfx + "State", extSlots[i].pendingStateB64);
-      }
+      extPlug[i] = extSlots[i].plugin.get();
+      extPath[i] = extSlots[i].path;
+      extName[i] = extSlots[i].name;
+      extByp[i] = extSlots[i].bypassed.load();
+      extPendPath[i] = extSlots[i].pendingPath;
+      extPendName[i] = extSlots[i].pendingName;
+      extPendB64[i] = extSlots[i].pendingStateB64;
+    }
+  }
+  for (int i = 0; i < kNumExtSlots; ++i) {
+    const juce::String pfx = (i == ExtSat) ? "extSat" : "extLeslie";
+    o->setProperty(pfx + "Bypass", extByp[i]);
+    if (extPlug[i] != nullptr) {
+      o->setProperty(pfx + "Path", extPath[i]);
+      o->setProperty(pfx + "Name", extName[i]);
+      juce::MemoryBlock mb;
+      extPlug[i]->getStateInformation(mb);
+      if (mb.getSize() > 0)
+        o->setProperty(pfx + "State", mb.toBase64Encoding());
+    } else if (extPendPath[i].isNotEmpty()) {
+      o->setProperty(pfx + "Path", extPendPath[i]);
+      o->setProperty(pfx + "Name", extPendName[i]);
+      if (extPendB64[i].isNotEmpty())
+        o->setProperty(pfx + "State", extPendB64[i]);
     }
   }
   auto *db = new juce::DynamicObject();
@@ -900,14 +943,20 @@ inline void B3OrganProcessor::applyState(const juce::var &v,
   if (obj->hasProperty("sustainControlsLeslie"))
     sustainControlsLeslie.store((bool)obj->getProperty("sustainControlsLeslie"));
   if (obj->hasProperty("ccProfile"))
-    ccProfile.store((int)obj->getProperty("ccProfile"));
-  if (obj->hasProperty("customCcMapName")) {
+    ccProfile.store(juce::jlimit(0, (int)CcCustom, (int)obj->getProperty("ccProfile")));
+  if (obj->hasProperty("customCcMapName"))
     customCcMapName = obj->getProperty("customCcMapName").toString();
-    if (ccProfile.load() == CcCustom && customCcMapName.isNotEmpty()) {
+  // Resolve CcCustom unconditionally: a state with ccProfile=CcCustom but a
+  // missing/empty/unresolvable map name must fall back to CcAuto, otherwise the
+  // audio thread would match incoming CCs against unset drawbar-CC slots.
+  if (ccProfile.load() == CcCustom) {
+    bool resolved = false;
+    if (customCcMapName.isNotEmpty()) {
       refreshCustomCcMaps();
-      if (!applyCustomCcMapByName(customCcMapName, false))
-        ccProfile.store(CcAuto);
+      resolved = applyCustomCcMapByName(customCcMapName, false);
     }
+    if (!resolved)
+      ccProfile.store(CcAuto);
   }
   {
     juce::SpinLock::ScopedLockType sl(extLock);
@@ -1059,6 +1108,8 @@ inline void B3OrganProcessor::processBlock(juce::AudioBuffer<float> &buffer,
 
     const int nCh = juce::jmax(2, juce::jmax(plug->getTotalNumInputChannels(),
                                              plug->getTotalNumOutputChannels()));
+    // Normally pre-sized by prepare()/swapExtPlugin(); this fallback should be
+    // unreachable for device blocks within the prepared capacity.
     if (extStereoBuf.getNumChannels() < nCh || extStereoBuf.getNumSamples() < need)
       extStereoBuf.setSize(nCh, need, false, false, true);
     extStereoBuf.clear();
