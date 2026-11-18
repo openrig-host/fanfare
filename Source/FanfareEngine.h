@@ -232,11 +232,22 @@ void processAudio(const float *const *inputData, int numInputs,
       return; // hardware outputs + buses already cleared above
     }
 
-    for (auto &smb : slotMidiBuffers)
-      smb.clear();
+    for (size_t i = 0; i < slotMidiBuffers.size(); ++i) {
+      slotMidiBuffers[i].clear();
+      if (i < (size_t)FanfareConstants::kNumSlots &&
+          !pendingRecoveryMidi[i].isEmpty()) {
+        slotMidiBuffers[i].addEvents(pendingRecoveryMidi[i], 0, -1, 0);
+        pendingRecoveryMidi[i].clear();
+      }
+    }
 
     // Panic Button Trigger
     if (panicTriggered.exchange(false)) {
+      for (int i = 0; i < FanfareConstants::kNumSlots; ++i) {
+        slotActiveNotesLo[i] = 0;
+        slotActiveNotesHi[i] = 0;
+        pendingRecoveryMidi[i].clear();
+      }
       for (auto &slot : slots) {
         if (slot) {
           if (slot->getArpeggiator().enabled.load(std::memory_order_relaxed))
@@ -304,15 +315,26 @@ void processAudio(const float *const *inputData, int numInputs,
 
         // Special routing: MIDI messages -> only to slots
         if (msg.isNoteOn() || msg.isNoteOff()) {
-          int noteNum = msg.getNoteNumber();
-          // Apply per-slot channel + note range filtering
+          const int noteNum = msg.getNoteNumber();
+          const bool isNoteOnMsg = msg.isNoteOn() && msg.getVelocity() > 0;
+          // Apply per-slot channel + note range filtering; always allow NoteOff
+          // for any note currently active in that slot so range/channel edits
+          // while holding keys never stick a note.
           for (size_t i = 0; i < slots.size(); ++i) {
-            if (slotAcceptsChannel(i, msgChannel) &&
-                slots[i]->isNoteInRange(noteNum)) {
+            const bool slotMatches =
+                slotAcceptsChannel(i, msgChannel) && slots[i]->isNoteInRange(noteNum);
+            const bool wasActive =
+                !isNoteOnMsg && isSlotNoteActive((int)i, noteNum);
+            if (slotMatches || wasActive) {
+              if (isNoteOnMsg)
+                setSlotNoteActive((int)i, noteNum, true);
+              else
+                setSlotNoteActive((int)i, noteNum, false);
+
               int transposeSemis = juce::jlimit(-48, 48, slots[i]->getTransposeSemis());
               if (transposeSemis != 0) {
                 int transposed = juce::jlimit(0, 127, noteNum + transposeSemis);
-                auto transposedMsg = msg.isNoteOn()
+                auto transposedMsg = isNoteOnMsg
                     ? juce::MidiMessage::noteOn(msg.getChannel(), transposed,
                                                 msg.getVelocity())
                     : juce::MidiMessage::noteOff(msg.getChannel(), transposed,
@@ -389,6 +411,7 @@ void processAudio(const float *const *inputData, int numInputs,
     // never touch scratchBuffers or invoke processBlock concurrently on an in-flight VST.
     if (engineWedged.load(std::memory_order_acquire)) {
       if (dspInFlightWorkers.load(std::memory_order_acquire) != 0) {
+        savePendingNoteOffsForRecovery(numActiveSlots);
         audioUnderrunFlag.store(true, std::memory_order_relaxed);
         aux1Bus.clear(0, numSamples);
         aux2Bus.clear(0, numSamples);
@@ -493,6 +516,7 @@ void processAudio(const float *const *inputData, int numInputs,
       }
 
       if (timedOut) {
+        savePendingNoteOffsForRecovery(numActiveSlots);
         engineWedged.store(true, std::memory_order_release);
         audioUnderrunFlag.store(true, std::memory_order_relaxed);
         int timeouts = consecutiveParallelTimeouts.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -1062,6 +1086,39 @@ private:
   
 std::vector<std::unique_ptr<RackSlot>> slots;
 std::vector<juce::MidiBuffer> slotMidiBuffers;
+juce::MidiBuffer pendingRecoveryMidi[FanfareConstants::kNumSlots];
+uint64_t slotActiveNotesLo[FanfareConstants::kNumSlots] = {};
+uint64_t slotActiveNotesHi[FanfareConstants::kNumSlots] = {};
+
+bool isSlotNoteActive(int slotIdx, int note) const noexcept {
+  if (slotIdx < 0 || slotIdx >= FanfareConstants::kNumSlots || note < 0 || note > 127)
+    return false;
+  return (note < 64) ? ((slotActiveNotesLo[slotIdx] & (1ULL << note)) != 0)
+                     : ((slotActiveNotesHi[slotIdx] & (1ULL << (note - 64))) != 0);
+}
+
+void setSlotNoteActive(int slotIdx, int note, bool active) noexcept {
+  if (slotIdx < 0 || slotIdx >= FanfareConstants::kNumSlots || note < 0 || note > 127)
+    return;
+  uint64_t &word = (note < 64) ? slotActiveNotesLo[slotIdx] : slotActiveNotesHi[slotIdx];
+  const uint64_t bit = 1ULL << (note & 63);
+  if (active) word |= bit;
+  else        word &= ~bit;
+}
+
+void savePendingNoteOffsForRecovery(int numSlots) {
+  const int n = juce::jmin(numSlots, (int)slotMidiBuffers.size());
+  for (int i = 0; i < n && i < FanfareConstants::kNumSlots; ++i) {
+    for (const auto meta : slotMidiBuffers[i]) {
+      const auto m = meta.getMessage();
+      if (m.isNoteOff() || (m.isNoteOn() && m.getVelocity() == 0) ||
+          m.isAllNotesOff() || m.isAllSoundOff() ||
+          (m.isController() && m.getControllerNumber() == 64 && m.getControllerValue() < 64)) {
+        pendingRecoveryMidi[i].addEvent(m, 0);
+      }
+    }
+  }
+}
 mutable juce::CriticalSection scenesLock;
 std::vector<Scene> scenes;
 int currentSceneIndex = 0;

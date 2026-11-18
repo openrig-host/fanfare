@@ -1084,7 +1084,7 @@ public:
 
     // ---- Mapping list ----
     auto listArea =
-        r.removeFromTop(r.getHeight() - 8 - 4 * rowH - 4 * gap - 22);
+        r.removeFromTop(r.getHeight() - 8 - 5 * rowH - 5 * gap - 22);
     mappingList.setBounds(listArea);
 
     r.removeFromTop(gap);
@@ -1110,7 +1110,18 @@ public:
 
     r.removeFromTop(gap);
 
-    // ---- Row C: new mapping - plugin, param, CC, min, max; actions right ----
+    // ---- Row C1: new mapping - plugin and parameter selectors (full width) ----
+    {
+      auto row = r.removeFromTop(rowH);
+      const int plugW = juce::jmax(220, row.getWidth() * 44 / 100);
+      pluginSelector.setBounds(row.removeFromLeft(plugW));
+      row.removeFromLeft(6);
+      paramSelector.setBounds(row);
+    }
+
+    r.removeFromTop(gap);
+
+    // ---- Row C2: new mapping - CC, min, max; actions right ----
     {
       auto row = r.removeFromTop(rowH);
       learnBtn.setBounds(row.removeFromRight(62).reduced(0, 1));
@@ -1122,21 +1133,17 @@ public:
       togBtn.setBounds(row.removeFromRight(38).reduced(0, 1));
       row.removeFromRight(6);
 
-      maxEditor.setBounds(row.removeFromRight(44));
-      row.removeFromRight(3);
-      maxLabel.setBounds(row.removeFromRight(32));
-      row.removeFromRight(6);
-      minEditor.setBounds(row.removeFromRight(44));
-      row.removeFromRight(3);
-      minLabel.setBounds(row.removeFromRight(32));
-      row.removeFromRight(6);
-      ccEditor.setBounds(row.removeFromRight(40));
-      row.removeFromRight(3);
-      ccLabel.setBounds(row.removeFromRight(32));
-      row.removeFromRight(6);
-      paramSelector.setBounds(row.removeFromRight(136));
-      row.removeFromRight(6);
-      pluginSelector.setBounds(row);
+      ccLabel.setBounds(row.removeFromLeft(32));
+      row.removeFromLeft(3);
+      ccEditor.setBounds(row.removeFromLeft(40));
+      row.removeFromLeft(6);
+      minLabel.setBounds(row.removeFromLeft(32));
+      row.removeFromLeft(3);
+      minEditor.setBounds(row.removeFromLeft(44));
+      row.removeFromLeft(6);
+      maxLabel.setBounds(row.removeFromLeft(32));
+      row.removeFromLeft(3);
+      maxEditor.setBounds(row.removeFromLeft(44));
     }
 
     r.removeFromTop(gap);

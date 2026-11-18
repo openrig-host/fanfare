@@ -195,7 +195,9 @@ public:
     constexpr float kTwoPi = 6.28318530717958647692f;
     const float srF = (float)sr;
 
-    const float micAngleMag = 0.20f + 1.32f * micSpread;
+    // Keep stereo mics nearly opposite (~170-180 deg apart across normal spread)
+    // so L and R never peak simultaneously into an unnatural mono tremolo.
+    const float micAngleMag = 0.35f + 1.2208f * std::sqrt(micSpread);
     const float cosMic = std::cos(micAngleMag);
     const float sinMicL = std::sin(-micAngleMag);
     const float sinMicR = std::sin(+micAngleMag);
@@ -436,7 +438,7 @@ private:
                              0.35f * readCubic(hornBuf.data(), writePos, rDly2) - hornRear;
 
       const float normFace = 0.5f + 0.5f * cosH;
-      const float shapedFace = normFace * (0.45f + 0.55f * normFace);
+      const float shapedFace = normFace * (0.72f + 0.28f * normFace);
       const float dispCoef = dispMinCoef + dispSpanCoef * shapedFace;
       c.dispZ[mi] += dispCoef * (hornDirect - c.dispZ[mi]);
       const float hornDispersed = hornDirectMix * hornDirect + (1.0f - hornDirectMix) * c.dispZ[mi];
@@ -541,19 +543,19 @@ private:
         // 122 CLOSED: dark, boxy, woody, drum-heavy, deep & mellow
         {760.0, 3900.0, 1100.0, 2.0, 0.80, 520.0, 3800.0,
          0.46f, 135.0f, 0.38f, 0.08f, 0.84f, 1.32f, 4800.0f, 0.80f,
-         1.40f, 0.00044f, 0.00f, 0.12f, 1.15f, 0.28f, 0.82f, 0.24f},
+         1.40f, 0.00044f, 0.00f, 0.22f, 0.92f, 0.36f, 0.64f, 0.24f},
         // 122 OPEN: airy, wide, lots of room/back-wave comb, silky highs
         {800.0, 5600.0, 1300.0, 3.0, 0.85, 950.0, 8200.0,
          0.08f, 150.0f, 0.10f, 0.36f, 1.06f, 0.90f, 9000.0f, 1.55f,
-         0.85f, 0.00058f, 0.42f, 0.22f, 1.05f, 0.36f, 0.68f, 0.12f},
+         0.85f, 0.00058f, 0.42f, 0.28f, 0.88f, 0.44f, 0.56f, 0.12f},
         // 147 CLOSED: punchy, bright horn bark, tight cabinet, rock/gospel
         {960.0, 7400.0, 1700.0, 5.8, 0.95, 720.0, 6600.0,
          0.22f, 165.0f, 0.22f, 0.22f, 1.45f, 0.82f, 7600.0f, 1.00f,
-         0.95f, 0.00046f, 0.00f, 0.14f, 1.15f, 0.32f, 0.74f, 0.18f},
+         0.95f, 0.00046f, 0.00f, 0.24f, 0.94f, 0.40f, 0.60f, 0.18f},
         // 147 OPEN: brightest, widest, most Doppler and space
         {980.0, 9200.0, 1750.0, 5.0, 1.00, 1100.0, 9800.0,
          0.05f, 175.0f, 0.08f, 0.42f, 1.35f, 0.78f, 12000.0f, 1.75f,
-         0.75f, 0.00068f, 0.48f, 0.24f, 1.05f, 0.38f, 0.64f, 0.10f}};
+         0.75f, 0.00068f, 0.48f, 0.30f, 0.88f, 0.46f, 0.54f, 0.10f}};
     const Voice &v = kV[(int)cabType];
 
     // Crossover

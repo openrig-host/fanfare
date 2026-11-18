@@ -184,18 +184,9 @@ public:
     }
 
     void updateContentHeight() {
-        auto parsed = parseLines();
-        float sz = fontSize > 0 ? fontSize : 22.0f;
-        float lineH = sz * 1.45f;
-        int totalH = 40;
-
-        for (const auto& pl : parsed) {
-            if (pl.isHeading) totalH += (int)(lineH * 1.5f);
-            else totalH += (int)lineH;
-        }
-
+        const float endY = layoutOrPaint(nullptr);
         int parentH = getParentComponent() ? getParentComponent()->getHeight() : 400;
-        setSize(juce::jmax(200, getWidth()), juce::jmax(parentH, totalH + 60));
+        setSize(juce::jmax(200, getWidth()), juce::jmax(parentH, (int)std::ceil(endY) + 40));
     }
 
     void paint(juce::Graphics& g) override {
@@ -209,8 +200,14 @@ public:
             return;
         }
 
-        float sz = fontSize > 0 ? fontSize : 22.0f;
-        float lineH = sz * 1.45f;
+        layoutOrPaint(&g);
+    }
+
+    float layoutOrPaint(juce::Graphics* g) {
+        const float sz = fontSize > 0 ? fontSize : 22.0f;
+        const float lineH = sz * 1.45f;
+        const float leftMargin = 20.0f;
+        const float maxRight = (float)juce::jmax(140, getWidth() - 20);
         float curY = 16.0f;
 
         juce::Font baseFont = isMonospace
@@ -228,14 +225,16 @@ public:
                 float hSize = pl.headingLevel == 1 ? sz * 1.35f : (pl.headingLevel == 2 ? sz * 1.2f : sz * 1.1f);
                 juce::Colour hCol = pl.headingLevel == 1 ? accentCol : (pl.headingLevel == 2 ? fohCol : okCol);
 
-                juce::Font hFont = baseFont.withHeight(hSize).boldened();
-                g.setFont(hFont);
-                g.setColour(hCol);
-                g.drawText(pl.headingText, 20, (int)curY, getWidth() - 40, (int)(hSize * 1.2f), juce::Justification::left);
+                if (g != nullptr) {
+                    juce::Font hFont = baseFont.withHeight(hSize).boldened();
+                    g->setFont(hFont);
+                    g->setColour(hCol);
+                    g->drawText(pl.headingText, 20, (int)curY, getWidth() - 40, (int)(hSize * 1.2f), juce::Justification::left);
 
-                if (pl.headingLevel == 1) {
-                    g.setColour(hCol.withAlpha(0.35f));
-                    g.drawLine(20.0f, curY + hSize * 1.2f + 2.0f, (float)getWidth() - 20.0f, curY + hSize * 1.2f + 2.0f, 1.0f);
+                    if (pl.headingLevel == 1) {
+                        g->setColour(hCol.withAlpha(0.35f));
+                        g->drawLine(20.0f, curY + hSize * 1.2f + 2.0f, (float)getWidth() - 20.0f, curY + hSize * 1.2f + 2.0f, 1.0f);
+                    }
                 }
 
                 curY += lineH * 1.5f;
@@ -247,36 +246,75 @@ public:
                 continue;
             }
 
-            float curX = 20.0f;
+            float curX = leftMargin;
             for (const auto& tok : pl.tokens) {
                 if (tok.type == Token::ChordBadge) {
                     juce::Font cFont = baseFont.withHeight(sz).boldened();
-                    g.setFont(cFont);
                     float strW = (float)cFont.getStringWidth(tok.text);
                     float badgeW = strW + 12.0f;
                     float badgeH = sz * 1.2f;
 
-                    juce::Rectangle<float> badgeRect(curX, curY + (lineH - badgeH) * 0.5f, badgeW, badgeH);
-                    g.setColour(accentCol.withAlpha(0.16f));
-                    g.fillRoundedRectangle(badgeRect, 3.0f);
-                    g.setColour(accentCol.withAlpha(0.60f));
-                    g.drawRoundedRectangle(badgeRect, 3.0f, 1.0f);
+                    if (curX > leftMargin && curX + badgeW > maxRight) {
+                        curX = leftMargin;
+                        curY += lineH;
+                    }
 
-                    g.setColour(accentCol);
-                    g.drawText(tok.text, badgeRect, juce::Justification::centred, false);
+                    if (g != nullptr) {
+                        g->setFont(cFont);
+                        juce::Rectangle<float> badgeRect(curX, curY + (lineH - badgeH) * 0.5f, badgeW, badgeH);
+                        g->setColour(accentCol.withAlpha(0.16f));
+                        g->fillRoundedRectangle(badgeRect, 3.0f);
+                        g->setColour(accentCol.withAlpha(0.60f));
+                        g->drawRoundedRectangle(badgeRect, 3.0f, 1.0f);
+
+                        g->setColour(accentCol);
+                        g->drawText(tok.text, badgeRect, juce::Justification::centred, false);
+                    }
                     curX += badgeW + 4.0f;
                 } else {
                     juce::Font tFont = tok.isBold ? baseFont.boldened() : baseFont;
-                    g.setFont(tFont);
-                    g.setColour(tok.colour);
+                    if (g != nullptr) {
+                        g->setFont(tFont);
+                        g->setColour(tok.colour);
+                    }
 
-                    float strW = (float)tFont.getStringWidth(tok.text);
-                    g.drawText(tok.text, (int)curX, (int)curY, (int)strW + 2, (int)lineH, juce::Justification::left, false);
-                    curX += strW;
+                    // Word-wrap text tokens so long lines wrap cleanly in View Mode
+                    int pos = 0;
+                    const int len = tok.text.length();
+                    while (pos < len) {
+                        int next = pos;
+                        while (next < len && tok.text[next] != ' ' && tok.text[next] != '\t')
+                            ++next;
+                        while (next < len && (tok.text[next] == ' ' || tok.text[next] == '\t'))
+                            ++next;
+
+                        const juce::String chunk = tok.text.substring(pos, next);
+                        const juce::String trimmed = chunk.trimEnd();
+                        const float trimmedW = (float)tFont.getStringWidth(trimmed);
+                        const float chunkW = (float)tFont.getStringWidth(chunk);
+
+                        if (curX > leftMargin && curX + trimmedW > maxRight) {
+                            curX = leftMargin;
+                            curY += lineH;
+                            const juce::String leadTrimmed = chunk.trimStart();
+                            if (leadTrimmed.isNotEmpty()) {
+                                const float lw = (float)tFont.getStringWidth(leadTrimmed);
+                                if (g != nullptr)
+                                    g->drawText(leadTrimmed, (int)curX, (int)curY, (int)lw + 4, (int)lineH, juce::Justification::left, false);
+                                curX += lw;
+                            }
+                        } else {
+                            if (g != nullptr)
+                                g->drawText(chunk, (int)curX, (int)curY, (int)chunkW + 4, (int)lineH, juce::Justification::left, false);
+                            curX += chunkW;
+                        }
+                        pos = next;
+                    }
                 }
             }
             curY += lineH;
         }
+        return curY;
     }
 
 private:
@@ -780,28 +818,28 @@ public:
         auto area = getLocalBounds().reduced(10);
 
         auto topRow = area.removeFromTop(26);
-        songTitleLabel.setBounds(topRow.removeFromLeft(110));
-        topRow.removeFromLeft(8);
+        songTitleLabel.setBounds(topRow.removeFromLeft(94));
+        topRow.removeFromLeft(4);
 
-        liveModeBtn.setBounds(topRow.removeFromLeft(110));
-        topRow.removeFromLeft(8);
+        liveModeBtn.setBounds(topRow.removeFromLeft(96));
+        topRow.removeFromLeft(6);
 
-        zoomOutBtn.setBounds(topRow.removeFromLeft(28));
-        fontSizeLabel.setBounds(topRow.removeFromLeft(46));
-        zoomInBtn.setBounds(topRow.removeFromLeft(28));
-        topRow.removeFromLeft(8);
+        zoomOutBtn.setBounds(topRow.removeFromLeft(26));
+        fontSizeLabel.setBounds(topRow.removeFromLeft(44));
+        zoomInBtn.setBounds(topRow.removeFromLeft(26));
+        topRow.removeFromLeft(6);
 
-        fontTypeBtn.setBounds(topRow.removeFromLeft(52));
-        topRow.removeFromLeft(8);
+        fontTypeBtn.setBounds(topRow.removeFromLeft(48));
+        topRow.removeFromLeft(6);
 
-        importBtn.setBounds(topRow.removeFromLeft(75));
-        topRow.removeFromLeft(8);
+        importBtn.setBounds(topRow.removeFromLeft(62));
+        topRow.removeFromLeft(6);
 
-        manageTabsBtn.setBounds(topRow.removeFromRight(65));
+        manageTabsBtn.setBounds(topRow.removeFromRight(58));
         topRow.removeFromRight(4);
-        addTabBtn.setBounds(topRow.removeFromRight(55));
+        addTabBtn.setBounds(topRow.removeFromRight(50));
         topRow.removeFromRight(4);
-        helpBtn.setBounds(topRow.removeFromRight(74));
+        helpBtn.setBounds(topRow.removeFromRight(54));
 
         area.removeFromTop(8);
 
@@ -830,7 +868,10 @@ public:
         area.removeFromTop(6);
 
         liveViewport.setBounds(area);
-        if (liveViewer) liveViewer->setBounds(0, 0, area.getWidth() - 16, area.getHeight());
+        if (liveViewer) {
+            liveViewer->setSize(juce::jmax(200, area.getWidth() - 16), liveViewer->getHeight());
+            liveViewer->updateContentHeight();
+        }
         textEditor.setBounds(area);
     }
 

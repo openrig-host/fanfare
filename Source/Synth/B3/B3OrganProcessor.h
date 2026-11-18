@@ -587,6 +587,7 @@ private:
   int maxBlock = 8192;
   int scratchCapacity = 8192;
   int extBufChannels = 2;
+  int idleSilenceSamples = 0;
 
   B3::TonewheelEngine wheels;
   B3::ScannerChorus scanner;
@@ -678,13 +679,19 @@ private:
         wheels.noteOn(note, msg.getFloatVelocity());
       }
     } else if (msg.isNoteOff() || (msg.isNoteOn() && msg.getVelocity() == 0)) {
-      const int note = msg.getNoteNumber() + octShift;
-      if (note >= 0 && note <= 127) {
-        physHeld.reset((size_t)note);
+      const int rawNote = msg.getNoteNumber();
+      for (int candidate : {rawNote + octShift, rawNote, rawNote + 12}) {
+        if (candidate < 0 || candidate > 127)
+          continue;
+        const bool wasHeld = physHeld.test((size_t)candidate) || sustHeld.test((size_t)candidate);
+        if (candidate != rawNote + octShift && !wasHeld)
+          continue;
+        physHeld.reset((size_t)candidate);
         if (pedalDown && !sustainControlsLeslie.load(std::memory_order_relaxed)) {
-          sustHeld.set((size_t)note, true);
+          sustHeld.set((size_t)candidate, true);
         } else {
-          wheels.noteOff(note);
+          sustHeld.reset((size_t)candidate);
+          wheels.noteOff(candidate);
         }
       }
     } else if (msg.isController()) {
@@ -1028,6 +1035,19 @@ inline void B3OrganProcessor::processBlock(juce::AudioBuffer<float> &buffer,
   }
   uiPitchBendPending.exchange(-1, std::memory_order_acq_rel);
 
+  // Automatic idle-silence gate: wake instantaneously on any MIDI/voice/pedal
+  // activity; sleep after 2.5s of <-100dB silence so idle B3 strips use ~0% CPU.
+  if (!mergedMidi.isEmpty() || plm >= 0 || pmw >= 0 ||
+      wheels.activeVoices() > 0 || sustHeld.any() || pedalDown) {
+    idleSilenceSamples = 0;
+  } else if (idleSilenceSamples >= (int)(sr * 2.5)) {
+    peakL.store(peakL.load(std::memory_order_relaxed) * 0.86f,
+                std::memory_order_relaxed);
+    peakR.store(peakR.load(std::memory_order_relaxed) * 0.86f,
+                std::memory_order_relaxed);
+    return;
+  }
+
   // Prepare forwarded MIDI (Mod Wheel CC1 + all CCs/PitchBend) for external Leslie VST3
   extMidiScratch.clear();
   if (pmw >= 0)
@@ -1174,4 +1194,11 @@ inline void B3OrganProcessor::processBlock(juce::AudioBuffer<float> &buffer,
               std::memory_order_relaxed);
   peakR.store(juce::jmax(blockPeakR, peakR.load(std::memory_order_relaxed) * 0.86f),
               std::memory_order_relaxed);
+
+  if (wheels.activeVoices() == 0 && !sustHeld.any() &&
+      blockPeakL < 1.0e-5f && blockPeakR < 1.0e-5f) {
+    idleSilenceSamples += numSamples;
+  } else {
+    idleSilenceSamples = 0;
+  }
 }

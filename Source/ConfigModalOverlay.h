@@ -16,6 +16,8 @@ public:
     std::function<juce::String()> getInfo;
     std::function<void()> onStressTestToggle;
     std::function<bool()> isStressTestActive;
+    std::function<bool()> isConfirmOverwriteOnSave;
+    std::function<void(bool)> onSetConfirmOverwriteOnSave;
   };
 
   explicit ConfigModalOverlay(Actions a);
@@ -36,6 +38,7 @@ private:
   juce::ComboBox themeCombo;
   juce::TextButton audioSettingsBtn, engineTuningBtn, scanPluginsBtn, busRoutingBtn,
       resetAudioBtn, aboutBtn, stressTestBtn;
+  juce::ToggleButton confirmOverwriteToggle{"CONFIRM OVERWRITE ON SAVE"};
   juce::TextButton closeBtn{"X"};
   juce::TextButton helpBtn{"Help"};
 

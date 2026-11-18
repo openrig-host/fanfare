@@ -22,7 +22,7 @@
 #include "ThemeManager.h"
 // Optional personal gig art. The file is deliberately gitignored - public
 // checkouts build without it and fall back to the committed OpenRig logo.
-#if __has_include("LastWaltzLogoData.h")
+#if defined(FANFARE_INCLUDE_LW_LOGO) && FANFARE_INCLUDE_LW_LOGO && __has_include("LastWaltzLogoData.h")
 #include "LastWaltzLogoData.h"
 #define OPENRIG_HAS_LW_LOGO 1
 #else
@@ -218,6 +218,11 @@ void MainComponent::showConfigOverlay() {
     engine.stressTestActive.store(!engine.stressTestActive.load());
   };
   a.isStressTestActive = [this] { return engine.stressTestActive.load(); };
+  a.isConfirmOverwriteOnSave = [this] { return confirmOverwriteOnSave; };
+  a.onSetConfirmOverwriteOnSave = [this](bool enabled) {
+    confirmOverwriteOnSave = enabled;
+    saveConfirmOverwritePreference();
+  };
   a.getInfo = [this] {
     juce::String s;
     s << "Fanfare v" << OPENRIG_VERSION_STRING
@@ -475,9 +480,13 @@ bool MainComponent::keyPressed(const juce::KeyPress &key,
     showGigNotepadWindow();
     return true;
   } else if (key.getModifiers().isCommandDown() &&
+             key.getModifiers().isShiftDown() &&
              (key.getKeyCode() == 'S' || key.getKeyCode() == 's')) {
-    if (saveBtn.onClick)
-      saveBtn.onClick();
+    saveSongAs();
+    return true;
+  } else if (key.getModifiers().isCommandDown() &&
+             (key.getKeyCode() == 'S' || key.getKeyCode() == 's')) {
+    saveCurrentSong();
     return true;
   } else if (key.getModifiers().isCommandDown() &&
              (key.getKeyCode() == 'O' || key.getKeyCode() == 'o')) {
@@ -578,6 +587,7 @@ enum MenuIds {
   miNewSong = 1,
   miLoadSong,
   miSaveSong,
+  miSaveSongAs,
   miBuildSong,
   miLoadMap,
   miSaveMap,
@@ -682,7 +692,8 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex,
   case 0: // File
     m.addItem(menuItem(miNewSong, "New song"));
     m.addItem(menuItem(miLoadSong, "Load song...", "Ctrl+O"));
-    m.addItem(menuItem(miSaveSong, "Save song as...", "Ctrl+S"));
+    m.addItem(menuItem(miSaveSong, "Save song", "Ctrl+S"));
+    m.addItem(menuItem(miSaveSongAs, "Save song as...", "Ctrl+Shift+S"));
     m.addItem(menuItem(miBuildSong, "Build song from strips..."));
     m.addItem(menuItem(miRigDoctor, "Diagnose & repair song (Rig Doctor)..."));
     m.addSeparator();
@@ -781,7 +792,10 @@ void MainComponent::menuItemSelected(int id, int) {
     click(loadBtn);
     break;
   case miSaveSong:
-    click(saveBtn);
+    saveCurrentSong();
+    break;
+  case miSaveSongAs:
+    saveSongAs();
     break;
   case miBuildSong:
     click(setupBuilderBtn);

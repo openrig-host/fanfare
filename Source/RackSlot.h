@@ -1918,6 +1918,9 @@ private:
   std::atomic<bool> midiActivity{false};
   std::atomic<int> lastMidiNote{-1};
 
+  mutable uint64_t layerActiveNotesLo[3] = {};
+  mutable uint64_t layerActiveNotesHi[3] = {};
+
   void filterMidiForLayer(int chainIdx, const juce::MidiBuffer &src,
                           juce::MidiBuffer &dst) const {
     dst.clear();
@@ -1927,12 +1930,30 @@ private:
 
     for (const auto metadata : src) {
       const auto msg = metadata.getMessage();
+      const bool isNoteOnMsg = msg.isNoteOn() && msg.getVelocity() > 0;
+      const bool isNoteOffMsg = msg.isNoteOff() || (msg.isNoteOn() && msg.getVelocity() == 0);
+      const int note = msg.getNoteNumber();
+
+      if (isNoteOffMsg && chainIdx >= 0 && chainIdx < 3 && note >= 0 && note <= 127) {
+        uint64_t &word = (note < 64) ? layerActiveNotesLo[chainIdx] : layerActiveNotesHi[chainIdx];
+        const uint64_t bit = 1ULL << (note & 63);
+        if ((word & bit) != 0) {
+          word &= ~bit;
+          dst.addEvent(msg, metadata.samplePosition);
+          continue;
+        }
+      }
+
       if (chOverride > 0 && msg.getChannel() > 0 && msg.getChannel() != chOverride)
         continue;
       if (msg.isNoteOnOrOff()) {
-        const int note = msg.getNoteNumber();
-        if (note >= low && note <= high)
+        if (note >= low && note <= high) {
+          if (isNoteOnMsg && chainIdx >= 0 && chainIdx < 3 && note >= 0 && note <= 127) {
+            uint64_t &word = (note < 64) ? layerActiveNotesLo[chainIdx] : layerActiveNotesHi[chainIdx];
+            word |= (1ULL << (note & 63));
+          }
           dst.addEvent(msg, metadata.samplePosition);
+        }
       } else {
         dst.addEvent(msg, metadata.samplePosition);
       }

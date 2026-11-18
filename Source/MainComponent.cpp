@@ -25,7 +25,7 @@
 
 // Optional personal gig art. The file is deliberately gitignored - public
 // checkouts build without it and fall back to the committed OpenRig logo.
-#if __has_include("LastWaltzLogoData.h")
+#if defined(FANFARE_INCLUDE_LW_LOGO) && FANFARE_INCLUDE_LW_LOGO && __has_include("LastWaltzLogoData.h")
 #include "LastWaltzLogoData.h"
 #define OPENRIG_HAS_LW_LOGO 1
 #else
@@ -1411,6 +1411,21 @@ void MainComponent::loadEngineTuningSettings() {
     stripWidthSlider.setValue(preferredExpandedWidth,
                               juce::dontSendNotification);
   }
+  if (v.hasProperty("confirmOverwriteOnSave"))
+    confirmOverwriteOnSave = (bool)v["confirmOverwriteOnSave"];
+}
+
+void MainComponent::saveConfirmOverwritePreference() const {
+  auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
+  juce::var v;
+  if (f.existsAsFile())
+    v = juce::JSON::parse(f.loadFileAsString());
+  if (!v.isObject())
+    v = juce::var(new juce::DynamicObject());
+  if (auto *obj = v.getDynamicObject())
+    obj->setProperty("confirmOverwriteOnSave", confirmOverwriteOnSave);
+  f.getParentDirectory().createDirectory();
+  f.replaceWithText(juce::JSON::toString(v));
 }
 
 void MainComponent::savePreferredStripWidth() const {

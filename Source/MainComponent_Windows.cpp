@@ -22,7 +22,7 @@
 #include "ThemeManager.h"
 // Optional personal gig art. The file is deliberately gitignored - public
 // checkouts build without it and fall back to the committed OpenRig logo.
-#if __has_include("LastWaltzLogoData.h")
+#if defined(FANFARE_INCLUDE_LW_LOGO) && FANFARE_INCLUDE_LW_LOGO && __has_include("LastWaltzLogoData.h")
 #include "LastWaltzLogoData.h"
 #define OPENRIG_HAS_LW_LOGO 1
 #else

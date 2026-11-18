@@ -22,7 +22,7 @@
 #include "ThemeManager.h"
 // Optional personal gig art. The file is deliberately gitignored - public
 // checkouts build without it and fall back to the committed OpenRig logo.
-#if __has_include("LastWaltzLogoData.h")
+#if defined(FANFARE_INCLUDE_LW_LOGO) && FANFARE_INCLUDE_LW_LOGO && __has_include("LastWaltzLogoData.h")
 #include "LastWaltzLogoData.h"
 #define OPENRIG_HAS_LW_LOGO 1
 #else
@@ -1290,39 +1290,7 @@ void MainComponent::setupHeaderButtons() {
   // Save/Load buttons
   addAndMakeVisible(saveBtn);
   Fanfare::setButtonRole(saveBtn, Fanfare::ButtonRole::Standard);
-  saveBtn.onClick = [this] {
-    auto chooser = std::make_shared<juce::FileChooser>(
-        "Save Song Configuration", Fanfare::RigLibrary::getSongsDirectory(),
-        "*.json");
-
-    juce::Component::SafePointer<MainComponent> safeThis(this);
-    chooser->launchAsync(
-        juce::FileBrowserComponent::saveMode |
-            juce::FileBrowserComponent::canSelectFiles,
-        [safeThis, chooser](const juce::FileChooser &fc) {
-          if (safeThis == nullptr)
-            return;
-          auto file = fc.getResult();
-          if (file != juce::File()) {
-            if (file.getFileExtension() != ".json")
-              file = file.withFileExtension(".json");
-
-            juce::String json = safeThis->engine.exportRigToJson();
-            SaveHistory::recordSave(file);
-            if (Fanfare::RigSerializer::save(file, json)) {
-              SaveHistory::recordSave(file);
-              safeThis->currentRigFile = file;
-              safeThis->setupNameLabel.setText(
-                  file.getFileNameWithoutExtension(),
-                  juce::dontSendNotification);
-              Fanfare::RecentSongs::record(file);
-              LOG_INFO("Rig saved to: " + file.getFullPathName());
-            } else {
-              LOG_ERROR("Failed to save rig to: " + file.getFullPathName());
-            }
-          }
-        });
-  };
+  saveBtn.onClick = [this] { saveCurrentSong(); };
 
   addAndMakeVisible(loadBtn);
   Fanfare::setButtonRole(loadBtn, Fanfare::ButtonRole::Standard);
@@ -1680,6 +1648,10 @@ void MainComponent::setupSetupButtons() {
         return;
       }
       engine.deleteScene(idx);
+      if (idx < sceneSetupFilePaths.size()) {
+        sceneSetupFilePaths.remove(idx);
+        saveButtonMappings();
+      }
       refreshSceneButtons();
     }
   };

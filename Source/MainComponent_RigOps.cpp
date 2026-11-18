@@ -22,7 +22,7 @@
 #include "ThemeManager.h"
 // Optional personal gig art. The file is deliberately gitignored - public
 // checkouts build without it and fall back to the committed OpenRig logo.
-#if __has_include("LastWaltzLogoData.h")
+#if defined(FANFARE_INCLUDE_LW_LOGO) && FANFARE_INCLUDE_LW_LOGO && __has_include("LastWaltzLogoData.h")
 #include "LastWaltzLogoData.h"
 #define OPENRIG_HAS_LW_LOGO 1
 #else
@@ -33,6 +33,17 @@
 
 void MainComponent::refreshSceneButtons() {
   sceneButtons.clear();
+
+  // Ensure enough scenes exist to display all assigned sceneSetupFilePaths
+  int lastNonEmptyScene = -1;
+  for (int i = 0; i < sceneSetupFilePaths.size(); ++i) {
+    if (sceneSetupFilePaths[i].isNotEmpty())
+      lastNonEmptyScene = i;
+  }
+  while (engine.getNumScenes() <= lastNonEmptyScene) {
+    engine.createNewScene("SCENE " + juce::String(engine.getNumScenes() + 1));
+  }
+
   int numScenes = engine.getNumScenes();
 
   while (sceneSetupFilePaths.size() < numScenes)
@@ -453,6 +464,7 @@ void MainComponent::loadButtonMappings() {
     }
   }
 
+  refreshSceneButtons();
   updatePreloadStatus();
 }
 
@@ -548,6 +560,7 @@ void MainComponent::applySetlistFromFile(const juce::File &file) {
     }
   }
   saveButtonMappings();
+  refreshSceneButtons();
   updatePreloadStatus();
 }
 
@@ -618,5 +631,79 @@ void MainComponent::resetToNewSong() {
       [safeThis, performReset](int result) {
         if (result == 1 && safeThis != nullptr)
           performReset();
+      });
+}
+
+bool MainComponent::saveRigToFile(const juce::File &targetFile) {
+  if (targetFile == juce::File())
+    return false;
+  juce::File file = (targetFile.getFileExtension() == ".json")
+                        ? targetFile
+                        : targetFile.withFileExtension(".json");
+
+  juce::String json = engine.exportRigToJson();
+  if (Fanfare::RigSerializer::save(file, json)) {
+    SaveHistory::recordSave(file);
+    currentRigFile = file;
+    setupNameLabel.setText(file.getFileNameWithoutExtension(),
+                           juce::dontSendNotification);
+    Fanfare::RecentSongs::record(file);
+    LOG_INFO("Rig saved to: " + file.getFullPathName());
+    return true;
+  }
+  LOG_ERROR("Failed to save rig to: " + file.getFullPathName());
+  return false;
+}
+
+void MainComponent::saveCurrentSong() {
+  if (currentRigFile != juce::File() &&
+      currentRigFile.getFullPathName().isNotEmpty()) {
+    if (confirmOverwriteOnSave && currentRigFile.existsAsFile()) {
+      const juce::File target = currentRigFile;
+      juce::Component::SafePointer<MainComponent> safeThis(this);
+      juce::AlertWindow::showAsync(
+          juce::MessageBoxOptions()
+              .withIconType(juce::MessageBoxIconType::QuestionIcon)
+              .withTitle("Overwrite Song?")
+              .withMessage("Overwrite \"" + target.getFileNameWithoutExtension() +
+                           "\" with the current rig?")
+              .withButton("Overwrite")
+              .withButton("Save As...")
+              .withButton("Cancel"),
+          [safeThis, target](int result) {
+            if (safeThis == nullptr)
+              return;
+            if (result == 1)
+              safeThis->saveRigToFile(target);
+            else if (result == 2)
+              safeThis->saveSongAs();
+          });
+      return;
+    }
+    saveRigToFile(currentRigFile);
+    return;
+  }
+  saveSongAs();
+}
+
+void MainComponent::saveSongAs() {
+  juce::File initialTarget =
+      (currentRigFile != juce::File() &&
+       currentRigFile.getFullPathName().isNotEmpty())
+          ? currentRigFile
+          : Fanfare::RigLibrary::getSongsDirectory();
+  auto chooser = std::make_shared<juce::FileChooser>(
+      "Save Song Configuration", initialTarget, "*.json");
+
+  juce::Component::SafePointer<MainComponent> safeThis(this);
+  chooser->launchAsync(
+      juce::FileBrowserComponent::saveMode |
+          juce::FileBrowserComponent::canSelectFiles,
+      [safeThis, chooser](const juce::FileChooser &fc) {
+        if (safeThis == nullptr)
+          return;
+        auto file = fc.getResult();
+        if (file != juce::File())
+          safeThis->saveRigToFile(file);
       });
 }

@@ -97,6 +97,10 @@ public:
   void showWelcomeModal();
   void onStartupSplashFinished();
   void resetToNewSong();
+  bool saveRigToFile(const juce::File &targetFile);
+  void saveCurrentSong();
+  void saveSongAs();
+  void saveConfirmOverwritePreference() const;
   void showConfigOverlay();
   void setActiveMidiNoteLearner(juce::Component* learner) {
     activeMidiNoteLearner = learner;
@@ -363,6 +367,7 @@ private:
 
   juce::Label setupNameLabel{"setupNameLabel", "No song loaded"};
   juce::File currentRigFile;
+  bool confirmOverwriteOnSave = true;
   juce::ToggleButton freshBuildToggle{"CLEAN SLATE"};
   juce::ToggleButton autoCollapseToggle{"STAGE COMPACT"};
   juce::Label stripWidthLabel{"wLabel", "STRIP WIDTH"};

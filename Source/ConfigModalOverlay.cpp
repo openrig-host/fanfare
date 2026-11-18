@@ -64,6 +64,17 @@ ConfigModalOverlay::ConfigModalOverlay(Actions a) : actions(std::move(a)) {
   aboutBtn.setTooltip("Fanfare Stage Engine philosophy, version & stage credits.");
   aboutBtn.onClick = [this] { clicked(actions.onAbout); };
 
+  confirmOverwriteToggle.setTooltip(
+      "Ask for confirmation before overwriting an existing song file with Save (Ctrl+S).");
+  confirmOverwriteToggle.setToggleState(
+      actions.isConfirmOverwriteOnSave ? actions.isConfirmOverwriteOnSave() : true,
+      juce::dontSendNotification);
+  confirmOverwriteToggle.onClick = [this] {
+    if (actions.onSetConfirmOverwriteOnSave)
+      actions.onSetConfirmOverwriteOnSave(confirmOverwriteToggle.getToggleState());
+  };
+  addAndMakeVisible(confirmOverwriteToggle);
+
   closeBtn.setButtonText("CLOSE");
   Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Subtle);
   closeBtn.onClick = [this] {
@@ -77,7 +88,7 @@ ConfigModalOverlay::ConfigModalOverlay(Actions a) : actions(std::move(a)) {
 
   refreshInfo();
   updateStressTestButtonState();
-  setSize(376, 488);
+  setSize(376, 522);
 }
 
 void ConfigModalOverlay::updateStressTestButtonState() {
@@ -130,6 +141,8 @@ void ConfigModalOverlay::resized() {
   resetAudioBtn.setBounds(area.removeFromTop(rowH).reduced(0, 2));
   stressTestBtn.setBounds(area.removeFromTop(rowH).reduced(0, 2));
   aboutBtn.setBounds(area.removeFromTop(rowH).reduced(0, 2));
+  area.removeFromTop(4);
+  confirmOverwriteToggle.setBounds(area.removeFromTop(26));
 }
 
 void ConfigModalOverlay::addSettingButton(juce::TextButton &b, const juce::String &text) {
