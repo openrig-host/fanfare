@@ -48,7 +48,7 @@ It's not a DAW. It's an instrument.
 
 ## Quick Start
 
-1. **Download the latest release.** Grab `Fanfare.exe` from [GitHub Releases](https://github.com/openrig-host/fanfare/releases/latest). No installer.
+1. **Install Fanfare.** Either install smoothly with no SmartScreen warning from the **[Microsoft Store](https://apps.microsoft.com/detail/9mw95413hg69?hl=en-US&gl=CA)**, or grab the latest unsigned `.exe` / `.msi` from **[GitHub Releases](https://github.com/openrig-host/fanfare/releases/latest)** (usually more current, as Microsoft certification takes a few days).
 2. **Set up audio and MIDI.** From the Startup Welcome screen or **`Rig → Audio & MIDI settings...`**, pick your **ASIO** driver (or WASAPI) and enable your MIDI controller.
 3. **Load a song or fill a slot.** Pick a recent song on the Welcome screen, double-click a song in the left **Songs** sidebar, or click **`+`** on any channel strip slot to load a VST3.
 4. **Set key ranges and MIDI mappings.** Open the strip **`...`** menu for **Note range & transpose**, or click **`CC`** to open the CC Assignment Manager and apply your global **Controller Profile**.
@@ -262,11 +262,14 @@ Used on stage with:
 
 ## Download
 
-Windows builds with **ASIO support** are on the [Releases page](https://github.com/openrig-host/fanfare/releases). It's a single `Fanfare.exe`. Download it and run it.
+You have two ways to install Fanfare on Windows 10/11 (64-bit) with **ASIO support**:
+
+- **Microsoft Store (Signed — No SmartScreen Warnings):** [**Get Fanfare Live on Microsoft Store**](https://apps.microsoft.com/detail/9mw95413hg69?hl=en-US&gl=CA)
+  Installs smoothly with zero security warnings. Updates take a few days to clear Microsoft Store certification.
+- **GitHub Releases (Most Current — Unsigned):** [**Download Latest from GitHub Releases**](https://github.com/openrig-host/fanfare/releases/latest)
+  Always has the newest fixes and features first (`Fanfare.exe`, `.msi`, and portable `.zip`), **but is unsigned** and will trigger a Windows SmartScreen warning on installation (*More info → Run anyway*).
 
 > Releases are built with ASIO enabled and uploaded to GitHub directly. There's no CI build because Steinberg's ASIO SDK license doesn't allow it to live in a public repo or on a public build server.
-
-**Latest release:** https://github.com/openrig-host/fanfare/releases/latest
 
 ### Requirements
 - Windows 10 or 11 (64-bit)
