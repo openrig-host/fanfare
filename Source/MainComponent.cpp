@@ -304,8 +304,9 @@ MainComponent::MainComponent() {
   // Add audio callback
   deviceManager.addAudioCallback(this);
 
-  // Initialize scene buttons from default scenes
+  // Initialize top-bar setlist slots & far-right snapshots rail
   refreshSceneButtons();
+  refreshSnapshotRail();
 
   // Initialize embedded Web Server for Tablet HUD Companion
   Fanfare::FanfareSplashScreen::reportProgress(
@@ -1413,6 +1414,21 @@ void MainComponent::loadEngineTuningSettings() {
   }
   if (v.hasProperty("confirmOverwriteOnSave"))
     confirmOverwriteOnSave = (bool)v["confirmOverwriteOnSave"];
+  if (v.hasProperty("programChangeMode"))
+    engine.setProgramChangeMode((int)v["programChangeMode"]);
+}
+
+void MainComponent::saveProgramChangeModePreference() const {
+  auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
+  juce::var v;
+  if (f.existsAsFile())
+    v = juce::JSON::parse(f.loadFileAsString());
+  if (!v.isObject())
+    v = juce::var(new juce::DynamicObject());
+  if (auto *obj = v.getDynamicObject())
+    obj->setProperty("programChangeMode", engine.getProgramChangeMode());
+  f.getParentDirectory().createDirectory();
+  f.replaceWithText(juce::JSON::toString(v));
 }
 
 void MainComponent::saveConfirmOverwritePreference() const {
@@ -1645,6 +1661,7 @@ void MainComponent::resetAudioDevice() {
           : (hasDesiredAudioSetup ? desiredAudioSetup
                                   : deviceManager.getAudioDeviceSetup());
   deviceManager.closeAudioDevice();
+  juce::Thread::sleep(80); // Let USB ASIO drivers cleanly release their isochronous endpoint
   if (desiredAudioDeviceType.isNotEmpty() &&
       deviceManager.getCurrentAudioDeviceType() != desiredAudioDeviceType) {
     deviceManager.setCurrentAudioDeviceType(desiredAudioDeviceType, true);
@@ -1657,7 +1674,15 @@ void MainComponent::resetAudioDevice() {
     if (newDev->isOpen() && newDev->isPlaying()) {
       inAudioRecoveryMode = false;
       audioRecoveryAttemptCount = 0;
+      LOG_INFO("Reset Audio succeeded: " + newDev->getName());
+      showSongStatus("AUDIO RESET: " + newDev->getName() + " restarted");
+    } else {
+      LOG_WARN("Reset Audio: device opened but not playing: " + newDev->getName());
+      showSongStatus("AUDIO RESET: " + newDev->getName() + " (not playing)");
     }
+  } else {
+    LOG_WARN("Reset Audio: no audio device active after restart");
+    showSongStatus("AUDIO RESET: device unavailable (check USB)");
   }
 }
 
@@ -1763,6 +1788,7 @@ void MainComponent::refreshThemeDependentStyles() {
     iemFxBtns[i].getProperties().set("slotAccent", (int)t.iem.getARGB());
   }
 
+  snapshotRail.refreshStyles();
   updatePreloadStatus();
 }
 
@@ -1900,6 +1926,8 @@ void MainComponent::resized() {
   panicBtn.setBounds(sh.removeFromRight(88).reduced(0, 5));
   sh.removeFromRight(20); // keep-clear gap around PANIC
   clockLabel.setBounds(sh.removeFromRight(92).reduced(0, 7));
+  sh.removeFromRight(6);
+  clickBtn.setBounds(sh.removeFromRight(68).reduced(0, 7));
   if (updateBadgeBtn.isVisible()) {
     sh.removeFromRight(6);
     updateBadgeBtn.setBounds(sh.removeFromRight(104).reduced(0, 7));
@@ -1973,6 +2001,8 @@ void MainComponent::resized() {
     sb.removeFromLeft(6);
     audioDeviceLabel.setBounds(
         sb.removeFromLeft(juce::jmin(210, sb.getWidth() / 5)));
+    sb.removeFromLeft(4);
+    resetAudioBtn.setBounds(sb.removeFromLeft(78).reduced(0, 2));
     const bool showThermal = thermalLabel.isVisible();
     if (showThermal)
       thermalLabel.setBounds(sb.removeFromRight(110).reduced(0, 2));
@@ -1996,6 +2026,12 @@ void MainComponent::resized() {
     r.removeFromLeft(3);
   } else if (libraryPanel) {
     libraryPanel->setVisible(false);
+  }
+
+  // Far-right Snapshots Rail (stationary regardless of left sidebar)
+  if (snapshotRail.isVisible()) {
+    snapshotRail.setBounds(r.removeFromRight(snapshotRail.getPreferredWidth()));
+    r.removeFromRight(2);
   }
 
   // Master Console Column (right side)
@@ -2517,6 +2553,19 @@ void MainComponent::timerCallback() {
   // Update live performance clock
   auto now = juce::Time::getCurrentTime();
   clockLabel.setText(now.formatted("%I:%M:%S %p"), juce::dontSendNotification);
+
+  // Sync IEM Click button state (auto-clears when a Count-In finishes)
+  const bool clkOn = engine.getClickTrack().isEnabled();
+  const juce::String clkText =
+      clkOn ? ("CLK " + juce::String(juce::roundToInt(engine.getClickTrack().getBpm())))
+            : "CLICK";
+  if (clickBtn.getButtonText() != clkText)
+    clickBtn.setButtonText(clkText);
+  if (clickBtn.getToggleState() != clkOn) {
+    clickBtn.setToggleState(clkOn, juce::dontSendNotification);
+    Fanfare::setButtonRole(clickBtn, clkOn ? Fanfare::ButtonRole::Iem
+                                           : Fanfare::ButtonRole::Standard);
+  }
 
   // Sync Master FX buttons
   for (int i = 0; i < 3; ++i) {

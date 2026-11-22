@@ -195,27 +195,27 @@ public:
     constexpr float kTwoPi = 6.28318530717958647692f;
     const float srF = (float)sr;
 
-    // Keep stereo mics nearly opposite (~170-180 deg apart across normal spread)
-    // so L and R never peak simultaneously into an unnatural mono tremolo.
-    const float micAngleMag = 0.35f + 1.2208f * std::sqrt(micSpread);
+    // Sweep smoothly from a single front-center virtual mic (micSpread = 0)
+    // to wide ~176 deg opposing stereo mics (micSpread = 1) without summing out-of-phase L/R.
+    const float micAngleMag = 1.54f * std::pow(micSpread, 0.85f);
     const float cosMic = std::cos(micAngleMag);
     const float sinMicL = std::sin(-micAngleMag);
     const float sinMicR = std::sin(+micAngleMag);
-    // When micSpread -> 0, collapse rotor L/R action to dead-center mono (while keeping
-    // post-rotor Chorus & Wood Room stereo) and add a thicker mono acoustic swish.
-    const float monoSwish = 1.0f - micSpread;
-    const float monoFold = monoSwish * (1.0f - 0.35f * micSpread);
 
     const float roomEff = std::min(1.0f, roomMix * roomScale);
     const float drySpeakerGain = 1.0f - 0.36f * roomEff;
     const float woodWetGain = roomEff * 1.15f;
     const float dynCabRes = cabResAmt * (0.25f + 1.55f * warmth);
     const float warmAmt = warmth * 2.15f * warmMul;
-    const float warmNorm = 1.0f / (1.0f + 0.16f * warmAmt);
 
     for (int s = 0; s < n; ++s) {
       advanceCabinet(cabA, kTwoPi);
       advanceCabinet(cabB, kTwoPi);
+
+      const float speedNorm = std::clamp(
+          (cabA.hornSpeed - cabA.hornSlow) / std::max(1e-6f, cabA.hornFast - cabA.hornSlow),
+          0.0f, 1.0f);
+      const float slowBlend = 1.0f - speedNorm; // 1.0 at Slow/Brake, 0.0 at Fast
 
       const float mono = 0.5f * (left[s] + right[s]);
 
@@ -247,26 +247,21 @@ public:
 
       // Always Dual asynchronous Leslie 122 stage
       float aL = 0.0f, aR = 0.0f, bL = 0.0f, bR = 0.0f;
-      sampleCabinet(cabA, cosMic, sinMicL, sinMicR, srF, kTwoPi, 0.0f, aL, aR);
+      sampleCabinet(cabA, cosMic, sinMicL, sinMicR, srF, kTwoPi, 0.0f, slowBlend, aL, aR);
       sampleCabinet(cabB, cosMic, sinMicL, sinMicR, srF, kTwoPi,
-                    0.00055f * srF, bL, bR);
+                    0.00055f * srF, slowBlend, bL, bR);
 
       if (++writePos >= dlySize)
         writePos = 0;
 
-      const float stageL = (0.86f * aL + 0.14f * aR) * 0.78f +
-                           (0.18f * bL + 0.08f * bR) * 0.50f;
-      const float stageR = (0.18f * aR + 0.08f * aL) * 0.50f +
-                           (0.86f * bR + 0.14f * bL) * 0.78f;
-
-      auto fastSat = [](float x) noexcept {
-        const float x2 = x * x;
-        return x / (1.0f + 0.33f * x2);
-      };
-      const float monoRaw = 0.5f * (stageL + stageR);
-      const float monoThick = monoRaw + monoSwish * 0.22f * fastSat(monoRaw * 1.45f);
-      const float spkL = stageL + monoFold * (monoThick - stageL);
-      const float spkR = stageR + monoFold * (monoThick - stageR);
+      const float wideL = (0.86f * aL + 0.14f * aR) * 0.78f +
+                          (0.18f * bL + 0.08f * bR) * 0.50f;
+      const float wideR = (0.18f * aR + 0.08f * aL) * 0.50f +
+                          (0.86f * bR + 0.14f * bL) * 0.78f;
+      const float narrowL = 0.5f * (aL + bL) * 0.92f;
+      const float narrowR = 0.5f * (aR + bR) * 0.92f;
+      const float spkL = narrowL + micSpread * (wideL - narrowL);
+      const float spkR = narrowR + micSpread * (wideR - narrowR);
 
       // Birch cabinet resonance (scales with Warmth)
       cabWarmL += cabCoef * (spkL - cabWarmL);
@@ -280,15 +275,22 @@ public:
       closeL = outLpL;
       closeR = outLpR;
 
-      // Low-mid warmth: deep 230 Hz body + 560 Hz woody chest + gentle 15" woofer fatness
+      auto fastSat = [](float x) noexcept {
+        const float x2 = x * x;
+        return x / (1.0f + 0.33f * x2);
+      };
+
+      // Low-mid warmth: deep 230 Hz body + 560 Hz woody chest + slightly thicker slow cab bloom
+      const float effWarmAmt = warmAmt * (1.0f + 0.14f * slowBlend);
+      const float effWarmNorm = 1.0f / (1.0f + 0.16f * effWarmAmt);
       lm1L += lm1Coef * (closeL - lm1L);
       lm1R += lm1Coef * (closeR - lm1R);
       lm2L += lm2Coef * (closeL - lm2L);
       lm2R += lm2Coef * (closeR - lm2R);
-      const float bodyL = warmAmt * (0.95f * lm1L + 0.70f * (lm2L - lm1L));
-      const float bodyR = warmAmt * (0.95f * lm1R + 0.70f * (lm2R - lm1R));
-      closeL = (closeL + bodyL + 0.14f * warmth * fastSat(bodyL * 1.25f)) * warmNorm;
-      closeR = (closeR + bodyR + 0.14f * warmth * fastSat(bodyR * 1.25f)) * warmNorm;
+      const float bodyL = effWarmAmt * (0.95f * lm1L + 0.70f * (lm2L - lm1L));
+      const float bodyR = effWarmAmt * (0.95f * lm1R + 0.70f * (lm2R - lm1R));
+      closeL = (closeL + bodyL + 0.14f * warmth * fastSat(bodyL * 1.25f)) * effWarmNorm;
+      closeR = (closeR + bodyR + 0.14f * warmth * fastSat(bodyR * 1.25f)) * effWarmNorm;
 
       // Built-in Dimension-style stereo chorus (cross-coupled, opposing LFOs)
       if (chorusMix > 0.004f && chSize > 0) {
@@ -413,11 +415,14 @@ private:
 
   inline void sampleCabinet(RotorCab &c, float cosMic, float sinMicL,
                             float sinMicR, float srF, float kTwoPi,
-                            float baseOffsetSamples, float &outL,
-                            float &outR) noexcept {
+                            float baseOffsetSamples, float slowBlend,
+                            float &outL, float &outR) noexcept {
     float cosHA, sinHA, cosDA, sinDA;
     fastCosSin(c.hornAngle, cosHA, sinHA);
     fastCosSin(kTwoPi - c.drumAngle, cosDA, sinDA);
+
+    const float wallSwirl = 1.0f + 0.45f * slowBlend;
+    const float effReflMix = reflMix * (1.0f + 0.35f * slowBlend);
 
     float micOut[2] = {0.0f, 0.0f};
     for (int mi = 0; mi < 2; ++mi) {
@@ -426,8 +431,8 @@ private:
       const float sinH = sinHA * cosMic + cosHA * sinMic;
 
       const float hDly = baseOffsetSamples + (hornDopp + 0.0005f + hornDopp * sinH) * srF;
-      const float rDly1 = baseOffsetSamples + (0.00195f - 0.00024f * sinH) * srF;
-      const float rDly2 = baseOffsetSamples + (0.00290f - 0.00017f * cosH) * srF;
+      const float rDly1 = baseOffsetSamples + (0.00195f - 0.00024f * wallSwirl * sinH) * srF;
+      const float rDly2 = baseOffsetSamples + (0.00290f - 0.00017f * wallSwirl * cosH) * srF;
       const float rDly3 = baseOffsetSamples + (0.00430f - 0.00066f * cosH) * srF;
 
       const float hornDirect = readCubic(hornBuf.data(), writePos, hDly);
@@ -445,7 +450,7 @@ private:
 
       c.reflZ[mi] += reflLpCoef * (hornWall - c.reflZ[mi]);
       const float hornLobe = hornLobeBase + hornLobeDepth * shapedFace;
-      const float hornSig = (hornDispersed * hornLobe + c.reflZ[mi] * reflMix) * hornGain;
+      const float hornSig = (hornDispersed * hornLobe + c.reflZ[mi] * effReflMix) * hornGain;
 
       const float cosD = cosDA * cosMic - sinDA * sinMic;
       const float sinD = sinDA * cosMic + cosDA * sinMic;

@@ -193,7 +193,24 @@ void FanfareEngine::loadScene(int index)
       sceneCopy = scenes[index];
       currentSceneIndex = index;
     }
-    panicTriggered.store(true); // Silence active notes so transpose changes don't cause stuck notes
+    // Only flush voices/panic when key-range, transpose, or MIDI channel changes,
+    // so pure mute/volume/DSP snapshots allow held chords and tails to ring smoothly.
+    bool needsMidiReset = false;
+    for (size_t i = 0; i < slots.size() && i < sceneCopy.slotStates.size(); ++i) {
+      auto* slot = slots[i].get();
+      const auto& st = sceneCopy.slotStates[i];
+      if (slot->getTransposeOctaves() != st.transposeOctaves ||
+          slot->getTransposeSemitones() != st.transposeSemitones ||
+          slot->getLowNote() != st.lowNote ||
+          slot->getHighNote() != st.highNote ||
+          (st.hasMidiCcState && slot->getMidiChannelOverride() != st.midiChannelOverride)) {
+        needsMidiReset = true;
+        break;
+      }
+    }
+    if (needsMidiReset)
+      panicTriggered.store(true);
+
     for (size_t i = 0; i < slots.size() && i < sceneCopy.slotStates.size(); ++i) {
       auto* slot = slots[i].get();
       const auto& st = sceneCopy.slotStates[i];
@@ -210,6 +227,12 @@ void FanfareEngine::loadScene(int index)
       slot->setTransposeOctaves(st.transposeOctaves);
       slot->setTransposeSemitones(st.transposeSemitones);
       slot->setNoteRange(st.lowNote, st.highNote);
+      if (st.hasMidiCcState) {
+        slot->setFohCC(st.fohCC);
+        slot->setIemCC(st.iemCC);
+        slot->setMuteCC(st.muteCC);
+        slot->setMidiChannelOverride(st.midiChannelOverride);
+      }
 
       // DSP
       auto& dsp = slot->getStrip();
@@ -389,6 +412,13 @@ void FanfareEngine::saveCurrentStateToScene(int index)
       // Sampler
       st.samplerEnabled = slot->getSampler().enabled.load();
 
+      // CC & MIDI channel
+      st.hasMidiCcState = true;
+      st.fohCC = slot->getFohCC();
+      st.iemCC = slot->getIemCC();
+      st.muteCC = slot->getMuteCC();
+      st.midiChannelOverride = slot->getMidiChannelOverride();
+
       captured.push_back(std::move(st));
     }
 
@@ -405,6 +435,14 @@ void FanfareEngine::renameScene(int index, const juce::String &newName)
     juce::ScopedLock sl(scenesLock);
     if (index >= 0 && index < (int)scenes.size()) {
       scenes[index].name = newName;
+    }
+  }
+
+void FanfareEngine::setSceneColor(int index, juce::uint32 argb)
+{
+    juce::ScopedLock sl(scenesLock);
+    if (index >= 0 && index < (int)scenes.size()) {
+      scenes[index].colorArgb = argb;
     }
   }
 
@@ -479,6 +517,13 @@ void FanfareEngine::createNewScene(const juce::String &name)
 
       // Sampler
       st.samplerEnabled = slot->getSampler().enabled.load();
+
+      // CC & MIDI channel
+      st.hasMidiCcState = true;
+      st.fohCC = slot->getFohCC();
+      st.iemCC = slot->getIemCC();
+      st.muteCC = slot->getMuteCC();
+      st.midiChannelOverride = slot->getMidiChannelOverride();
 
       newScene.slotStates.push_back(st);
     }
@@ -561,6 +606,7 @@ void FanfareEngine::prepareToPlay(int samplesPerBlockExpected, double sampleRate
     // Stereo buses (multi-out VST3 instruments render into RackSlot::scratchBuffer and sum stereo into slotBuffer)
     fohBus.setSize(2, samplesPerBlockExpected);
     iemBus.setSize(2, samplesPerBlockExpected);
+    iemClick.prepare(sampleRate);
 
     // Initialize per-slot stereo scratch buffers
     scratchBuffers.resize(slots.size() + auxReturns.size());
@@ -1093,6 +1139,7 @@ void FanfareEngine::loadPluginList()
       sceneObj->setProperty("name", scene.name);
       sceneObj->setProperty("midiProgramChange", scene.midiProgramChange);
       sceneObj->setProperty("midiChannel", scene.midiChannel);
+      sceneObj->setProperty("colorArgb", (juce::int64)scene.colorArgb);
 
       juce::Array<juce::var> states;
       for (const auto &st : scene.slotStates) {
@@ -1163,6 +1210,12 @@ void FanfareEngine::loadPluginList()
 
         // Sampler
         stateObj->setProperty("samplerEnabled", st.samplerEnabled);
+        if (st.hasMidiCcState) {
+          stateObj->setProperty("fohCC", st.fohCC);
+          stateObj->setProperty("iemCC", st.iemCC);
+          stateObj->setProperty("muteCC", st.muteCC);
+          stateObj->setProperty("midiChannel", st.midiChannelOverride);
+        }
 
         states.add(juce::var(stateObj));
       }
@@ -1679,6 +1732,7 @@ void FanfareEngine::applyRig(const juce::var &rig)
           Scene newScene(sv.getProperty("name", "Scene").toString());
           newScene.midiProgramChange = sv.getProperty("midiProgramChange", -1);
           newScene.midiChannel = sv.getProperty("midiChannel", 0);
+          newScene.colorArgb = static_cast<juce::uint32>((juce::int64)sv.getProperty("colorArgb", 0));
 
           if (auto *stateArr = sv.getProperty("states", juce::var()).getArray()) {
             for (int s = 0; s < stateArr->size(); ++s) {
@@ -1747,6 +1801,18 @@ void FanfareEngine::applyRig(const juce::var &rig)
 
               // Sampler
               st.samplerEnabled = stv.getProperty("samplerEnabled", false);
+              if (auto* stDyn = stv.getDynamicObject()) {
+                st.hasMidiCcState = stDyn->hasProperty("fohCC") ||
+                                    stDyn->hasProperty("iemCC") ||
+                                    stDyn->hasProperty("muteCC") ||
+                                    stDyn->hasProperty("midiChannel");
+              }
+              if (st.hasMidiCcState) {
+                st.fohCC = stv.getProperty("fohCC", -1);
+                st.iemCC = stv.getProperty("iemCC", -1);
+                st.muteCC = stv.getProperty("muteCC", -1);
+                st.midiChannelOverride = stv.getProperty("midiChannel", -1);
+              }
 
               newScene.slotStates.push_back(st);
             }

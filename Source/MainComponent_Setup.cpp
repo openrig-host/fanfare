@@ -1287,6 +1287,28 @@ void MainComponent::setupHeaderButtons() {
     });
   };
 
+  // IEM-only Click / Count-In button in header
+  Fanfare::BackupKeyboardMap::getInstance().load();
+  addAndMakeVisible(clickBtn);
+  Fanfare::setButtonRole(clickBtn, Fanfare::ButtonRole::Standard);
+  clickBtn.setTooltip(
+      "IEM-Only Click / Count-In (never sent to FOH). Left-click: Start/Stop | Shift-click or Tools menu: BPM & Count-In");
+  clickBtn.onClick = [this] {
+    if (juce::ModifierKeys::currentModifiers.isShiftDown() ||
+        juce::ModifierKeys::currentModifiers.isPopupMenu()) {
+      showClickPopover();
+      return;
+    }
+    auto &clk = engine.getClickTrack();
+    clk.setEnabled(!clk.isEnabled());
+    const bool on = clk.isEnabled();
+    clickBtn.setToggleState(on, juce::dontSendNotification);
+    clickBtn.setButtonText(
+        on ? ("CLK " + juce::String(juce::roundToInt(clk.getBpm()))) : "CLICK");
+    Fanfare::setButtonRole(clickBtn, on ? Fanfare::ButtonRole::Iem
+                                        : Fanfare::ButtonRole::Standard);
+  };
+
   // Save/Load buttons
   addAndMakeVisible(saveBtn);
   Fanfare::setButtonRole(saveBtn, Fanfare::ButtonRole::Standard);
@@ -1592,7 +1614,7 @@ void MainComponent::setupSetupButtons() {
     queueButtons.add(btn);
   }
 
-  // Scene management buttons
+  // Top bar "+ Slot" adds a permanent song slot to the top Setlist bar
   addAndMakeVisible(addSceneBtn);
   addAndMakeVisible(saveSceneBtn);
   addAndMakeVisible(renameSceneBtn);
@@ -1604,7 +1626,8 @@ void MainComponent::setupSetupButtons() {
   Fanfare::setButtonRole(deleteSceneBtn, Fanfare::ButtonRole::Danger);
 
   addSceneBtn.onClick = [this] {
-    engine.createNewScene("SCENE " + juce::String(engine.getNumScenes() + 1));
+    sceneSetupFilePaths.add("");
+    saveButtonMappings();
     refreshSceneButtons();
   };
 
@@ -1631,7 +1654,7 @@ void MainComponent::setupSetupButtons() {
                 juce::String newName = safeAlert->getTextEditorContents("name");
                 if (newName.isNotEmpty()) {
                   safeThis->engine.renameScene(idx, newName);
-                  safeThis->refreshSceneButtons();
+                  safeThis->refreshSnapshotRail();
                 }
               }
             }),
@@ -1643,16 +1666,12 @@ void MainComponent::setupSetupButtons() {
     if (idx >= 0 && idx < engine.getNumScenes()) {
       if (engine.getNumScenes() <= 1) {
         juce::AlertWindow::showMessageBoxAsync(
-            juce::MessageBoxIconType::InfoIcon, "Delete Scene",
-            "Cannot delete the last remaining scene.");
+            juce::MessageBoxIconType::InfoIcon, "Delete Snapshot",
+            "Cannot delete the last remaining snapshot.");
         return;
       }
       engine.deleteScene(idx);
-      if (idx < sceneSetupFilePaths.size()) {
-        sceneSetupFilePaths.remove(idx);
-        saveButtonMappings();
-      }
-      refreshSceneButtons();
+      refreshSnapshotRail();
     }
   };
 
@@ -1759,46 +1778,105 @@ void MainComponent::setupStudioShell() {
   queueTilesPanel.setContent(tiles, {&loadSetBtn, &saveSetBtn});
   libraryPanel->setQueueContent(&queueTilesPanel);
 
-  addSceneBtn.setButtonText("+ Scene");
+  addSceneBtn.setButtonText("+ Slot");
   addSceneBtn.setTooltip(
-      "Add a scene (snapshot of strip mutes, levels and sends)");
+      "Add another permanent song slot to the top Setlist bar");
   Fanfare::setButtonRole(addSceneBtn, Fanfare::ButtonRole::Subtle);
   addAndMakeVisible(sceneMenuBtn);
   Fanfare::setButtonRole(sceneMenuBtn, Fanfare::ButtonRole::Subtle);
   sceneMenuBtn.setTooltip(
-      "Scene actions: save, rename, delete (right-click a scene for more)");
+      "Top-bar Setlist actions (or right-click any song tile)");
   sceneMenuBtn.onClick = [this] { showSceneMenu(); };
 
-  // Overflow button: lists scenes that no longer fit in the scene row
+  // Overflow button: lists song slots that no longer fit in the top Setlist bar
   addAndMakeVisible(sceneOverflowBtn);
   Fanfare::setButtonRole(sceneOverflowBtn, Fanfare::ButtonRole::Subtle);
   sceneOverflowBtn.setTooltip(
-      "Scenes hidden by a narrow window - click to recall one");
+      "Setlist songs hidden by a narrow window - click to load one");
   sceneOverflowBtn.onClick = [this] {
     juce::PopupMenu m;
-    m.addSectionHeader("More scenes");
+    m.addSectionHeader("More Setlist Songs");
     for (int idx : hiddenSceneIndices) {
-      juce::String name = (idx >= 0 && idx < engine.getNumScenes())
-                              ? engine.getSceneName(idx)
-                              : juce::String();
-      juce::File f(idx < sceneSetupFilePaths.size() ? sceneSetupFilePaths[idx]
-                                                    : juce::String());
-      if (f.existsAsFile())
-        name = f.getFileNameWithoutExtension();
+      juce::File f(idx >= 0 && idx < sceneSetupFilePaths.size() ? sceneSetupFilePaths[idx]
+                                                                : juce::String());
+      juce::String name = f.existsAsFile()
+                              ? f.getFileNameWithoutExtension()
+                              : ("Slot " + juce::String(idx + 1) + " (Empty)");
       m.addItem(idx + 1, juce::String(idx + 1) + "  " + name);
     }
     juce::Component::SafePointer<MainComponent> safeThis(this);
     m.showMenuAsync(
         juce::PopupMenu::Options().withTargetComponent(&sceneOverflowBtn),
         [safeThis](int result) {
-          if (safeThis != nullptr && result > 0)
-            safeThis->recallScene(result - 1);
+          if (safeThis == nullptr || result <= 0)
+            return;
+          const int slotIdx = result - 1;
+          juce::File f(slotIdx < safeThis->sceneSetupFilePaths.size()
+                           ? safeThis->sceneSetupFilePaths[slotIdx]
+                           : juce::String());
+          if (f.existsAsFile()) {
+            safeThis->syncSetlistFromTopBar();
+            safeThis->loadRigAsync(f, -1, slotIdx);
+          } else {
+            safeThis->assignSongToTopBarSlot(slotIdx);
+          }
         });
   };
+
+  // Far-right vertical Snapshots rail (instant strip mutes/levels/ranges/DSP, zero VST reload)
+  addAndMakeVisible(snapshotRail);
+  snapshotRail.onRecall = [this](int idx) { recallSnapshot(idx); };
+  snapshotRail.onRightClick = [this](int idx, juce::Component* src) {
+    showSnapshotContextMenu(idx, src);
+  };
+  snapshotRail.onAdd = [this]() {
+    const int nextNum = engine.getNumScenes() + 1;
+    auto *alert = new juce::AlertWindow(
+        "New Snapshot",
+        "Capture current strip mutes, levels, key ranges & DSP.\nShort name (~8 chars fits best):",
+        juce::AlertWindow::QuestionIcon);
+    alert->addTextEditor("name", "SNAP " + juce::String(nextNum));
+    alert->addButton("Capture", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    juce::Component::SafePointer<juce::AlertWindow> safeAlert(alert);
+    alert->enterModalState(
+        true,
+        juce::ModalCallbackFunction::create([safeThis, safeAlert](int result) {
+          if (safeThis != nullptr && safeAlert != nullptr && result == 1) {
+            juce::String snapName = safeAlert->getTextEditorContents("name").trim();
+            if (snapName.isEmpty())
+              snapName = "SNAP " + juce::String(safeThis->engine.getNumScenes() + 1);
+            safeThis->engine.createNewScene(snapName);
+            const int newIdx = safeThis->engine.getNumScenes() - 1;
+            safeThis->engine.setCurrentSceneIndex(newIdx);
+            safeThis->refreshSnapshotRail();
+            safeThis->showSongStatus("SNAP CAPTURED: " + snapName);
+          }
+        }),
+        true);
+  };
+  snapshotRail.onUpdateActive = [this]() {
+    const int idx = engine.getCurrentSceneIndex();
+    if (idx >= 0 && idx < engine.getNumScenes()) {
+      engine.saveCurrentStateToScene(idx);
+      showSongStatus("SNAP UPDATED: " + engine.getSceneName(idx));
+    }
+  };
+  snapshotRail.onCollapsedChanged = [this]() {
+    resized();
+    repaint();
+  };
+  refreshSnapshotRail();
 
   panicBtn.setButtonText("Panic");
   panicBtn.setTooltip(
       "Panic (P): silences all stuck notes and flushes audio buffers.");
+  resetAudioBtn.setVisible(true);
+  resetAudioBtn.setButtonText("Reset Audio");
+  Fanfare::setButtonRole(resetAudioBtn, Fanfare::ButtonRole::Subtle);
+  resetAudioBtn.setTooltip(
+      "Reset Audio: closes and re-opens the ASIO driver (~1s) if output drops out mid-gig.");
   prevSetlistBtn.setButtonText("<");
   nextSetlistBtn.setButtonText(">");
   prevSetlistBtn.setTooltip("Previous song in the setlist");

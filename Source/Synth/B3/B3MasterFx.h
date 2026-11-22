@@ -46,11 +46,11 @@ public:
     revDampCoef = 1.0f - std::exp(-kTwoPi * std::min(4200.0f, srF * 0.40f) / srF);
     revHpCoef = 1.0f - std::exp(-kTwoPi * 160.0f / srF);
 
-    // 10-Band Strip Voicing EQ (matches Slot 3 Graphic EQ, with warm low-end restored)
+    // 10-Band Strip Voicing EQ (restored low-end warmth + airy high-drawbar shine)
     static constexpr double kVoiceFreqs[10] = {31.25, 62.5, 125.0, 250.0, 500.0,
                                                1000.0, 2000.0, 4000.0, 8000.0, 16000.0};
-    static constexpr double kVoiceGainsDb[10] = {-2.0, -0.8, 0.4, 0.8, 1.4,
-                                                 4.4, 4.7, 5.9, 5.8, 6.2};
+    static constexpr double kVoiceGainsDb[10] = {0.2, 1.4, 2.0, 1.4, 1.4,
+                                                 4.4, 4.7, 6.4, 7.2, 7.6};
     for (int i = 0; i < 10; ++i)
       setPeaking(voiceEq[(size_t)i], kVoiceFreqs[i], 1.414, kVoiceGainsDb[i]);
     voiceTrimGain = std::pow(10.0f, -6.8f / 20.0f);

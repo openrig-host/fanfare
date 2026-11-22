@@ -1021,11 +1021,12 @@ void WebServer::processIncomingWsMessage(void* socketHandle, const juce::String&
                 return;
             if (idx < 0 || idx >= engine.getNumScenes())
                 return;
-            engine.saveCurrentStateToScene(engine.getCurrentSceneIndex());
-            engine.loadScene(idx);
-            notifySceneChanged(idx, engine.getSceneName(idx));
-            if (mainComponent != nullptr)
-                mainComponent->updateStripCollapseStates();
+            if (mainComponent != nullptr) {
+                mainComponent->recallSnapshot(idx);
+            } else {
+                engine.loadScene(idx);
+                notifySceneChanged(idx, engine.getSceneName(idx));
+            }
         });
     } else if (type == "prev_setlist") {
         juce::MessageManager::callAsync([this, life]() {
@@ -1534,11 +1535,12 @@ juce::String WebServer::handleApiPost(const juce::String& path, const juce::var&
                 return;
             if (idx < 0 || idx >= engine.getNumScenes())
                 return;
-            engine.saveCurrentStateToScene(engine.getCurrentSceneIndex());
-            engine.loadScene(idx);
-            notifySceneChanged(idx, engine.getSceneName(idx));
-            if (mainComponent != nullptr)
-                mainComponent->updateStripCollapseStates();
+            if (mainComponent != nullptr) {
+                mainComponent->recallSnapshot(idx);
+            } else {
+                engine.loadScene(idx);
+                notifySceneChanged(idx, engine.getSceneName(idx));
+            }
         });
         return "{\"ok\":true}";
     } else if (path == "/api/panic") {

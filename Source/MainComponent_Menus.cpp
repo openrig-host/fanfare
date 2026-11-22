@@ -503,11 +503,11 @@ bool MainComponent::keyPressed(const juce::KeyPress &key,
     return true;
   } else if (!key.getModifiers().isCommandDown() &&
              !key.getModifiers().isAltDown()) {
-    // Keys 1-9 recall scenes (nov8mistral.md 1.2). The TextEditor guard at the
+    // Keys 1-9 recall snapshots in the current setup. The TextEditor guard at the
     // top of this handler keeps digits typed into search/rename fields safe.
     const int digit = key.getKeyCode() - '0';
     if (digit >= 1 && digit <= 9 && digit <= engine.getNumScenes()) {
-      recallScene(digit - 1);
+      recallSnapshot(digit - 1);
       return true;
     }
     if (ThemeManager::isStudio() && rackSlotComponents.size() > 0) {
@@ -608,6 +608,11 @@ enum MenuIds {
   miInspector,
   miRigDoctor,
   miRemote,
+  miIemClick,
+  miBackupKeyboard,
+  miPcIgnore,
+  miPcSwitch,
+  miPcForward,
   miManual = 400,
   miWelcome,
   miQuickStart,
@@ -631,37 +636,65 @@ juce::PopupMenu::Item menuItem(int id, const juce::String &text,
 } // namespace
 
 void MainComponent::showSceneMenu() {
-  const int idx = engine.getCurrentSceneIndex();
-  const bool valid = idx >= 0 && idx < engine.getNumScenes();
-  const juce::String name = valid ? engine.getSceneName(idx) : juce::String();
   juce::PopupMenu m;
-  m.addSectionHeader(valid ? "Scene: " + name : "Scenes");
-  m.addItem(1, "Save current state to this scene", valid);
-  m.addItem(2, "Rename scene...", valid);
+  m.addSectionHeader("Top Setlist Bar");
+  m.addItem(1, "Add Song Slot");
+  if (sceneSetupFilePaths.size() > 4)
+    m.addItem(2, "Trim Empty Trailing Slots");
   m.addSeparator();
-  m.addItem(3, "Delete scene...", valid && engine.getNumScenes() > 1);
+  m.addItem(3, "Save Setlist File (.json)...");
+  m.addItem(4, "Load Setlist File (.json)...");
   juce::Component::SafePointer<MainComponent> safeThis(this);
   m.showMenuAsync(
       juce::PopupMenu::Options().withTargetComponent(&sceneMenuBtn),
-      [safeThis, name](int r) {
+      [safeThis](int r) {
         if (safeThis == nullptr)
           return;
-        if (r == 1 && safeThis->saveSceneBtn.onClick) {
-          safeThis->saveSceneBtn.onClick();
-        } else if (r == 2 && safeThis->renameSceneBtn.onClick) {
-          safeThis->renameSceneBtn.onClick();
+        if (r == 1) {
+          safeThis->sceneSetupFilePaths.add("");
+          safeThis->saveButtonMappings();
+          safeThis->refreshSceneButtons();
+        } else if (r == 2) {
+          while (safeThis->sceneSetupFilePaths.size() > 4 &&
+                 safeThis->sceneSetupFilePaths[safeThis->sceneSetupFilePaths.size() - 1].isEmpty()) {
+            safeThis->sceneSetupFilePaths.remove(safeThis->sceneSetupFilePaths.size() - 1);
+          }
+          safeThis->saveButtonMappings();
+          safeThis->syncSetlistFromTopBar();
+          safeThis->refreshSceneButtons();
+          safeThis->updatePreloadStatus();
         } else if (r == 3) {
-          juce::AlertWindow::showAsync(
-              juce::MessageBoxOptions()
-                  .withIconType(juce::MessageBoxIconType::WarningIcon)
-                  .withTitle("Delete scene")
-                  .withMessage("Delete \"" + name + "\"? This can't be undone.")
-                  .withButton("Delete")
-                  .withButton("Cancel"),
-              [safeThis](int result) {
-                if (result == 1 && safeThis != nullptr &&
-                    safeThis->deleteSceneBtn.onClick)
-                  safeThis->deleteSceneBtn.onClick();
+          safeThis->fileChooser = std::make_unique<juce::FileChooser>(
+              "Save Top-Bar Setlist...", Fanfare::RigLibrary::getSetsDirectory(), "*.json");
+          safeThis->fileChooser->launchAsync(
+              juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+              [safeThis](const juce::FileChooser &fc) {
+                if (safeThis == nullptr) return;
+                auto f = fc.getResult();
+                if (f != juce::File()) {
+                  if (f.getFileExtension() != ".json")
+                    f = f.withFileExtension(".json");
+                  safeThis->syncSetlistFromTopBar();
+                  Fanfare::SetlistManager::getInstance().saveSetlist(f);
+                }
+              });
+        } else if (r == 4) {
+          safeThis->fileChooser = std::make_unique<juce::FileChooser>(
+              "Load Setlist into Top Bar...", Fanfare::RigLibrary::getSetsDirectory(), "*.json");
+          safeThis->fileChooser->launchAsync(
+              juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+              [safeThis](const juce::FileChooser &fc) {
+                if (safeThis == nullptr) return;
+                auto f = fc.getResult();
+                if (f.existsAsFile() && Fanfare::SetlistManager::getInstance().loadSetlist(f)) {
+                  auto loaded = Fanfare::SetlistManager::getInstance().getSetupsSnapshot();
+                  safeThis->sceneSetupFilePaths.clear();
+                  for (const auto &sf : loaded)
+                    safeThis->sceneSetupFilePaths.add(sf.getFullPathName());
+                  safeThis->saveButtonMappings();
+                  safeThis->refreshSceneButtons();
+                  safeThis->updatePreloadStatus();
+                }
               });
         }
       });
@@ -743,6 +776,21 @@ juce::PopupMenu MainComponent::getMenuForIndex(int topLevelMenuIndex,
     m.addItem(menuItem(miInspector, "Resource inspector"));
     m.addItem(menuItem(miRigDoctor, "Rig doctor (diagnose & repair)..."));
     m.addItem(menuItem(miRemote, "Tablet remote..."));
+    m.addItem(menuItem(miIemClick, "IEM click / count-in...", {},
+                       engine.getClickTrack().isEnabled()));
+    m.addItem(menuItem(miBackupKeyboard, "Backup keyboard remap...", {},
+                       Fanfare::BackupKeyboardMap::getInstance().isEnabled()));
+    {
+      juce::PopupMenu pcMenu;
+      const int pcMode = engine.getProgramChangeMode();
+      pcMenu.addItem(menuItem(miPcIgnore, "Ignore All Program Changes (Safe)", {},
+                              pcMode == FanfareEngine::PcIgnoreAll));
+      pcMenu.addItem(menuItem(miPcSwitch, "Switch Songs & Scenes (Triggers)", {},
+                              pcMode == FanfareEngine::PcSwitchRig));
+      pcMenu.addItem(menuItem(miPcForward, "Forward to Plugins (Patch Change)", {},
+                              pcMode == FanfareEngine::PcForwardToPlugins));
+      m.addSubMenu("Program change filter", pcMenu);
+    }
     m.addItem(menuItem(miViewContextBase + Fanfare::ToolRail::Midi,
                        "MIDI monitor", {},
                        sidebarContext == Fanfare::ToolRail::Midi));
@@ -852,6 +900,24 @@ void MainComponent::menuItemSelected(int id, int) {
   case miRemote:
     showWebRemoteDialog();
     break;
+  case miIemClick:
+    showClickPopover();
+    break;
+  case miBackupKeyboard:
+    showBackupKeyboardDialog();
+    break;
+  case miPcIgnore:
+    engine.setProgramChangeMode(FanfareEngine::PcIgnoreAll);
+    saveProgramChangeModePreference();
+    break;
+  case miPcSwitch:
+    engine.setProgramChangeMode(FanfareEngine::PcSwitchRig);
+    saveProgramChangeModePreference();
+    break;
+  case miPcForward:
+    engine.setProgramChangeMode(FanfareEngine::PcForwardToPlugins);
+    saveProgramChangeModePreference();
+    break;
   case miManual:
     Fanfare::openHelpManual("#main-mixer");
     break;
@@ -902,4 +968,249 @@ void MainComponent::showWelcomeModal() {
   addAndMakeVisible(welcomeOverlay.get());
   welcomeOverlay->setBounds(getLocalBounds());
   welcomeOverlay->toFront(true);
+}
+
+void MainComponent::showClickPopover() {
+  struct ClickPopoverComp : public juce::Component {
+    Fanfare::IemClickTrack &clk;
+    juce::Label titleLbl{"", "IEM-ONLY CLICK / COUNT-IN"};
+    juce::Label bpmLbl{"", "BPM"};
+    juce::Slider bpmSlider;
+    juce::TextButton tapBtn{"TAP"};
+    juce::Label sigLbl{"", "TIME SIG"};
+    juce::ComboBox sigCombo;
+    juce::Label modeLbl{"", "MODE"};
+    juce::ComboBox modeCombo;
+    juce::Label lvlLbl{"", "IEM LEVEL"};
+    juce::Slider lvlSlider;
+    juce::TextButton startStopBtn{"START CLICK"};
+    double lastTapMs = 0.0;
+
+    explicit ClickPopoverComp(Fanfare::IemClickTrack &c) : clk(c) {
+      titleLbl.setFont(BoutiqueLookAndFeel::condensedFont(13.0f, 0.06f));
+      titleLbl.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::iem));
+      addAndMakeVisible(titleLbl);
+
+      bpmLbl.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.04f));
+      addAndMakeVisible(bpmLbl);
+      bpmSlider.setRange(40.0, 240.0, 1.0);
+      bpmSlider.setValue(clk.getBpm(), juce::dontSendNotification);
+      bpmSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+      bpmSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 48, 22);
+      bpmSlider.onValueChange = [this] { clk.setBpm((float)bpmSlider.getValue()); };
+      addAndMakeVisible(bpmSlider);
+
+      Fanfare::setButtonRole(tapBtn, Fanfare::ButtonRole::Standard);
+      tapBtn.onClick = [this] {
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        if (lastTapMs > 0.0) {
+          const double dt = nowMs - lastTapMs;
+          if (dt >= 250.0 && dt <= 1800.0) {
+            const float tapped = (float)juce::jlimit(40.0, 240.0, 60000.0 / dt);
+            bpmSlider.setValue(std::round(tapped), juce::sendNotificationSync);
+          }
+        }
+        lastTapMs = nowMs;
+      };
+      addAndMakeVisible(tapBtn);
+
+      sigLbl.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.04f));
+      addAndMakeVisible(sigLbl);
+      sigCombo.addItem("4/4", 4);
+      sigCombo.addItem("3/4", 3);
+      sigCombo.addItem("6/8", 6);
+      sigCombo.addItem("2/4", 2);
+      sigCombo.setSelectedId(clk.getBeatsPerBar(), juce::dontSendNotification);
+      sigCombo.onChange = [this] { clk.setBeatsPerBar(sigCombo.getSelectedId()); };
+      addAndMakeVisible(sigCombo);
+
+      modeLbl.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.04f));
+      addAndMakeVisible(modeLbl);
+      modeCombo.addItem("Continuous", 1);
+      modeCombo.addItem("1-Bar Count-In", 2);
+      modeCombo.addItem("2-Bar Count-In", 3);
+      modeCombo.setSelectedId(clk.getMode() + 1, juce::dontSendNotification);
+      modeCombo.onChange = [this] { clk.setMode(modeCombo.getSelectedId() - 1); };
+      addAndMakeVisible(modeCombo);
+
+      lvlLbl.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.04f));
+      addAndMakeVisible(lvlLbl);
+      lvlSlider.setRange(0.0, 1.0, 0.01);
+      lvlSlider.setValue(clk.getLevel(), juce::dontSendNotification);
+      lvlSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+      lvlSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 48, 22);
+      lvlSlider.onValueChange = [this] { clk.setLevel((float)lvlSlider.getValue()); };
+      addAndMakeVisible(lvlSlider);
+
+      syncButton();
+      startStopBtn.onClick = [this] {
+        clk.setEnabled(!clk.isEnabled());
+        syncButton();
+      };
+      addAndMakeVisible(startStopBtn);
+      setSize(320, 214);
+    }
+
+    void syncButton() {
+      const bool on = clk.isEnabled();
+      startStopBtn.setButtonText(on ? "STOP CLICK" : "START CLICK");
+      Fanfare::setButtonRole(startStopBtn, on ? Fanfare::ButtonRole::Danger
+                                              : Fanfare::ButtonRole::Iem);
+    }
+
+    void resized() override {
+      auto r = getLocalBounds().reduced(12);
+      titleLbl.setBounds(r.removeFromTop(22));
+      r.removeFromTop(6);
+      auto r1 = r.removeFromTop(26);
+      bpmLbl.setBounds(r1.removeFromLeft(56));
+      tapBtn.setBounds(r1.removeFromRight(46).reduced(0, 1));
+      r1.removeFromRight(4);
+      bpmSlider.setBounds(r1);
+      r.removeFromTop(6);
+      auto r2 = r.removeFromTop(26);
+      sigLbl.setBounds(r2.removeFromLeft(56));
+      sigCombo.setBounds(r2.removeFromLeft(72));
+      r2.removeFromLeft(8);
+      modeLbl.setBounds(r2.removeFromLeft(40));
+      modeCombo.setBounds(r2);
+      r.removeFromTop(6);
+      auto r3 = r.removeFromTop(26);
+      lvlLbl.setBounds(r3.removeFromLeft(56));
+      lvlSlider.setBounds(r3);
+      r.removeFromTop(10);
+      startStopBtn.setBounds(r.removeFromTop(30));
+    }
+  };
+
+  auto *comp = new ClickPopoverComp(engine.getClickTrack());
+  juce::CallOutBox::launchAsynchronously(
+      std::unique_ptr<juce::Component>(comp),
+      clickBtn.isVisible() ? clickBtn.getScreenBounds() : getScreenBounds().removeFromTop(36),
+      this);
+}
+
+void MainComponent::showBackupKeyboardDialog() {
+  struct BackupKbComp : public juce::Component {
+    Fanfare::BackupKeyboardMap &bkm = Fanfare::BackupKeyboardMap::getInstance();
+    juce::Label titleLbl{"", "BACKUP KEYBOARD QUICK REMAP"};
+    juce::Label subLbl{"", "Global MIDI input transform (no song edits needed)"};
+    juce::ToggleButton enableToggle{"ENABLE BACKUP KEYBOARD REMAP"};
+    juce::Label chLbl{"", "CHANNEL"};
+    juce::ComboBox chCombo;
+    juce::Label trLbl{"", "TRANSPOSE"};
+    juce::Slider trSlider;
+    juce::TextButton octDownBtn{"-12"};
+    juce::TextButton octZeroBtn{"0"};
+    juce::TextButton octUpBtn{"+12"};
+    juce::ToggleButton invSustToggle{"INVERT SUSTAIN PEDAL (CC 64: Yamaha <-> Roland)"};
+    juce::Label ccLbl{"", "REMAP CC"};
+    juce::ComboBox srcCcCombo;
+    juce::Label arrowLbl{"", "->"};
+    juce::ComboBox dstCcCombo;
+
+    BackupKbComp() {
+      titleLbl.setFont(BoutiqueLookAndFeel::condensedFont(13.0f, 0.06f));
+      titleLbl.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::accent));
+      addAndMakeVisible(titleLbl);
+
+      subLbl.setFont(juce::FontOptions(11.5f));
+      subLbl.setColour(juce::Label::textColourId, ThemeManager::get(Theme::Role::textDim));
+      addAndMakeVisible(subLbl);
+
+      enableToggle.setToggleState(bkm.isEnabled(), juce::dontSendNotification);
+      enableToggle.onClick = [this] { bkm.setEnabled(enableToggle.getToggleState()); };
+      addAndMakeVisible(enableToggle);
+
+      chLbl.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.04f));
+      addAndMakeVisible(chLbl);
+      chCombo.addItem("Pass-through (keep incoming)", 1);
+      for (int c = 1; c <= 16; ++c)
+        chCombo.addItem("Force All -> Ch " + juce::String(c), c + 1);
+      chCombo.setSelectedId(bkm.getForceChannel() + 1, juce::dontSendNotification);
+      chCombo.onChange = [this] { bkm.setForceChannel(chCombo.getSelectedId() - 1); };
+      addAndMakeVisible(chCombo);
+
+      trLbl.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.04f));
+      addAndMakeVisible(trLbl);
+      trSlider.setRange(-24.0, 24.0, 1.0);
+      trSlider.setValue(bkm.getTransposeSemis(), juce::dontSendNotification);
+      trSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+      trSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 40, 22);
+      trSlider.onValueChange = [this] {
+        bkm.setTransposeSemis(juce::roundToInt(trSlider.getValue()));
+      };
+      addAndMakeVisible(trSlider);
+
+      for (auto *b : {&octDownBtn, &octZeroBtn, &octUpBtn}) {
+        Fanfare::setButtonRole(*b, Fanfare::ButtonRole::Standard);
+        addAndMakeVisible(*b);
+      }
+      octDownBtn.onClick = [this] { trSlider.setValue(-12, juce::sendNotificationSync); };
+      octZeroBtn.onClick = [this] { trSlider.setValue(0, juce::sendNotificationSync); };
+      octUpBtn.onClick = [this] { trSlider.setValue(12, juce::sendNotificationSync); };
+
+      invSustToggle.setToggleState(bkm.isInvertSustain(), juce::dontSendNotification);
+      invSustToggle.onClick = [this] { bkm.setInvertSustain(invSustToggle.getToggleState()); };
+      addAndMakeVisible(invSustToggle);
+
+      ccLbl.setFont(BoutiqueLookAndFeel::condensedFont(11.0f, 0.04f));
+      addAndMakeVisible(ccLbl);
+      srcCcCombo.addItem("Off", 1);
+      for (int cc = 0; cc < 128; ++cc)
+        srcCcCombo.addItem("CC " + juce::String(cc), cc + 2);
+      srcCcCombo.setSelectedId(bkm.getRemapSrcCC() < 0 ? 1 : (bkm.getRemapSrcCC() + 2),
+                               juce::dontSendNotification);
+      srcCcCombo.onChange = [this] {
+        const int id = srcCcCombo.getSelectedId();
+        bkm.setRemapSrcCC(id <= 1 ? -1 : (id - 2));
+      };
+      addAndMakeVisible(srcCcCombo);
+
+      arrowLbl.setJustificationType(juce::Justification::centred);
+      addAndMakeVisible(arrowLbl);
+
+      for (int cc = 0; cc < 128; ++cc)
+        dstCcCombo.addItem("CC " + juce::String(cc), cc + 1);
+      dstCcCombo.setSelectedId(bkm.getRemapDstCC() + 1, juce::dontSendNotification);
+      dstCcCombo.onChange = [this] { bkm.setRemapDstCC(dstCcCombo.getSelectedId() - 1); };
+      addAndMakeVisible(dstCcCombo);
+
+      setSize(390, 246);
+    }
+
+    void resized() override {
+      auto r = getLocalBounds().reduced(14);
+      titleLbl.setBounds(r.removeFromTop(20));
+      subLbl.setBounds(r.removeFromTop(18));
+      r.removeFromTop(6);
+      enableToggle.setBounds(r.removeFromTop(26));
+      r.removeFromTop(6);
+      auto rCh = r.removeFromTop(26);
+      chLbl.setBounds(rCh.removeFromLeft(74));
+      chCombo.setBounds(rCh);
+      r.removeFromTop(6);
+      auto rTr = r.removeFromTop(26);
+      trLbl.setBounds(rTr.removeFromLeft(74));
+      octUpBtn.setBounds(rTr.removeFromRight(34).reduced(1));
+      octZeroBtn.setBounds(rTr.removeFromRight(28).reduced(1));
+      octDownBtn.setBounds(rTr.removeFromRight(34).reduced(1));
+      rTr.removeFromRight(4);
+      trSlider.setBounds(rTr);
+      r.removeFromTop(6);
+      invSustToggle.setBounds(r.removeFromTop(26));
+      r.removeFromTop(6);
+      auto rCc = r.removeFromTop(26);
+      ccLbl.setBounds(rCc.removeFromLeft(74));
+      srcCcCombo.setBounds(rCc.removeFromLeft(110));
+      arrowLbl.setBounds(rCc.removeFromLeft(26));
+      dstCcCombo.setBounds(rCc);
+    }
+  };
+
+  auto *comp = new BackupKbComp();
+  juce::CallOutBox::launchAsynchronously(
+      std::unique_ptr<juce::Component>(comp),
+      getScreenBounds().removeFromTop(36).withWidth(260),
+      this);
 }

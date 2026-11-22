@@ -37,7 +37,9 @@
 #include "WlanScanGuard.h"
 #include "ToolRail.h"
 #include "QueueTilesPanel.h"
+#include "SnapshotRailComponent.h"
 #include "StartupWelcomeModal.h"
+#include "BackupKeyboardMap.h"
 #include "Web/OpenRigWebServer.h"
 #include "Web/StageHotspotController.h"
 #include "Web/StageRemoteModalOverlay.h"
@@ -101,6 +103,9 @@ public:
   void saveCurrentSong();
   void saveSongAs();
   void saveConfirmOverwritePreference() const;
+  void saveProgramChangeModePreference() const;
+  void showClickPopover();
+  void showBackupKeyboardDialog();
   void showConfigOverlay();
   void setActiveMidiNoteLearner(juce::Component* learner) {
     activeMidiNoteLearner = learner;
@@ -114,6 +119,8 @@ public:
   void loadRigFromFile(const juce::File &file, int targetSetlistIndex = -1);
   void updateStripCollapseStates();
   void refreshThemeDependentStyles();
+  void recallSnapshot(int sceneIdx);
+  void refreshSnapshotRail();
 
 private:
   //==============================================================================
@@ -134,6 +141,7 @@ private:
   juce::TextButton quickStartBtn{"?"};
   juce::TextButton mainHelpBtn{"Help"};
   juce::TextButton updateBadgeBtn{"UPDATE"};
+  juce::TextButton clickBtn{"CLICK"};
   juce::String latestReleaseUrl;
   juce::TextButton prevSetlistBtn{"<<"};
   juce::TextButton nextSetlistBtn{">>"};
@@ -261,7 +269,12 @@ private:
   juce::OwnedArray<Fanfare::SceneButtonComponent> sceneButtons;
   juce::StringArray sceneSetupFilePaths;
   void refreshSceneButtons();
+  void syncSetlistFromTopBar();
+  void assignSongToTopBarSlot(int slotIdx);
   void recallScene(int sceneIdx);
+  void showSnapshotContextMenu(int idx, juce::Component* target);
+  void promptRenameSnapshot(int idx);
+  void promptLearnSnapshotMidi(int idx);
   void showSetupBuilderOverlay();
 
   // Collapsible library sidebar
@@ -404,6 +417,7 @@ private:
   std::unique_ptr<Fanfare::StartupWelcomeModal> welcomeOverlay;
   Fanfare::ToolRail toolRail;
   Fanfare::QueueTilesPanel queueTilesPanel;
+  Fanfare::SnapshotRailComponent snapshotRail;
   juce::TextButton sceneMenuBtn{"..."};
   juce::TextButton sceneOverflowBtn{">>"}; // lists scenes hidden by a narrow scene row
   juce::Array<int> hiddenSceneIndices;     // filled by resized()
@@ -469,10 +483,13 @@ private:
   void changeListenerCallback(juce::ChangeBroadcaster *source) override;
 
   void handleIncomingMidiMessage(juce::MidiInput *,
-                                 const juce::MidiMessage &msg) override {
+                                 const juce::MidiMessage &incomingMsg) override {
     // Skip SysEx messages - they can cause issues and we don't need them
-    if (msg.isSysEx())
+    if (incomingMsg.isSysEx())
       return;
+
+    const juce::MidiMessage msg =
+        Fanfare::BackupKeyboardMap::getInstance().remapIncoming(incomingMsg);
 
     // Status-bar readout of the last playable event (see noteMidiStatus).
     noteMidiStatus(msg);
@@ -526,7 +543,7 @@ private:
           safeThis->sceneLearnAlert->exitModalState(0);
           safeThis->sceneLearnAlert = nullptr;
         }
-        safeThis->refreshSceneButtons();
+        safeThis->refreshSnapshotRail();
       });
       return;
     }
@@ -543,8 +560,16 @@ private:
       }
     }
 
-    // Direct MIDI Trigger matching for Setups
+    // Program Change handling (Ignore All / Switch Songs & Scenes / Forward to Plugins)
     if (msg.isProgramChange()) {
+      const int pcMode = engine.getProgramChangeMode();
+      if (pcMode == FanfareEngine::PcIgnoreAll)
+        return;
+      if (pcMode == FanfareEngine::PcForwardToPlugins) {
+        midiCollector.addMessageToQueue(msg);
+        return;
+      }
+
       int pgNum = msg.getProgramChangeNumber();
       int channel = msg.getChannel();
       juce::String setupFile = SetupMidiTriggers::getInstance().findSetupForTrigger(true, pgNum, channel);
@@ -557,28 +582,23 @@ private:
         return;
       }
 
-      // Check if any scene has this PC assigned as a trigger
+      // Check if any snapshot has this PC assigned as a trigger
       int sceneByTrigger = engine.findSceneForProgram(pgNum, channel);
       if (sceneByTrigger >= 0) {
         juce::Component::SafePointer<MainComponent> safeThis(this);
         juce::MessageManager::callAsync([safeThis, sceneByTrigger]() {
           if (safeThis == nullptr) return;
-          safeThis->engine.saveCurrentStateToScene(safeThis->engine.getCurrentSceneIndex());
-          safeThis->engine.loadScene(sceneByTrigger);
-          safeThis->refreshSceneButtons();
+          safeThis->recallSnapshot(sceneByTrigger);
         });
         return;
       }
 
-      // If it doesn't trigger a setup switch, use the PC number to select the scene index inside the current setup
+      // Otherwise use the PC number to select the snapshot index inside the current setup
       juce::Component::SafePointer<MainComponent> safeThis(this);
       juce::MessageManager::callAsync([safeThis, pgNum]() {
         if (safeThis == nullptr) return;
-        safeThis->engine.saveCurrentStateToScene(safeThis->engine.getCurrentSceneIndex());
-        if (pgNum >= 0 && pgNum < safeThis->engine.getNumScenes()) {
-          safeThis->engine.loadScene(pgNum);
-          safeThis->refreshSceneButtons();
-        }
+        if (pgNum >= 0 && pgNum < safeThis->engine.getNumScenes())
+          safeThis->recallSnapshot(pgNum);
       });
       return;
     } else if (msg.isController() && msg.getControllerValue() > 64) {

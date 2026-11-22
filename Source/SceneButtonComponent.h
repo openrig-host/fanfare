@@ -23,6 +23,8 @@ public:
     void setActive(bool active);
     bool getActive() const { return isActive; }
 
+    void setPreloadState(bool preloaded, bool preloading);
+
     std::function<void(int sceneIdx, const juce::File& file)> onFileDropped;
     std::function<void(int sceneIdx)> onClicked;
     std::function<void(int sceneIdx, const juce::MouseEvent& e)> onRightClicked;
@@ -44,6 +46,8 @@ private:
     int midiPC = -1;
     int midiChannel = 0;
     bool isActive = false;
+    bool isPreloaded = false;
+    bool isPreloading = false;
     bool isDragHover = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SceneButtonComponent)

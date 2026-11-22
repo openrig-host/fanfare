@@ -31,136 +31,127 @@
 
 #include "MainComponentInternal.h"
 
+void MainComponent::syncSetlistFromTopBar() {
+  Fanfare::SetlistManager::getInstance().syncTopBarSlots(sceneSetupFilePaths,
+                                                         currentRigFile);
+}
+
+void MainComponent::assignSongToTopBarSlot(int slotIdx) {
+  if (slotIdx < 0)
+    return;
+  auto fileChooser = std::make_shared<juce::FileChooser>(
+      "Select Song File for Slot " + juce::String(slotIdx + 1) + "...",
+      Fanfare::RigLibrary::getSongsDirectory(), "*.json");
+  juce::Component::SafePointer<MainComponent> safeThis(this);
+  fileChooser->launchAsync(
+      juce::FileBrowserComponent::openMode |
+          juce::FileBrowserComponent::canSelectFiles,
+      [safeThis, slotIdx, fileChooser](const juce::FileChooser &fc) {
+        if (safeThis == nullptr)
+          return;
+        auto file = fc.getResult();
+        if (file.existsAsFile()) {
+          while (safeThis->sceneSetupFilePaths.size() <= slotIdx)
+            safeThis->sceneSetupFilePaths.add("");
+          safeThis->sceneSetupFilePaths.set(slotIdx, file.getFullPathName());
+          safeThis->saveButtonMappings();
+          safeThis->syncSetlistFromTopBar();
+          safeThis->refreshSceneButtons();
+          safeThis->updatePreloadStatus();
+        }
+      });
+}
+
 void MainComponent::refreshSceneButtons() {
   sceneButtons.clear();
 
-  // Ensure enough scenes exist to display all assigned sceneSetupFilePaths
-  int lastNonEmptyScene = -1;
-  for (int i = 0; i < sceneSetupFilePaths.size(); ++i) {
-    if (sceneSetupFilePaths[i].isNotEmpty())
-      lastNonEmptyScene = i;
-  }
-  while (engine.getNumScenes() <= lastNonEmptyScene) {
-    engine.createNewScene("SCENE " + juce::String(engine.getNumScenes() + 1));
-  }
-
-  int numScenes = engine.getNumScenes();
-
-  while (sceneSetupFilePaths.size() < numScenes)
+  // Top bar is a permanent Setlist / Song Queue bar (decoupled from internal Snapshots).
+  while (sceneSetupFilePaths.size() < 4)
     sceneSetupFilePaths.add("");
 
-  for (int i = 0; i < numScenes; ++i) {
-    auto *btn = new Fanfare::SceneButtonComponent(i, engine.getSceneName(i));
+  auto &sm = Fanfare::SetlistManager::getInstance();
+  const juce::File preloadTarget = sm.getNextPreloadTarget();
+  const int numSlots = sceneSetupFilePaths.size();
 
+  for (int i = 0; i < numSlots; ++i) {
     juce::File assignedFile(sceneSetupFilePaths[i]);
+    juce::String fallbackLabel = "Slot " + juce::String(i + 1);
+    auto *btn = new Fanfare::SceneButtonComponent(i, fallbackLabel);
+
     if (assignedFile.existsAsFile()) {
       btn->setAssignedFile(assignedFile);
+      const bool isCur = (currentRigFile != juce::File{} && assignedFile == currentRigFile);
+      btn->setActive(isCur);
+      const bool isPre = sm.isPreloaded() && (preloadTarget == assignedFile);
+      const bool isLoading = sm.isPreloading() && (preloadTarget == assignedFile);
+      btn->setPreloadState(isPre, isLoading);
     }
 
-    int assignedPC = engine.getSceneMidiPC(i);
-    int assignedCh = engine.getSceneMidiChannel(i);
-    btn->setMidiTriggerInfo(assignedPC, assignedCh);
-
-    if (i == engine.getCurrentSceneIndex()) {
-      btn->setActive(true);
-    }
-
-    int sceneIdx = i;
+    int slotIdx = i;
     btn->onFileDropped = [this](int idx, const juce::File &file) {
       while (sceneSetupFilePaths.size() <= idx)
         sceneSetupFilePaths.add("");
       sceneSetupFilePaths.set(idx, file.getFullPathName());
       saveButtonMappings();
+      syncSetlistFromTopBar();
       refreshSceneButtons();
+      updatePreloadStatus();
     };
 
-    btn->onClicked = [this, sceneIdx](int) { recallScene(sceneIdx); };
+    btn->onClicked = [this, slotIdx](int) {
+      juce::File f(slotIdx < sceneSetupFilePaths.size() ? sceneSetupFilePaths[slotIdx] : "");
+      if (f.existsAsFile()) {
+        syncSetlistFromTopBar();
+        loadRigAsync(f, -1, slotIdx);
+      } else {
+        assignSongToTopBarSlot(slotIdx);
+      }
+    };
 
-    btn->onRightClicked = [this, sceneIdx](int, const juce::MouseEvent &) {
+    btn->onRightClicked = [this, slotIdx](int, const juce::MouseEvent &) {
       juce::PopupMenu menu;
-      juce::File assigned(sceneSetupFilePaths.size() > sceneIdx
-                              ? sceneSetupFilePaths[sceneIdx]
+      juce::File assigned(sceneSetupFilePaths.size() > slotIdx
+                              ? sceneSetupFilePaths[slotIdx]
                               : "");
 
-      menu.addSectionHeader("SCENE " + juce::String(sceneIdx + 1));
+      menu.addSectionHeader("SETLIST SLOT " + juce::String(slotIdx + 1));
       menu.addItem(1, "Assign Song File...");
-      if (assigned.existsAsFile()) {
+      if (assigned.existsAsFile())
         menu.addItem(2, "Clear Song Assignment");
-      }
       menu.addSeparator();
+      menu.addItem(3, "Add Slot at End");
+      if (sceneSetupFilePaths.size() > 1)
+        menu.addItem(4, "Remove This Slot");
 
-      int currentPC = engine.getSceneMidiPC(sceneIdx);
-      if (currentPC >= 0) {
-        int currentCh = engine.getSceneMidiChannel(sceneIdx);
-        juce::String info = "MIDI Trigger: PC " + juce::String(currentPC);
-        if (currentCh > 0)
-          info += " / Ch " + juce::String(currentCh);
-        menu.addItem(-1, info, false, false);
-        menu.addSeparator();
-      }
-      menu.addItem(3, "Assign MIDI Trigger (Learn)...");
-      if (currentPC >= 0)
-        menu.addItem(4, "Clear MIDI Trigger");
-
-      auto *b = sceneButtons[sceneIdx];
+      auto *b = sceneButtons[slotIdx];
       juce::Component::SafePointer<MainComponent> safeThis(this);
       menu.showMenuAsync(
           juce::PopupMenu::Options{}.withTargetComponent(b),
-          [safeThis, sceneIdx](int result) {
+          [safeThis, slotIdx](int result) {
             if (safeThis == nullptr)
               return;
             if (result == 1) {
-              auto fileChooser = std::make_shared<juce::FileChooser>(
-                  "Select Song File...",
-                  Fanfare::RigLibrary::getSongsDirectory(), "*.json");
-              fileChooser->launchAsync(
-                  juce::FileBrowserComponent::openMode |
-                      juce::FileBrowserComponent::canSelectFiles,
-                  [safeThis, sceneIdx,
-                   fileChooser](const juce::FileChooser &fc) {
-                    if (safeThis == nullptr)
-                      return;
-                    auto file = fc.getResult();
-                    if (file.existsAsFile()) {
-                      while (safeThis->sceneSetupFilePaths.size() <= sceneIdx)
-                        safeThis->sceneSetupFilePaths.add("");
-                      safeThis->sceneSetupFilePaths.set(sceneIdx,
-                                                        file.getFullPathName());
-                      safeThis->saveButtonMappings();
-                      safeThis->refreshSceneButtons();
-                    }
-                  });
+              safeThis->assignSongToTopBarSlot(slotIdx);
             } else if (result == 2) {
-              if (sceneIdx < safeThis->sceneSetupFilePaths.size())
-                safeThis->sceneSetupFilePaths.set(sceneIdx, "");
+              if (slotIdx < safeThis->sceneSetupFilePaths.size())
+                safeThis->sceneSetupFilePaths.set(slotIdx, "");
               safeThis->saveButtonMappings();
+              safeThis->syncSetlistFromTopBar();
               safeThis->refreshSceneButtons();
+              safeThis->updatePreloadStatus();
             } else if (result == 3) {
-              if (safeThis->sceneLearnAlert != nullptr) {
-                safeThis->sceneLearnAlert->exitModalState(0);
-                safeThis->sceneLearnAlert = nullptr;
-              }
-              auto *alert = new juce::AlertWindow(
-                  "MIDI Learn",
-                  "Send a Program Change from your controller now...",
-                  juce::AlertWindow::InfoIcon);
-              alert->addButton("Cancel", 0,
-                               juce::KeyPress(juce::KeyPress::escapeKey));
-
-              safeThis->sceneMidiLearnArmed.store(sceneIdx,
-                                                  std::memory_order_release);
-              alert->enterModalState(
-                  true, juce::ModalCallbackFunction::create([safeThis](int) {
-                    if (safeThis != nullptr)
-                      safeThis->sceneMidiLearnArmed.store(
-                          -1, std::memory_order_release);
-                  }),
-                  true);
-              safeThis->sceneLearnAlert = alert;
-            } else if (result == 4) {
-              safeThis->engine.clearSceneMidiTrigger(sceneIdx);
+              safeThis->sceneSetupFilePaths.add("");
               safeThis->saveButtonMappings();
               safeThis->refreshSceneButtons();
+            } else if (result == 4) {
+              if (safeThis->sceneSetupFilePaths.size() > 1 &&
+                  slotIdx < safeThis->sceneSetupFilePaths.size()) {
+                safeThis->sceneSetupFilePaths.remove(slotIdx);
+                safeThis->saveButtonMappings();
+                safeThis->syncSetlistFromTopBar();
+                safeThis->refreshSceneButtons();
+                safeThis->updatePreloadStatus();
+              }
             }
           });
     };
@@ -168,28 +159,156 @@ void MainComponent::refreshSceneButtons() {
     addAndMakeVisible(btn);
     sceneButtons.add(btn);
   }
-  updateStripCollapseStates();
   resized();
 }
 
-// Shared scene recall path: assigned song file loads asynchronously, otherwise
-// the engine scene snapshot is restored. Used by scene buttons, the overflow
-// menu and the 1-9 hotkeys (nov8mistral.md 1.2).
 void MainComponent::recallScene(int sceneIdx) {
-  if (sceneIdx >= 0 && sceneIdx < sceneSetupFilePaths.size()) {
-    juce::File f(sceneSetupFilePaths[sceneIdx]);
-    if (f.existsAsFile()) {
-      loadRigAsync(f);
-      return;
-    }
-  }
-  engine.saveCurrentStateToScene(engine.getCurrentSceneIndex());
+  recallSnapshot(sceneIdx);
+}
+
+void MainComponent::recallSnapshot(int sceneIdx) {
+  if (sceneIdx < 0 || sceneIdx >= engine.getNumScenes())
+    return;
   engine.loadScene(sceneIdx);
-  for (int j = 0; j < sceneButtons.size(); ++j)
-    sceneButtons[j]->setActive(j == sceneIdx);
+  snapshotRail.setActiveIndex(sceneIdx);
+  for (auto *comp : rackSlotComponents)
+    comp->repaint();
   if (webServer)
     webServer->notifySceneChanged(sceneIdx, engine.getSceneName(sceneIdx));
   updateStripCollapseStates();
+}
+
+void MainComponent::refreshSnapshotRail() {
+  std::vector<Fanfare::SnapshotTileData> items;
+  const int n = engine.getNumScenes();
+  const int cur = engine.getCurrentSceneIndex();
+  items.reserve((size_t)n);
+  for (int i = 0; i < n; ++i) {
+    Fanfare::SnapshotTileData d;
+    d.name = engine.getSceneName(i);
+    d.colorArgb = engine.getSceneColor(i);
+    d.midiPC = engine.getSceneMidiPC(i);
+    d.midiChannel = engine.getSceneMidiChannel(i);
+    d.active = (i == cur);
+    items.push_back(std::move(d));
+  }
+  snapshotRail.setSnapshots(items);
+}
+
+void MainComponent::promptRenameSnapshot(int idx) {
+  if (idx < 0 || idx >= engine.getNumScenes())
+    return;
+  auto *alert = new juce::AlertWindow(
+      "Rename Snapshot", "Enter short stage name (e.g. ORGAN, SOLO):",
+      juce::AlertWindow::QuestionIcon);
+  alert->addTextEditor("name", engine.getSceneName(idx));
+  alert->addButton("Rename", 1, juce::KeyPress(juce::KeyPress::returnKey));
+  alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+  juce::Component::SafePointer<MainComponent> safeThis(this);
+  juce::Component::SafePointer<juce::AlertWindow> safeAlert(alert);
+  alert->enterModalState(
+      true,
+      juce::ModalCallbackFunction::create(
+          [safeThis, idx, safeAlert](int result) {
+            if (safeThis != nullptr && safeAlert != nullptr && result == 1) {
+              juce::String newName = safeAlert->getTextEditorContents("name").trim();
+              if (newName.isNotEmpty()) {
+                safeThis->engine.renameScene(idx, newName);
+                safeThis->refreshSnapshotRail();
+              }
+            }
+          }),
+      true);
+}
+
+void MainComponent::promptLearnSnapshotMidi(int idx) {
+  if (idx < 0 || idx >= engine.getNumScenes())
+    return;
+  if (sceneLearnAlert != nullptr) {
+    sceneLearnAlert->exitModalState(0);
+    sceneLearnAlert = nullptr;
+  }
+  auto *alert = new juce::AlertWindow(
+      "Snapshot MIDI Learn",
+      "Send a Program Change from your controller for \"" + engine.getSceneName(idx) + "\"...",
+      juce::AlertWindow::InfoIcon);
+  alert->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+  sceneMidiLearnArmed.store(idx, std::memory_order_release);
+  juce::Component::SafePointer<MainComponent> safeThis(this);
+  alert->enterModalState(
+      true, juce::ModalCallbackFunction::create([safeThis](int) {
+        if (safeThis != nullptr)
+          safeThis->sceneMidiLearnArmed.store(-1, std::memory_order_release);
+      }),
+      true);
+  sceneLearnAlert = alert;
+}
+
+void MainComponent::showSnapshotContextMenu(int idx, juce::Component* target) {
+  if (idx < 0 || idx >= engine.getNumScenes())
+    return;
+  juce::PopupMenu menu;
+  menu.addSectionHeader("SNAPSHOT " + juce::String(idx + 1) + ": " + engine.getSceneName(idx));
+  menu.addItem(1, "Update from Current");
+  menu.addItem(2, "Rename...");
+
+  juce::PopupMenu colorMenu;
+  int palCount = 0;
+  const auto *pal = Fanfare::getSnapshotPalette(palCount);
+  const juce::uint32 curCol = engine.getSceneColor(idx);
+  for (int c = 0; c < palCount; ++c) {
+    colorMenu.addItem(100 + c, pal[c].label, true, curCol == pal[c].argb);
+  }
+  menu.addSubMenu("Color", colorMenu);
+  menu.addSeparator();
+
+  int currentPC = engine.getSceneMidiPC(idx);
+  if (currentPC >= 0) {
+    int currentCh = engine.getSceneMidiChannel(idx);
+    juce::String info = "MIDI Trigger: PC " + juce::String(currentPC);
+    if (currentCh > 0)
+      info += " / Ch " + juce::String(currentCh);
+    menu.addItem(-1, info, false, false);
+  }
+  menu.addItem(3, "Assign MIDI Trigger (Learn)...");
+  if (currentPC >= 0)
+    menu.addItem(4, "Clear MIDI Trigger");
+
+  if (engine.getNumScenes() > 1) {
+    menu.addSeparator();
+    menu.addItem(5, "Delete Snapshot");
+  }
+
+  juce::Component::SafePointer<MainComponent> safeThis(this);
+  menu.showMenuAsync(
+      juce::PopupMenu::Options{}.withTargetComponent(target),
+      [safeThis, idx](int result) {
+        if (safeThis == nullptr || result == 0)
+          return;
+        if (result == 1) {
+          safeThis->engine.saveCurrentStateToScene(idx);
+          safeThis->showSongStatus("SNAP UPDATED: " + safeThis->engine.getSceneName(idx));
+        } else if (result == 2) {
+          safeThis->promptRenameSnapshot(idx);
+        } else if (result == 3) {
+          safeThis->promptLearnSnapshotMidi(idx);
+        } else if (result == 4) {
+          safeThis->engine.clearSceneMidiTrigger(idx);
+          safeThis->refreshSnapshotRail();
+        } else if (result == 5) {
+          safeThis->engine.deleteScene(idx);
+          safeThis->refreshSnapshotRail();
+        } else if (result >= 100 && result < 120) {
+          int palCount2 = 0;
+          const auto *pal2 = Fanfare::getSnapshotPalette(palCount2);
+          int ci = result - 100;
+          if (ci >= 0 && ci < palCount2) {
+            safeThis->engine.setSceneColor(idx, pal2[ci].argb);
+            safeThis->refreshSnapshotRail();
+          }
+        }
+      });
 }
 
 void MainComponent::updatePreloadStatus() {
@@ -212,6 +331,16 @@ void MainComponent::updatePreloadStatus() {
 
       queueButtons[i]->setSlotStates(isActive, isPreloaded, isPreloading);
     }
+  }
+
+  for (int i = 0; i < sceneButtons.size(); ++i) {
+    juce::File slotFile(i < sceneSetupFilePaths.size() ? sceneSetupFilePaths[i] : "");
+    sceneButtons[i]->setAssignedFile(slotFile);
+    const bool isActive = slotFile.existsAsFile() && (currentRigFile != juce::File{} && slotFile == currentRigFile);
+    const bool isPreloaded = sm.isPreloaded() && slotFile.existsAsFile() && (preloadTarget == slotFile);
+    const bool isPreloading = sm.isPreloading() && slotFile.existsAsFile() && (preloadTarget == slotFile);
+    sceneButtons[i]->setActive(isActive);
+    sceneButtons[i]->setPreloadState(isPreloaded, isPreloading);
   }
 
   // A recent song-load outcome owns the segment briefly (showSongStatus) so
@@ -329,6 +458,7 @@ void MainComponent::loadRigAsync(const juce::File &file,
                 }
                 safeThis->repaint();
                 safeThis->refreshSceneButtons();
+                safeThis->refreshSnapshotRail();
                 if (safeThis->autoCollapseToggle.getToggleState()) {
                   safeThis->updateStripCollapseStates();
                 } else {
@@ -463,6 +593,16 @@ void MainComponent::loadButtonMappings() {
       sceneSetupFilePaths.add(sceneArr->getReference(i).toString());
     }
   }
+
+  bool hasAnyTopBar = false;
+  for (const auto &p : sceneSetupFilePaths) {
+    if (p.isNotEmpty() && juce::File(p).existsAsFile()) {
+      hasAnyTopBar = true;
+      break;
+    }
+  }
+  if (hasAnyTopBar)
+    syncSetlistFromTopBar();
 
   refreshSceneButtons();
   updatePreloadStatus();
@@ -609,6 +749,7 @@ void MainComponent::resetToNewSong() {
       c->repaint();
     }
     refreshSceneButtons();
+    refreshSnapshotRail();
     updatePreloadStatus();
     resized();
     repaint();

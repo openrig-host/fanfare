@@ -294,6 +294,7 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
             Scene sc(sv.getProperty("name", "Scene").toString());
             sc.midiProgramChange = sv.getProperty("midiProgramChange", -1);
             sc.midiChannel = sv.getProperty("midiChannel", 0);
+            sc.colorArgb = static_cast<juce::uint32>((juce::int64)sv.getProperty("colorArgb", 0));
             if (auto* sts = sv.getProperty("states", juce::var()).getArray()) {
                 for (int s = 0; s < sts->size(); ++s) {
                     const auto& stv = sts->getReference(s);
@@ -357,6 +358,18 @@ bool RigSerializer::varToSong(const juce::var& rig, Song& out) {
                     st.harmTargetSlot = stv.getProperty("harmTargetSlot", -1);
 
                     st.samplerEnabled = stv.getProperty("samplerEnabled", false);
+                    if (auto* stDyn = stv.getDynamicObject()) {
+                        st.hasMidiCcState = stDyn->hasProperty("fohCC") ||
+                                            stDyn->hasProperty("iemCC") ||
+                                            stDyn->hasProperty("muteCC") ||
+                                            stDyn->hasProperty("midiChannel");
+                    }
+                    if (st.hasMidiCcState) {
+                        st.fohCC = stv.getProperty("fohCC", -1);
+                        st.iemCC = stv.getProperty("iemCC", -1);
+                        st.muteCC = stv.getProperty("muteCC", -1);
+                        st.midiChannelOverride = stv.getProperty("midiChannel", -1);
+                    }
 
                     sc.slotStates.push_back(st);
                 }
@@ -620,6 +633,7 @@ juce::var RigSerializer::songToVar(const Song& song) {
         so->setProperty("name", scene.name);
         so->setProperty("midiProgramChange", scene.midiProgramChange);
         so->setProperty("midiChannel", scene.midiChannel);
+        so->setProperty("colorArgb", (juce::int64)scene.colorArgb);
         juce::Array<juce::var> states;
         for (const auto& ss : scene.slotStates) {
             auto* sso = new juce::DynamicObject();
@@ -685,6 +699,12 @@ juce::var RigSerializer::songToVar(const Song& song) {
             sso->setProperty("harmTargetSlot", ss.harmTargetSlot);
 
             sso->setProperty("samplerEnabled", ss.samplerEnabled);
+            if (ss.hasMidiCcState) {
+                sso->setProperty("fohCC", ss.fohCC);
+                sso->setProperty("iemCC", ss.iemCC);
+                sso->setProperty("muteCC", ss.muteCC);
+                sso->setProperty("midiChannel", ss.midiChannelOverride);
+            }
 
             states.add(juce::var(sso));
         }

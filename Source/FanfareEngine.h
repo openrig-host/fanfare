@@ -8,6 +8,7 @@
 #include "Version.h"
 #include "RigSerializer.h"
 #include "SaveHistory.h"
+#include "IemClickTrack.h"
 #include <JuceHeader.h>
 #include "FanfareConstants.h"
 #include <algorithm>
@@ -143,6 +144,13 @@ void clearSceneMidiTrigger(int index);
   int findSceneForProgram(int pc, int channel) const;
 void saveCurrentStateToScene(int index);
 void renameScene(int index, const juce::String &newName);
+juce::uint32 getSceneColor(int index) const {
+    juce::ScopedLock sl(scenesLock);
+    if (index >= 0 && index < (int)scenes.size())
+      return scenes[index].colorArgb;
+    return 0;
+  }
+void setSceneColor(int index, juce::uint32 argb);
 void createNewScene(const juce::String &name);
 void deleteScene(int index);
 // Lock-free, zero-allocation slot DSP execution used by both Sequential and
@@ -307,11 +315,17 @@ void processAudio(const float *const *inputData, int numInputs,
         auto msg = metadata.getMessage();
         int pos = metadata.samplePosition;
 
-        // NEVER pass program change (patch change) messages
-        if (msg.isProgramChange())
-          continue;
-
         int msgChannel = msg.getChannel();
+
+        if (msg.isProgramChange()) {
+          if (programChangeMode.load(std::memory_order_relaxed) == PcForwardToPlugins) {
+            for (size_t i = 0; i < slots.size(); ++i) {
+              if (slotAcceptsChannel(i, msgChannel))
+                slotMidiBuffers[i].addEvent(msg, pos);
+            }
+          }
+          continue;
+        }
 
         // Special routing: MIDI messages -> only to slots
         if (msg.isNoteOn() || msg.isNoteOff()) {
@@ -613,6 +627,9 @@ void processAudio(const float *const *inputData, int numInputs,
         }
       }
     }
+
+    // IEM-only Click / Count-In (mixed strictly into iemBus, never FOH)
+    iemClick.processIntoIem(iemBus, numSamples);
 
     // --- Master FX Processing ---
     // Apply Master Fader Levels BEFORE FX (or typically after sums, but before
@@ -1000,6 +1017,14 @@ float getIemMasterLevel() const { return iemMasterLevel.load(); }
   void setDefaultMidiChannel(int channel) {
     defaultMidiChannel.store(juce::jlimit(0, 16, channel));
   }
+  enum ProgramChangeMode : int { PcIgnoreAll = 0, PcSwitchRig = 1, PcForwardToPlugins = 2 };
+  void setProgramChangeMode(int mode) noexcept {
+    programChangeMode.store(juce::jlimit(0, 2, mode), std::memory_order_relaxed);
+  }
+  int getProgramChangeMode() const noexcept {
+    return programChangeMode.load(std::memory_order_relaxed);
+  }
+  Fanfare::IemClickTrack &getClickTrack() noexcept { return iemClick; }
   
 int getDefaultMidiChannel() const { return defaultMidiChannel.load(); }
 
@@ -1131,6 +1156,7 @@ int currentBlockSize = 512;
 int selectedSlotIndex = 1;
 juce::AudioBuffer<float> fohBus;
 juce::AudioBuffer<float> iemBus;
+Fanfare::IemClickTrack iemClick;
 juce::AudioBuffer<float> aux1Bus;
 juce::AudioBuffer<float> aux2Bus;
 // Pre-allocated per-block reusable buffers (avoid heap allocs on audio thread)
@@ -1197,6 +1223,7 @@ std::atomic<float> iemPeakL{0.0f}
 std::atomic<float> fohMasterLevel{1.0f};
 std::atomic<float> iemMasterLevel{1.0f};
 std::atomic<int> defaultMidiChannel{FanfareConstants::kDefaultMidiChannel};
+std::atomic<int> programChangeMode{PcIgnoreAll};
 // 1 = legacy behaviour
 
   std::atomic<int> fohOutputOffset{0};

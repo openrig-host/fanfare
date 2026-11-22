@@ -198,7 +198,7 @@
 			<section id="header">
 				<header>
 					<span class="image avatar"><img src="Fanfare_Icon.png" alt="Fanfare" /></span>
-					<h1 id="logo"><a href="#workflow">Fanfare v1.7.1</a></h1>
+					<h1 id="logo"><a href="#workflow">Fanfare v1.73</a></h1>
 					<p>The Windows Stage Survival Manual</p>
 					<input type="text" id="nav-filter" placeholder="Filter topics (e.g. BLEEP-216, CoplanDX, Rig Doctor, EQ)..." />
 				</header>
@@ -392,7 +392,7 @@
 							<section id="main-mixer">
 								<div class="container">
 									<h3>4. Main Console, Menu Bar &amp; Studio Shell</h3>
-									<p>Fanfare's Studio workspace frames your 24-strip mixer console with a slim top <strong>Menu &amp; Song Bar</strong>, a <strong>Scene Bar</strong> directly above the rack, a collapsible left <strong>Vertical Ribbon</strong>, and a live <strong>Telemetry Footer</strong> along the bottom:</p>
+									<p>Fanfare's Studio workspace frames your 24-strip mixer console with a slim top <strong>Menu &amp; Song Bar</strong> (including an IEM-only <strong><code>Click</code></strong> metronome/count-in popover), a permanent auto-preloading <strong>Top Setlist Bar</strong> directly above the rack, a collapsible left <strong>Vertical Ribbon</strong>, a stationary far-right <strong>Snapshots Rail</strong>, and a live <strong>Telemetry Footer</strong> with a one-click <strong><code>Reset Audio</code></strong> button along the bottom:</p>
 
 									<div class="table-wrapper">
 										<table class="alt">
@@ -425,8 +425,8 @@
 													<td>Advances to the next Song in your Setlist (ignored while you're typing in a text box).</td>
 												</tr>
 												<tr>
-													<td><strong>Bottom Telemetry Footer (<code>AUDIO</code> &middot; <code>SONG</code> &middot; <code>CPU</code> &middot; <code>RAM</code> &middot; <code>LAT</code> &middot; <code>XRUNS</code>)</strong></td>
-													<td>Live interactive monospace status bar along the bottom edge. Displays your active audio driver, sample rate, and buffer size (click to open Audio &amp; MIDI Settings). <code>CPU</code> is the real-time audio-callback budget (coloring amber above 70% and red above 90%): hover <code>CPU</code> for live and session-peak CPU package temperature (in &deg;C), or click <code>CPU</code> / <code>RAM</code> to open the Per-Strip Resource Inspector. <code>LAT</code> shows color-thresholded round-trip audio latency (or <code>RECONNECT...</code> if your USB cable was yanked). <code>XRUNS</code> reads <code>gap/stall</code>: click <code>XRUNS</code> anytime to reset the counter and open the timestamped glitch log.</td>
+													<td><strong>Bottom Telemetry Footer (<code>AUDIO</code> &middot; <code>Reset Audio</code> &middot; <code>SONG</code> &middot; <code>CPU</code> &middot; <code>RAM</code> &middot; <code>LAT</code> &middot; <code>XRUNS</code>)</strong></td>
+													<td>Live interactive monospace status bar along the bottom edge. Displays your active audio driver, sample rate, and buffer size (click to open Audio &amp; MIDI Settings), followed directly by a one-click <strong><code>Reset Audio</code></strong> button that cleanly closes and re-opens the ASIO driver (~1s, with an 80&nbsp;ms USB endpoint settle) if a USB interface ever silently drops audio output mid-gig while MIDI keeps flowing. <code>CPU</code> is the real-time audio-callback budget (coloring amber above 70% and red above 90%): hover <code>CPU</code> for live and session-peak CPU package temperature (in &deg;C), or click <code>CPU</code> / <code>RAM</code> to open the Per-Strip Resource Inspector. <code>LAT</code> shows color-thresholded round-trip audio latency (or <code>RECONNECT...</code> if your USB cable was yanked). <code>XRUNS</code> reads <code>gap/stall</code>: click <code>XRUNS</code> anytime to reset the counter and open the timestamped glitch log.</td>
 												</tr>
 												<tr>
 													<td><strong>Thermal &amp; Throttle Guard Badge</strong></td>
@@ -751,14 +751,14 @@
 						<!-- 12D. FANFARE B3 ORGAN -->
 							<section id="b3-organ">
 								<div class="container">
-									<h3>12d. Fanfare B3 Organ: Built-In 91-Tonewheel Organ &amp; Dual Leslie 122 (v1.7)</h3>
-									<p>Every channel strip chain slot can load <strong>Fanfare B3 Organ</strong> (choose <strong><code>Fanfare B3 Organ (Built-in)</code></strong> from any strip slot, or open it from the strip <strong><code>...</code></strong> menu). Housed in a vintage walnut and brushed-bronze console, it models the complete tonewheel-to-room signal chain with zero external plugins:</p>
+									<h3>12d. Fanfare B3 Organ: Built-In 91-Tonewheel Organ &amp; Dual Leslie 122 (v1.73)</h3>
+									<p>Every channel strip chain slot can load <strong>Fanfare B3 Organ</strong> (choose <strong><code>Fanfare B3 Organ (Built-in)</code></strong> from any strip slot, or open it from the strip <strong><code>...</code></strong> menu). Housed in a real photorealistic <strong>walnut wood-grain &amp; brushed-bronze console</strong> (v1.73), it models the complete tonewheel-to-room signal chain with zero external plugins:</p>
 									<ul>
 										<li><strong>91-Tonewheel Generator &amp; Harmonic Percussion:</strong> Authentic synchronous gear ratios with magnetic pole-piece reluctance waveforms, 12-bin shaft micro-flutter, 9-busbar palladium contact stagger key-click, generator compartment crosstalk (<code>LEAK</code>), and classic single-trigger post-scanner Harmonic Percussion (<code>Perc ON</code>, <code>Soft</code>, <code>Fast decay</code>, <code>3RD harm</code> with automatic <code>1'</code> cancel).</li>
 										<li><strong>LC Scanner Vibrato / Chorus:</strong> 8-stage dispersive allpass ladder with inductor-core saturation (<code>OFF</code>, <code>V1</code>&ndash;<code>V3</code>, <code>C1</code>&ndash;<code>C3</code>) controlled by checkboxes or the rotary Scanner dial, plus a <strong><code>V/C WARBLE</code></strong> depth slider (defaulting to <strong><code>C1</code></strong> and <code>0.28</code> warble on the factory <strong><code>vibe coda</code></strong> preset).</li>
 										<li><strong>AO-28 Tube Preamp &amp; Swell Expression:</strong> 4x-oversampled asymmetric triode + 6550 push-pull + transformer core saturation with signal-gated 120 Hz B+ ripple and calibrated 12 o'clock defaults for <code>DRIVE</code>, <code>TONE</code>, <code>CLICK</code>, <code>LEAK</code>, <code>VOLUME</code>, and <code>SWELL</code> (CC 11).</li>
-										<li><strong>Dual Asynchronous Leslie 122 Rotary Speaker:</strong> Models two asynchronous cabinets with <code>Slow</code> / <code>Brake</code> / <code>Fast</code> modes (driven by Mod Wheel CC 1 and optional <code>CC64-&gt;FAST</code> sustain switch), <strong><code>SPREAD</code></strong> (sweeps all the way down to dead-center mono rotors with thick mono swish while keeping the room and chorus stereo), <strong><code>WARMTH</code></strong> (birch cabinet resonance + 230/560 Hz low-mid chest), <strong><code>CHORUS</code></strong>, and <strong><code>ROOM</code></strong>.</li>
-										<li><strong>Onboard Studio FX, Behind-the-Scenes Room Voicing &amp; External VST3 Inserts:</strong> Built-in 10-band studio voicing curve, <code>Studio Wood Room</code> convolution IR, 6 FX knobs (<code>EQ LOW</code>, <code>EQ MID</code>, <code>EQ HIGH</code>, <code>COMP</code>, <code>REVERB</code>, and 301 ms Ping-Pong <code>DELAY</code>), plus optional <code>SAT VST</code> (pre-Leslie) and <code>LESLIE VST</code> (replaces native Leslie with automatic Mod Wheel forwarding) insert slots.</li>
+										<li><strong>Dual Asynchronous Leslie 122 Rotary Speaker (v1.73 Enhanced):</strong> Models two asynchronous cabinets with <code>Slow</code> / <code>Brake</code> / <code>Fast</code> modes (driven by Mod Wheel CC 1 and optional <code>CC64-&gt;FAST</code> sustain switch). In v1.73, <strong><code>SPREAD</code></strong> smoothly narrows the virtual mic angle from ~176&deg; wide stereo down to a single front-center virtual mic with <strong>zero out-of-phase AM cancellation</strong>, so dialing back stereo width preserves 100% of the rotary swish; <strong>Slow Leslie</strong> also adds deeper wooden cabinet-reflection comb swirl and gentle low-mid body bloom without extra LFO pitch warble, alongside <strong><code>WARMTH</code></strong>, <strong><code>CHORUS</code></strong>, and <strong><code>ROOM</code></strong>.</li>
+										<li><strong>Onboard Studio FX, Retuned Voicing Curve &amp; External VST3 Inserts (v1.73):</strong> Built-in 10-band studio voicing curve (retuned in v1.73 for fuller 31&ndash;125&nbsp;Hz 16'/8' bottom end and extra 4&ndash;16&nbsp;kHz upper-drawbar shine across all saved patches), <code>Studio Wood Room</code> convolution IR, 6 FX knobs (<code>EQ LOW</code>, <code>EQ MID</code>, <code>EQ HIGH</code>, <code>COMP</code>, <code>REVERB</code>, and 301 ms Ping-Pong <code>DELAY</code>), plus optional <code>SAT VST</code> (pre-Leslie) and <code>LESLIE VST</code> (replaces native Leslie with automatic Mod Wheel forwarding) insert slots.</li>
 										<li><strong>Hardware Drawbar CC Learn &amp; <code>+12</code> Octave:</strong> Click the <code>CC</code> profile dropdown to pick <code>Auto (CK88+All)</code>, <code>CK88</code>, <code>Faders</code>, <code>Sound</code>, <code>Classic</code>, or <strong><code>+ Learn / Edit Drawbar Map...</code></strong> to save named hardware drawbar maps with optional <code>INV CC</code> inversion. Includes a <code>+12</code> octave-up switch and a toggleable 61-key waterfall manual (<code>Keys</code>, OFF by default).</li>
 									</ul>
 								</div>
@@ -810,16 +810,16 @@
 						<!-- 13. SCENES -->
 							<section id="scenes">
 								<div class="container">
-									<h3>15. Scenes (Instant Zero-Latency Snapshots)</h3>
-									<p>Directly above your mixer strips sits the <strong>Scene Bar</strong> (<code>+ Scene</code>, <code>Save</code>, <code>Rename</code>, <code>Delete</code>, followed by your Scene buttons). While a <strong>Song</strong> defines <em>which</em> VST plugins are loaded in your 24 strips, a <strong>Scene</strong> is an instantaneous snapshot of your mixer state <em>within</em> that Song:</p>
+									<h3>15. Snapshots Rail (Instant Zero-Latency Mix &amp; Routing Recall, v1.73)</h3>
+									<p>Anchored along the <strong>far-right edge</strong> of the console sits the stationary, collapsible <strong>Snapshots Rail</strong> (<code>SNAPS</code>, 84&nbsp;px wide or collapsible to a 22&nbsp;px tab via <code>&gt;</code> / <code>&lt;</code>). Completely decoupled from the permanent Top Setlist Bar, Snapshots let you load all your VSTs once at the start of a set and switch sounds instantaneously mid-song without ever reloading a plugin or sample:</p>
 									<ul>
 										<li>Strip Mute / Unmute states (and auto-collapse states when <code>STAGE COMPACT</code> is on)</li>
-										<li>Strip fader levels, <code>FOH</code> / <code>IEM</code> bus assignments, per-strip <code>IEM TRIM</code> offsets, and Aux sends</li>
-										<li>Note Range splits &amp; Transpose settings</li>
+										<li>Strip FOH &amp; IEM fader levels, bus routing, per-strip <code>IEM TRIM</code> offsets, and Aux sends</li>
+										<li>Note Range splits, Transpose settings, per-strip CC assignments (<code>FOH CC</code>, <code>IEM CC</code>, <code>MUTE CC</code>), and MIDI channel overrides</li>
 										<li>Strip DSP settings (EQ, Gate, Compressor, Stereo/Ping-Pong/Tape Delay, Reverb, Chorus, Musette)</li>
 										<li>Arpeggiator, Harmonizer, and Sampler states</li>
 									</ul>
-									<p>Whenever you click from Scene 1 to Scene 2, Fanfare automatically saves your current tweaks to Scene 1 before switching, or you can click <code>SAVE SCENE</code> at any time. On your laptop keyboard, tap number keys <strong><code>1</code>&ndash;<code>9</code></strong> (when not typing in a text field) to recall Scenes 1 through 9 directly; if a song has more scenes than fit across the bar, a compact <strong><code>+N</code></strong> overflow button at the right end opens a menu for the rest. Right-click any Scene button to <strong>Assign MIDI Trigger (Learn)...</strong> so a Program Change message from your keyboard footswitch or pad jumps straight to that Scene.</p>
+									<p><strong>Safe Live Switching (No Accidental Overwrites, Held Notes Ring Out):</strong> Click <strong><code>+</code></strong> at the bottom of the rail to capture your current rack as a new color-taggable Snapshot, and click <strong><code>UPD</code></strong> (or right-click a tile &rarr; <em>Update from Current</em>) only when you intentionally want to overwrite a Snapshot &mdash; nudging a fader live never corrupts your saved Snapshot when you switch away. When switching between Snapshots that only change mutes, levels, or DSP, Fanfare skips global MIDI panic so held chords and sustain tails ring smoothly (MIDI panic only fires if a strip's key range, transpose, or MIDI channel changed). Right-click any Snapshot tile to <strong>Update from Current</strong>, <strong>Rename</strong> (compact ~8-char stage labels), pick a <strong>Color</strong> (9 stage colors), <strong>Assign MIDI Trigger (Learn)...</strong>, or <strong>Delete</strong>. Laptop keys <strong><code>1</code>&ndash;<code>9</code></strong> recall Snapshots 1&ndash;9 directly.</p>
 
 									<blockquote>
 										<span class="use-case-label">Real-World Stage Use Case</span><br />
@@ -831,13 +831,11 @@
 						<!-- 14. STAGE QUEUE -->
 							<section id="stage-queue">
 								<div class="container">
-									<h3>16. Stage Queue &amp; Background Preloading</h3>
-									<p>Open the <strong><code>Queue</code></strong> icon on the left Vertical Ribbon to access your 10 instant <strong>Stage Queue</strong> tiles alongside <code>Save Set</code>, <code>Load Set</code>, and <code>Build Song</code>:</p>
+									<h3>16. Top Setlist Bar, Stage Queue &amp; Background Preloading (v1.73)</h3>
+									<p>Directly above the mixer rack sits the permanent <strong>Top Setlist Bar</strong> (with <strong><code>+ Slot</code></strong> and <strong><code>...</code></strong> Save/Load Setlist controls), complemented by the 10 instant <strong>Stage Queue</strong> tiles inside the left Vertical Ribbon's <strong><code>Queue</code></strong> tab:</p>
 									<ul>
-										<li><strong>Assigning Songs:</strong> Right-click any Queue tile and choose <code>Assign Song File...</code> (or manage tonight's full ordered show from the <code>Setlist</code> ribbon tab).</li>
-										<li><strong>Amber / Active Highlight:</strong> The Song currently live on stage.</li>
-										<li><strong>Pulsing Amber Dot:</strong> Fanfare's background thread is currently pre-building the VST plugins for this Song on your Efficiency CPU cores (true whenever <code>Auto: Fast Performance Cores Only</code> is selected in Chapter 21).</li>
-										<li><strong>Solid Green Ready Dot &amp; Top-Bar <code>Next-Up</code> Capsule:</strong> The next Song's plugins are already built and warm in memory &mdash; mirrored by the clickable <strong><code>Next-Up</code></strong> capsule right beside the top Song pill &mdash; ready for an instant swap when you click it or hit <code>Spacebar</code>.</li>
+										<li><strong>Permanent Top Setlist Bar (v1.73):</strong> Drag and drop Song <code>.json</code> files onto any top-bar slot (or click an empty slot / right-click &rarr; <code>Assign Song File...</code>). Unlike earlier versions, the Top Setlist Bar is completely permanent &mdash; clicking any song never shifts, renames, or alters the bar, and the active highlight always tracks the loaded Song.</li>
+										<li><strong>Automatic Next-Song Preloading:</strong> Loading any song from the Top Setlist Bar, Setlist sidebar, or Stage Queue immediately syncs with <code>SetlistManager</code> and begins preloading the <em>next</em> song in the background on your Efficiency CPU cores. A <strong>pulsing amber LED dot</strong> means the next song is preloading; a <strong>solid green LED dot</strong> (mirrored by the clickable <code>Next Ready</code> capsule in the top bar) means it is warm in RAM and ready for an instant swap via click or <code>Spacebar</code>. <em>(Note: songs saved with <code>Clean Slate / freshBuild</code> intentionally skip background preloading so they can unload prior plugins cleanly before building.)</em></li>
 										<li><strong>Segmented <code>[X/N]</code> Progress Bar &amp; Cancelable Two-Phase Load:</strong> When switching cold into a multi-plugin Song, Fanfare runs a deadlock-free two-phase build (initializing UI/QML-bound STA instruments like Kontakt, Raum, Massive, Omnisphere, and EZkeys sequentially on the message thread first, then building standard VST3s in parallel on worker threads). The switching overlay divides its orange LED progress bar into <strong><code>N</code> discrete segments</strong> matching the exact plugin count (<code>[3/13]</code>) &mdash; solid orange for completed steps, pulsing for the plugin currently initializing, and dim for remaining steps &mdash; with a non-blocking <strong><code>Cancel</code></strong> button underneath if you pick the wrong song.</li>
 									</ul>
 
@@ -922,7 +920,9 @@
 										<li><strong><code>ENGINE &amp; CPU TUNING</code>:</strong> Opens the hybrid CPU affinity and hardware interrupt shield settings (see Chapter 21).</li>
 										<li><strong><code>SCAN FOR PLUGINS</code>:</strong> Scans your system VST3 directories for newly installed plugins.</li>
 										<li><strong><code>BUS ROUTING</code>:</strong> Choose which physical stereo outputs on your audio interface carry the <strong>FOH Master Bus</strong> (Outputs <code>1+2</code>, <code>3+4</code>, <code>5+6</code>, or <code>7+8</code>), which carry the <strong>IEM Master Bus</strong>, and set your Global Default MIDI Channel (<code>Omni</code> or <code>Ch 1..16</code>).</li>
-										<li><strong><code>RESET AUDIO</code>:</strong> Manually closes and re-opens the audio driver and refreshes USB MIDI ports.</li>
+										<li><strong><code>IEM CLICK TRACK</code> (Top-Bar <code>Click</code> Button, v1.73):</strong> Lock-free, zero-allocation synthesized metronome and 1-bar / 2-bar count-in mixed strictly into the <strong>IEM bus</strong> (never sent to FOH), with adjustable BPM (30&ndash;260), beats per bar, level, and mode (<code>Continuous</code>, <code>Count-In 1 Bar</code>, <code>Count-In 2 Bars</code>).</li>
+										<li><strong><code>BACKUP KEYBOARD REMAP</code> (<code>Rig &rarr; Backup Keyboard Map...</code>, v1.73):</strong> Global MIDI ingress remap applied before any song, split, or CC learn sees incoming MIDI. Drop in a rented or backup keyboard on stage and force MIDI channel, global semitone transpose (&plusmn;24), sustain pedal polarity inversion, or a single CC remap (e.g. CC&nbsp;4 &rarr; CC&nbsp;11) without editing a single saved <code>.json</code> song file.</li>
+										<li><strong><code>RESET AUDIO</code> (Bottom Status Bar &amp; Settings, v1.73):</strong> Cleanly closes the ASIO/WASAPI driver (with an 80&nbsp;ms USB endpoint settle), re-opens it, and refreshes USB MIDI ports in ~1 second without pulling cables.</li>
 										<li><strong><code>RUN STRESS TEST</code>:</strong> Torture-tests your rig by firing rapid scene changes and heavy synthetic DSP load so you can verify your buffer size at home instead of finding out during the guitar solo on Saturday night.</li>
 									</ul>
 								</div>

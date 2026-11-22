@@ -16,10 +16,16 @@
 #include "../../../SynthMidiSetupDialog.h"
 #include "../../../ThemeManager.h"
 #include "../B3OrganProcessor.h"
+#include "B3WalnutTextureData.h"
 
 namespace FanfareB3::Ui {
 
 // ---- Shared Vintage Hardware Drawing Helpers ----
+inline const juce::Image &getWalnutTexture() {
+  static const juce::Image tex = juce::ImageFileFormat::loadFrom(
+      b3_walnut_jpg, (size_t)b3_walnut_jpg_size);
+  return tex;
+}
 inline void drawBrassScrew(juce::Graphics &g, float cx, float cy, float r = 2.6f,
                            float angle = 0.68f) {
   g.setColour(juce::Colour(0xCC0D0703));
@@ -40,6 +46,33 @@ inline void drawWalnutWood(juce::Graphics &g, juce::Rectangle<float> area,
                            float cornerRadius, bool horizontalGrain) {
   if (area.isEmpty())
     return;
+
+  const auto &tex = getWalnutTexture();
+  if (tex.isValid()) {
+    g.saveState();
+    juce::Path clip;
+    clip.addRoundedRectangle(area, cornerRadius);
+    g.reduceClipRegion(clip);
+
+    g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+    g.drawImage(tex, area, juce::RectanglePlacement::fillDestination);
+
+    if (!horizontalGrain) {
+      juce::ColourGradient lacquer(juce::Colour(0x32120602), area.getX(), area.getY(),
+                                   juce::Colour(0x68100501), area.getX(), area.getBottom(), false);
+      g.setGradientFill(lacquer);
+      g.fillRect(area);
+    } else {
+      juce::ColourGradient satin(juce::Colour(0x16FFE0B5), area.getX(), area.getY(),
+                                 juce::Colour(0x46100501), area.getX(), area.getBottom(), false);
+      g.setGradientFill(satin);
+      g.fillRect(area);
+    }
+
+    g.restoreState();
+    return;
+  }
+
   juce::ColourGradient baseGrad(
       juce::Colour(0xFF563119), area.getX(), area.getY(),
       juce::Colour(0xFF2B1408),

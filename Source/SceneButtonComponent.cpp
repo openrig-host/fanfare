@@ -6,7 +6,7 @@ namespace Fanfare {
 
 SceneButtonComponent::SceneButtonComponent(int index, const juce::String& name)
     : juce::Button("SceneButton_" + juce::String(index)), sceneIndex(index), defaultName(name) {
-    setTooltip("Scene " + juce::String(index + 1) + " (Right-click to assign MIDI trigger or link a Song .json file)");
+    setTooltip("Setlist Slot " + juce::String(index + 1) + " (Click to load, drop a Song .json, or right-click to assign/clear)");
 }
 
 void SceneButtonComponent::setAssignedFile(const juce::File& file) {
@@ -23,6 +23,14 @@ void SceneButtonComponent::setMidiTriggerInfo(int pc, int channel) {
 void SceneButtonComponent::setActive(bool active) {
     if (isActive != active) {
         isActive = active;
+        repaint();
+    }
+}
+
+void SceneButtonComponent::setPreloadState(bool preloaded, bool preloading) {
+    if (isPreloaded != preloaded || isPreloading != preloading) {
+        isPreloaded = preloaded;
+        isPreloading = preloading;
         repaint();
     }
 }
@@ -146,8 +154,14 @@ void SceneButtonComponent::paintButton(juce::Graphics& g,
     g.setColour(isActive ? t.text : (hasSetupFile ? t.iem : t.textDim));
     g.drawText(title, textRect.withTrimmedRight(10.0f), juce::Justification::centred, true);
 
-    // Subtle hardware LED indicator dot for linked Song or MIDI PC trigger
-    if (hasSetupFile) {
+    // LED indicator dot: green when preloaded ready, amber while loading, cyan when linked
+    if (isPreloaded) {
+        g.setColour(t.ok);
+        g.fillEllipse(bounds.getRight() - 9.0f, bounds.getY() + 4.5f, 5.5f, 5.5f);
+    } else if (isPreloading) {
+        g.setColour(t.warn);
+        g.fillEllipse(bounds.getRight() - 9.0f, bounds.getY() + 4.5f, 5.5f, 5.5f);
+    } else if (hasSetupFile) {
         g.setColour(t.iem);
         g.fillEllipse(bounds.getRight() - 8.5f, bounds.getY() + 5.0f, 4.5f, 4.5f);
     } else if (midiPC >= 0) {

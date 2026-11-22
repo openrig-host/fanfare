@@ -69,6 +69,13 @@ struct SlotState {
 
   // Sampler
   bool samplerEnabled = false;
+
+  // CC & MIDI channel overrides (instant snapshot recall, zero VST reload)
+  bool hasMidiCcState = false;
+  int fohCC = -1;
+  int iemCC = -1;
+  int muteCC = -1;
+  int midiChannelOverride = -1;
 };
 
 struct Scene {
@@ -78,6 +85,7 @@ struct Scene {
   // Optional MIDI trigger: -1 means "no assignment" (use index-based fallback)
   int midiProgramChange = -1;  // 0-127
   int midiChannel = 0;         // 0 = any channel
+  juce::uint32 colorArgb = 0;  // 0 = default accent/neutral
 
   Scene(const juce::String &n) : name(n) {}
 };

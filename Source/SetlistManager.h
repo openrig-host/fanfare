@@ -338,15 +338,63 @@ public:
         const int n = setups.size();
         if (n == 0)
             return {};
-        const int start = (activeIndex >= 0) ? activeIndex : 0;
+        if (activeIndex < 0) {
+            for (int i = 0; i < n; ++i) {
+                if (setups[i].existsAsFile())
+                    return setups[i];
+            }
+            return {};
+        }
         // Scan forward (wrapping) for the next slot that has a real setup file,
         // skipping empty slots. Wraps to CORE (slot 0) naturally if needed.
         for (int offset = 1; offset < n; ++offset) {
-            const int idx = (start + offset) % n;
+            const int idx = (activeIndex + offset) % n;
             if (setups[idx].existsAsFile())
                 return setups[idx];
         }
         return {};
+    }
+
+    void syncTopBarSlots(const juce::StringArray& paths, const juce::File& activeFile) {
+        juce::Array<juce::File> nextSetups;
+        nextSetups.ensureStorageAllocated(paths.size());
+        for (const auto& p : paths)
+            nextSetups.add(p.isNotEmpty() ? juce::File(p) : juce::File{});
+
+        bool listChanged = false;
+        {
+            const juce::ScopedLock sl(setupsLock);
+            if (setups.size() != nextSetups.size()) {
+                listChanged = true;
+            } else {
+                for (int i = 0; i < setups.size(); ++i) {
+                    if (setups[i] != nextSetups[i]) {
+                        listChanged = true;
+                        break;
+                    }
+                }
+            }
+            if (listChanged)
+                setups = std::move(nextSetups);
+
+            int resolvedActive = -1;
+            if (activeFile.existsAsFile()) {
+                for (int i = 0; i < setups.size(); ++i) {
+                    if (setups[i] == activeFile) {
+                        resolvedActive = i;
+                        break;
+                    }
+                }
+            }
+            if (resolvedActive != activeIndex) {
+                activeIndex = resolvedActive;
+                listChanged = true;
+            }
+        }
+        if (listChanged) {
+            sendChangeMessage();
+            triggerPreloadOfNext();
+        }
     }
 
     void setSlotSetup(int index, const juce::File& file) {
