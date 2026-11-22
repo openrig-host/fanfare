@@ -57,6 +57,19 @@ It's not a DAW. It's an instrument.
 
 ---
 
+## What's New in v1.73: Snapshots Rail, Permanent Setlist Bar & B3 Upgrades
+
+<p align="center">
+  <img src="docs/snapshots_rail.png" alt="Fanfare v1.73 Far-Right Snapshots Rail, Dual VU Meters, IEM Click Track & Panic" width="360" />
+</p>
+
+- **Far-Right Vertical Snapshots Rail (`SNAPS`).** A stationary, collapsible vertical rail anchored to the far-right edge (84 px expanded / 22 px collapsed) that switches strip mutes, FOH/IEM volumes, key ranges, transpose, strip DSP, and CC/MIDI overrides in **0 ms** with zero VST reloads. Color-taggable (9 stage colors), explicit `+` capture and `UPD` save (never accidentally overwrites on click), `1`–`9` hotkeys, MIDI Program Change learn, and glitchless recall that lets held notes ring out when pitch/range didn't change.
+- **Permanent Auto-Preloading Top Setlist Bar.** Decoupled from internal Snapshots so clicking a song never alters the bar; syncs directly with `SetlistManager` to preload the next song automatically with amber (loading) and green (ready) LED indicators.
+- **Fanfare B3 Organ Upgrades.** Embedded real walnut wood-grain console texture, retuned 10-band studio voicing curve (warmer 31–125 Hz bottom end + extra 4–16 kHz high-drawbar shine), zero-cancellation Leslie `SPREAD` narrowing, and creamier Slow Leslie wall-reflection swirl.
+- **Stage Survival Utilities.** One-click **`Reset Audio`** button in the bottom status bar (with 80 ms USB ASIO settle), **IEM-only Click Track / Count-In** (`Click` in top bar, never sent to FOH), and global **Backup Keyboard Input Remap** (`Rig → Backup Keyboard Map...`).
+
+---
+
 ## What's New in v1.7: Tonewheel & Wavetable Edition
 
 ![Fanfare B3 91-Tonewheel Organ & Dual Leslie 122](docs/fanfare_b3_organ.jpg)
