@@ -7,15 +7,18 @@
 
 namespace Fanfare {
 
+juce::File ensureOfflineManualExtracted();
+
 inline void openHelpManual(const juce::String& anchor = {}) {
     juce::String frag = anchor.trim();
     if (frag.startsWithChar('#'))
         frag = frag.substring(1);
 
-    // manual.html + its CSS/JS are compiled directly into EmbeddedWebAssets, so
-    // the local server always serves the bundled manual offline from any
-    // folder (including a standalone Fanfare.exe on the Desktop).
-    juce::String urlStr = "http://127.0.0.1:8080/manual.html?v=" OPENRIG_VERSION_STRING;
+    const juce::File manualFile = ensureOfflineManualExtracted();
+    if (!manualFile.existsAsFile())
+        return;
+
+    juce::String urlStr = juce::URL(manualFile).toString(false);
 
     if (frag.isNotEmpty())
         urlStr += "#" + frag;

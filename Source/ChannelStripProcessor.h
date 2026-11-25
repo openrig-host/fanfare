@@ -603,10 +603,11 @@ public:
     const double safeSr = (sampleRate > 8000.0) ? sampleRate : 48000.0;
     sr = safeSr;
     blockSize = juce::jmax(maxBlockSize, 8192);
+    convBlockSize = (maxBlockSize > 0 && maxBlockSize <= 2048) ? maxBlockSize : 512;
     wetBuffer.setSize(2, blockSize, false, false, true);
     juce::dsp::ProcessSpec spec;
     spec.sampleRate = sr;
-    spec.maximumBlockSize = (juce::uint32)blockSize;
+    spec.maximumBlockSize = (juce::uint32)convBlockSize;
     spec.numChannels = 2;
     convolution.prepare(spec);
 
@@ -693,10 +694,14 @@ public:
       return;
     for (int c = 0; c < 2; ++c)
       wetBuffer.copyFrom(c, 0, buffer, juce::jmin(c, chans - 1), 0, n);
-    juce::dsp::AudioBlock<float> wetBlock =
-        juce::dsp::AudioBlock<float>(wetBuffer).getSubBlock(0, (size_t)n);
-    juce::dsp::ProcessContextReplacing<float> ctx(wetBlock);
-    convolution.process(ctx);
+    juce::dsp::AudioBlock<float> fullWetBlock(wetBuffer);
+    const int step = juce::jmax(1, convBlockSize);
+    for (int offset = 0; offset < n; offset += step) {
+      const int chunk = juce::jmin(step, n - offset);
+      auto subBlock = fullWetBlock.getSubBlock((size_t)offset, (size_t)chunk);
+      juce::dsp::ProcessContextReplacing<float> ctx(subBlock);
+      convolution.process(ctx);
+    }
     const float w = mix, d = 1.0f - mix;
     for (int c = 0; c < chans; ++c) {
       auto *dry = buffer.getWritePointer(c);
@@ -1217,11 +1222,12 @@ private:
     }
   }
 
-  juce::dsp::Convolution convolution;
+  juce::dsp::Convolution convolution{juce::dsp::Convolution::NonUniform{1024}};
   juce::AudioBuffer<float> wetBuffer;
   double sr = 48000.0;
   double synthesizedSr = 0.0;
   int blockSize = 512;
+  int convBlockSize = 512;
   std::atomic<bool> hasIR{false};
   juce::String loadedPath;
 };

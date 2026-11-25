@@ -12,8 +12,10 @@
 
 #include "OpenRigWebServer.h"
 #include "EmbeddedWebAssets.h"
+#include "../FanfareConstants.h"
 #include "../FanfareEngine.h"
-#include "../MainComponent.h"
+#include "../HelpLauncher.h"
+#include "../RigLibrary.h"
 #include "../SetlistManager.h"
 #include "../Version.h"
 #include "../YoutubeDownloadManager.h"
@@ -22,6 +24,7 @@
 #include <cmath>
 #include <cctype>
 #include <cstring>
+#include <unordered_map>
 
 #if JUCE_WINDOWS
   typedef SOCKET SocketType;
@@ -42,6 +45,29 @@
   #define SOCKET_CLOSE(s) close(s)
   #define SOCKET_SHUTDOWN_BOTH(s) ::shutdown(s, SHUT_RDWR)
 #endif
+
+namespace {
+struct EmbeddedManualAsset {
+    const char* path;
+    const unsigned char* data;
+    size_t len;
+    const char* mime;
+};
+
+static const EmbeddedManualAsset kEmbeddedManualAssets[] = {
+    { "/manual.html", OpenRig::EmbeddedWebAssets::MANUAL_HTML_DATA, OpenRig::EmbeddedWebAssets::MANUAL_HTML_DATA_LEN, "text/html; charset=utf-8" },
+    { "/Fanfare_Icon.png", OpenRig::EmbeddedWebAssets::MANUAL_ICON_PNG_DATA, OpenRig::EmbeddedWebAssets::MANUAL_ICON_PNG_DATA_LEN, "image/png" },
+    { "/assets-readonly/css/main.css", OpenRig::EmbeddedWebAssets::MANUAL_MAIN_CSS_DATA, OpenRig::EmbeddedWebAssets::MANUAL_MAIN_CSS_DATA_LEN, "text/css; charset=utf-8" },
+    { "/assets-readonly/css/fontawesome-all.min.css", OpenRig::EmbeddedWebAssets::MANUAL_FA_CSS_DATA, OpenRig::EmbeddedWebAssets::MANUAL_FA_CSS_DATA_LEN, "text/css; charset=utf-8" },
+    { "/assets-readonly/js/jquery.min.js", OpenRig::EmbeddedWebAssets::MANUAL_JQUERY_JS_DATA, OpenRig::EmbeddedWebAssets::MANUAL_JQUERY_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+    { "/assets-readonly/js/jquery.scrollex.min.js", OpenRig::EmbeddedWebAssets::MANUAL_SCROLLEX_JS_DATA, OpenRig::EmbeddedWebAssets::MANUAL_SCROLLEX_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+    { "/assets-readonly/js/jquery.scrolly.min.js", OpenRig::EmbeddedWebAssets::MANUAL_SCROLLY_JS_DATA, OpenRig::EmbeddedWebAssets::MANUAL_SCROLLY_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+    { "/assets-readonly/js/browser.min.js", OpenRig::EmbeddedWebAssets::MANUAL_BROWSER_JS_DATA, OpenRig::EmbeddedWebAssets::MANUAL_BROWSER_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+    { "/assets-readonly/js/breakpoints.min.js", OpenRig::EmbeddedWebAssets::MANUAL_BREAKPOINTS_JS_DATA, OpenRig::EmbeddedWebAssets::MANUAL_BREAKPOINTS_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+    { "/assets-readonly/js/util.js", OpenRig::EmbeddedWebAssets::MANUAL_UTIL_JS_DATA, OpenRig::EmbeddedWebAssets::MANUAL_UTIL_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+    { "/assets-readonly/js/main.js", OpenRig::EmbeddedWebAssets::MANUAL_MAIN_JS_DATA, OpenRig::EmbeddedWebAssets::MANUAL_MAIN_JS_DATA_LEN, "application/javascript; charset=utf-8" },
+};
+} // namespace
 
 namespace OpenRig {
 
@@ -381,10 +407,10 @@ namespace {
     }
 }
 
-WebServer::WebServer(FanfareEngine& eng, MainComponent* mc)
+WebServer::WebServer(FanfareEngine& eng, IWebHost* host)
     : juce::Thread("OpenRigWebServerThread"),
       engine(eng),
-      mainComponent(mc),
+      webHost(host),
       sessionToken(generateSessionTokenHex()) {
 #if JUCE_WINDOWS
     WSADATA wsaData;
@@ -417,18 +443,71 @@ WebServer::~WebServer() {
 #endif
 }
 
-bool WebServer::startServer(int port) {
+juce::String WebServer::getLastBindError() const {
+    std::lock_guard<std::mutex> lock(bindErrorMutex);
+    return lastBindError;
+}
+
+bool WebServer::runOnMessageThreadSync(std::function<void()> fn, int timeoutMs) {
+    auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+    if (mm == nullptr)
+        return false;
+    if (mm->isThisTheMessageThread()) {
+        fn();
+        return true;
+    }
+    struct SyncState {
+        juce::WaitableEvent done;
+        std::atomic<bool> completed{false};
+    };
+    auto st = std::make_shared<SyncState>();
+    auto life = lifetime;
+    juce::MessageManager::callAsync([this, life, st, fn = std::move(fn)]() {
+        if (life && life->alive.load(std::memory_order_acquire)
+            && serverRunning.load(std::memory_order_acquire)) {
+            fn();
+            st->completed.store(true, std::memory_order_release);
+        }
+        st->done.signal();
+    });
+    const int stepMs = 25;
+    for (int elapsed = 0; elapsed < timeoutMs; elapsed += stepMs) {
+        if (!serverRunning.load(std::memory_order_acquire))
+            return false;
+        if (st->done.wait(stepMs))
+            return st->completed.load(std::memory_order_acquire);
+    }
+    return false;
+}
+
+bool WebServer::startServer(int port, BindScope scope) {
     if (serverRunning.load() || wsOutboundThread.joinable())
         stopServer();
+
+    {
+        std::lock_guard<std::mutex> lock(bindErrorMutex);
+        lastBindError.clear();
+    }
+
+    serverPort = port;
+
+    if (scope == BindScope::Off) {
+        activeBindScope.store(BindScope::Off, std::memory_order_release);
+        return true;
+    }
 
     lifetime = std::make_shared<LifetimeState>();
     if (sessionToken.isEmpty())
         sessionToken = generateSessionTokenHex();
 
-    serverPort = port;
-
     SocketType sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET_VAL) {
+        {
+            std::lock_guard<std::mutex> lock(bindErrorMutex);
+            lastBindError = "Failed to create TCP socket for port " + juce::String(port);
+        }
+        LOG_WARN("WebServer: " + getLastBindError());
+        activeBindScope.store(BindScope::Off, std::memory_order_release);
         return false;
     }
 
@@ -441,15 +520,27 @@ bool WebServer::startServer(int port) {
 
     sockaddr_in serverAddr{};
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_addr.s_addr = (scope == BindScope::Loopback) ? htonl(INADDR_LOOPBACK) : INADDR_ANY;
     serverAddr.sin_port = htons((u_short)port);
 
     if (::bind(sock, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        {
+            std::lock_guard<std::mutex> lock(bindErrorMutex);
+            lastBindError = "Port " + juce::String(port) + " is already in use or unavailable";
+        }
+        LOG_WARN("WebServer: " + getLastBindError());
+        activeBindScope.store(BindScope::Off, std::memory_order_release);
         SOCKET_CLOSE(sock);
         return false;
     }
 
     if (::listen(sock, 16) < 0) {
+        {
+            std::lock_guard<std::mutex> lock(bindErrorMutex);
+            lastBindError = "Port " + juce::String(port) + " failed to listen";
+        }
+        LOG_WARN("WebServer: " + getLastBindError());
+        activeBindScope.store(BindScope::Off, std::memory_order_release);
         SOCKET_CLOSE(sock);
         return false;
     }
@@ -461,6 +552,7 @@ bool WebServer::startServer(int port) {
         pendingMeterFrame.clear();
         wsOutQueue.clear();
     }
+    activeBindScope.store(scope, std::memory_order_release);
     serverRunning.store(true, std::memory_order_release);
     wsOutboundThread = std::thread(&WebServer::wsOutboundLoop, this);
 
@@ -474,6 +566,7 @@ void WebServer::stopServer() {
     if (lifetime)
         lifetime->alive.store(false, std::memory_order_release);
     serverRunning.store(false, std::memory_order_release);
+    activeBindScope.store(BindScope::Off, std::memory_order_release);
     wsOutCv.notify_all();
     stopTimer();
     stopPluginMirror();
@@ -1005,76 +1098,119 @@ bool WebServer::hasMirrorSubscribers() {
     return mirrorSubscriberCount.load(std::memory_order_acquire) > 0;
 }
 
-void WebServer::processIncomingWsMessage(void* socketHandle, const juce::String& messageText) {
-    auto json = juce::JSON::parse(messageText);
-    if (!json.isObject()) return;
+struct WebServer::Dispatch {
+    using WsHandler = void (*)(WebServer&, void*, const juce::var&, const juce::String&);
+    using PostHandler = juce::String (*)(WebServer&, const juce::var&);
 
-    juce::String type = json["type"].toString();
-    auto life = lifetime;
-
-    if (type == "select_scene") {
-        int idx = 0;
-        if (!tryJsonInt(json["index"], idx, 0, 1024))
-            return;
-        juce::MessageManager::callAsync([this, life, idx]() {
+    static void selectSceneAsync(WebServer& s, int idx) {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, idx]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
-            if (idx < 0 || idx >= engine.getNumScenes())
+            if (idx < 0 || idx >= self->engine.getNumScenes())
                 return;
-            if (mainComponent != nullptr) {
-                mainComponent->recallSnapshot(idx);
+            if (self->webHost != nullptr) {
+                self->webHost->recallSnapshot(idx);
             } else {
-                engine.loadScene(idx);
-                notifySceneChanged(idx, engine.getSceneName(idx));
+                self->engine.loadScene(idx);
+                self->notifySceneChanged(idx, self->engine.getSceneName(idx));
             }
         });
-    } else if (type == "prev_setlist") {
-        juce::MessageManager::callAsync([this, life]() {
-            if (!life || !life->alive.load(std::memory_order_acquire))
+    }
+
+    static void stepSetlistAsync(WebServer& s, int delta) {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, delta]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || self->webHost == nullptr)
                 return;
             auto& sm = Fanfare::SetlistManager::getInstance();
-            if (sm.hasPrev() && mainComponent != nullptr) {
-                int prevIdx = sm.getActiveIndex() - 1;
-                auto setups = sm.getSetupsSnapshot();
-                if (prevIdx >= 0 && prevIdx < setups.size())
-                    mainComponent->loadRigFromFile(setups[prevIdx], prevIdx);
-            }
+            const bool canStep = (delta < 0) ? sm.hasPrev() : sm.hasNext();
+            if (!canStep)
+                return;
+            const int targetIdx = sm.getActiveIndex() + delta;
+            const auto setups = sm.getSetupsSnapshot();
+            if (targetIdx >= 0 && targetIdx < setups.size())
+                self->webHost->loadRigFromFile(setups[targetIdx], targetIdx);
         });
-    } else if (type == "next_setlist") {
-        juce::MessageManager::callAsync([this, life]() {
+    }
+
+    static void sendSnapshotAsync(WebServer& s, void* socketHandle, const char* msgType,
+                                  juce::var (WebServer::*builder)()) {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::String typeStr(msgType);
+        juce::MessageManager::callAsync([self, life, socketHandle, typeStr, builder]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
-            auto& sm = Fanfare::SetlistManager::getInstance();
-            if (sm.hasNext() && mainComponent != nullptr) {
-                int nextIdx = sm.getActiveIndex() + 1;
-                auto setups = sm.getSetupsSnapshot();
-                if (nextIdx >= 0 && nextIdx < setups.size())
-                    mainComponent->loadRigFromFile(setups[nextIdx], nextIdx);
+            juce::DynamicObject::Ptr root = new juce::DynamicObject();
+            root->setProperty("type", typeStr);
+            root->setProperty("data", (self->*builder)());
+            self->sendWebSocketTextToClient(socketHandle, juce::JSON::toString(juce::var(root.get())));
+        });
+    }
+
+    static juce::String mp3TransportAsync(WebServer& s, void (*action)(Mp3PlayerProcessor*)) {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, action]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || !self->serverRunning.load())
+                return;
+            if (auto* mp3 = self->engine.getMp3Player()) {
+                action(mp3);
+                self->notifyMp3Changed();
             }
         });
-    } else if (type == "select_setlist") {
+        return "{\"ok\":true}";
+    }
+
+    static void wsSelectScene(WebServer& s, void*, const juce::var& json, const juce::String&) {
+        int idx = 0;
+        if (tryJsonInt(json["index"], idx, 0, 1024))
+            selectSceneAsync(s, idx);
+    }
+
+    static void wsPrevSetlist(WebServer& s, void*, const juce::var&, const juce::String&) {
+        stepSetlistAsync(s, -1);
+    }
+
+    static void wsNextSetlist(WebServer& s, void*, const juce::var&, const juce::String&) {
+        stepSetlistAsync(s, +1);
+    }
+
+    static void wsSelectSetlist(WebServer& s, void*, const juce::var& json, const juce::String&) {
         int targetIdx = 0;
         if (!tryJsonInt(json["index"], targetIdx, 0, 10000))
             return;
-        juce::MessageManager::callAsync([this, life, targetIdx]() {
-            if (!life || !life->alive.load(std::memory_order_acquire))
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, targetIdx]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || self->webHost == nullptr)
                 return;
             auto& sm = Fanfare::SetlistManager::getInstance();
             auto setups = sm.getSetupsSnapshot();
-            if (targetIdx >= 0 && targetIdx < setups.size() && mainComponent != nullptr)
-                mainComponent->loadRigFromFile(setups[targetIdx], targetIdx);
+            if (targetIdx >= 0 && targetIdx < setups.size())
+                self->webHost->loadRigFromFile(setups[targetIdx], targetIdx);
         });
-    } else if (type == "load_song") {
+    }
+
+    static void wsLoadSong(WebServer& s, void*, const juce::var& json, const juce::String&) {
         juce::String pathOrName = json["path"].toString();
-        juce::MessageManager::callAsync([this, life, pathOrName]() {
-            if (!life || !life->alive.load(std::memory_order_acquire) || mainComponent == nullptr)
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, pathOrName]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || self->webHost == nullptr)
                 return;
             juce::File f = resolveAllowedSongFile(pathOrName);
             if (f.existsAsFile())
-                mainComponent->loadRigFromFile(f);
+                self->webHost->loadRigFromFile(f);
         });
-    } else if (type == "queue_song") {
+    }
+
+    static void wsQueueSong(WebServer& s, void*, const juce::var& json, const juce::String&) {
         juce::String pathOrName = json["path"].toString();
+        auto life = s.lifetime;
         juce::MessageManager::callAsync([life, pathOrName]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
@@ -1084,8 +1220,11 @@ void WebServer::processIncomingWsMessage(void* socketHandle, const juce::String&
                 sm.addSetup(f);
             }
         });
-    } else if (type == "toggle_favorite") {
+    }
+
+    static void wsToggleFavorite(WebServer& s, void*, const juce::var& json, const juce::String&) {
         juce::String pathOrName = json["path"].toString();
+        auto life = s.lifetime;
         juce::MessageManager::callAsync([life, pathOrName]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
@@ -1123,20 +1262,28 @@ void WebServer::processIncomingWsMessage(void* socketHandle, const juce::String&
                     tmp.overwriteTargetFileWithTemporary();
             }
         });
-    } else if (type == "panic") {
-        engine.triggerPanic();
-    } else if (type == "set_fader") {
+    }
+
+    static void wsPanic(WebServer& s, void*, const juce::var&, const juce::String&) {
+        s.engine.triggerPanic();
+    }
+
+    static void wsSetFader(WebServer& s, void*, const juce::var& json, const juce::String&) {
         juce::String fader = json["fader"].toString();
         float val = 0.0f;
         if (!tryJsonFloat(json["value"], val, 0.0f, 1.0f))
             return;
-        juce::MessageManager::callAsync([this, life, fader, val]() {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, fader, val]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
-            if (fader == "masterFoh") engine.setFohMasterLevel(val);
-            else if (fader == "masterIem") engine.setIemMasterLevel(val);
+            if (fader == "masterFoh") self->engine.setFohMasterLevel(val);
+            else if (fader == "masterIem") self->engine.setIemMasterLevel(val);
         });
-    } else if (type == "set_slot_fader") {
+    }
+
+    static void wsSetSlotFader(WebServer& s, void*, const juce::var& json, const juce::String&) {
         int slotIdx = 0;
         float val = 0.0f;
         if (!tryJsonInt(json["slot"], slotIdx, 0, 128))
@@ -1144,122 +1291,295 @@ void WebServer::processIncomingWsMessage(void* socketHandle, const juce::String&
         if (!tryJsonFloat(json["value"], val, 0.0f, 1.0f))
             return;
         juce::String ch = json["channel"].toString();
-        juce::MessageManager::callAsync([this, life, slotIdx, ch, val]() {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, slotIdx, ch, val]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
-            if (slotIdx < 0 || slotIdx >= engine.getNumSlots())
+            if (slotIdx < 0 || slotIdx >= self->engine.getNumSlots())
                 return;
-            if (auto* slot = engine.getSlot(slotIdx)) {
+            if (auto* slot = self->engine.getSlot(slotIdx)) {
                 if (ch == "foh") slot->setFohLevel(val);
                 else if (ch == "iem") slot->setIemOffset(val * 2.0f);
             }
         });
-    } else if (type == "set_slot_mute") {
+    }
+
+    static void wsSetSlotMute(WebServer& s, void*, const juce::var& json, const juce::String&) {
         int slotIdx = 0;
         if (!tryJsonInt(json["slot"], slotIdx, 0, 128))
             return;
         juce::String ch = json["channel"].toString();
         bool enabled = static_cast<bool>(json["enabled"]);
-        juce::MessageManager::callAsync([this, life, slotIdx, ch, enabled]() {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, slotIdx, ch, enabled]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
-            if (slotIdx < 0 || slotIdx >= engine.getNumSlots())
+            if (slotIdx < 0 || slotIdx >= self->engine.getNumSlots())
                 return;
-            if (auto* slot = engine.getSlot(slotIdx)) {
+            if (auto* slot = self->engine.getSlot(slotIdx)) {
                 if (ch == "foh") slot->setFohEnabled(enabled);
                 else if (ch == "iem") slot->setIemEnabled(enabled);
             }
         });
-    } else if (type == "set_notepad_tab") {
+    }
+
+    static void wsSetNotepadTab(WebServer& s, void*, const juce::var& json, const juce::String&) {
         int idx = 0;
         if (!tryJsonInt(json["index"], idx, 0, 15))
             return;
-        juce::MessageManager::callAsync([this, life, idx]() {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, idx]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
-            const int maxTab = std::max(0, (int)engine.getNotes().size() - 1);
-            engine.setActiveNoteTabIndex(juce::jlimit(0, maxTab, idx));
-            engine.broadcastNotesChanged();
+            const int maxTab = std::max(0, (int)self->engine.getNotes().size() - 1);
+            self->engine.setActiveNoteTabIndex(juce::jlimit(0, maxTab, idx));
+            self->engine.broadcastNotesChanged();
         });
-    } else if (type == "set_notepad_font_size") {
+    }
+
+    static void wsSetNotepadFontSize(WebServer& s, void*, const juce::var& json, const juce::String&) {
         float sz = 20.0f;
         if (!tryJsonFloat(json["size"], sz, 10.0f, 72.0f))
             return;
-        juce::MessageManager::callAsync([this, life, sz]() {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, sz]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
-            engine.setNoteFontSize(sz);
-            engine.broadcastNotesChanged();
+            self->engine.setNoteFontSize(sz);
+            self->engine.broadcastNotesChanged();
         });
-    } else if (type == "set_notepad_monospace") {
+    }
+
+    static void wsSetNotepadMonospace(WebServer& s, void*, const juce::var& json, const juce::String&) {
         bool mono = static_cast<bool>(json["isMonospace"]);
-        juce::MessageManager::callAsync([this, life, mono]() {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, mono]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
-            engine.setNoteIsMonospace(mono);
-            engine.broadcastNotesChanged();
+            self->engine.setNoteIsMonospace(mono);
+            self->engine.broadcastNotesChanged();
         });
-    } else if (type == "update_notepad_content") {
+    }
+
+    static void wsUpdateNotepadContent(WebServer& s, void*, const juce::var& json, const juce::String&) {
         int idx = 0;
         if (!tryJsonInt(json["index"], idx, 0, 15))
             return;
         juce::String content = json["content"].toString();
-        juce::MessageManager::callAsync([this, life, idx, content]() {
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, idx, content]() {
             if (!life || !life->alive.load(std::memory_order_acquire))
                 return;
-            auto notes = engine.getNotes();
+            auto notes = self->engine.getNotes();
             if (idx >= 0 && idx < (int)notes.size()) {
                 notes[idx].content = content;
-                engine.setNotes(notes);
-                engine.broadcastNotesChanged();
+                self->engine.setNotes(notes);
+                self->engine.broadcastNotesChanged();
             }
         });
-    } else if (type == "get_status") {
-        juce::MessageManager::callAsync([this, life, socketHandle]() {
-            if (!life || !life->alive.load(std::memory_order_acquire))
-                return;
-            juce::DynamicObject::Ptr root = new juce::DynamicObject();
-            root->setProperty("type", "status");
-            root->setProperty("data", buildStatusJson());
-            sendWebSocketTextToClient(socketHandle, juce::JSON::toString(juce::var(root.get())));
-        });
-    } else if (type == "get_notepad") {
-        juce::MessageManager::callAsync([this, life, socketHandle]() {
-            if (!life || !life->alive.load(std::memory_order_acquire))
-                return;
-            juce::DynamicObject::Ptr root = new juce::DynamicObject();
-            root->setProperty("type", "notepad");
-            root->setProperty("data", buildNotepadJson());
-            sendWebSocketTextToClient(socketHandle, juce::JSON::toString(juce::var(root.get())));
-        });
-    } else if (type == "get_mixer") {
-        juce::MessageManager::callAsync([this, life, socketHandle]() {
-            if (!life || !life->alive.load(std::memory_order_acquire))
-                return;
-            juce::DynamicObject::Ptr root = new juce::DynamicObject();
-            root->setProperty("type", "mixer");
-            root->setProperty("data", buildMixerJson());
-            sendWebSocketTextToClient(socketHandle, juce::JSON::toString(juce::var(root.get())));
-        });
-    } else if (type == "mirror_subscribe") {
-        handleMirrorSubscribe(socketHandle);
-    } else if (type == "mirror_unsubscribe") {
-        handleMirrorUnsubscribe(socketHandle);
-    } else if (type == "plugin_touch") {
+    }
+
+    static void wsGetStatus(WebServer& s, void* sock, const juce::var&, const juce::String&) {
+        sendSnapshotAsync(s, sock, "status", &WebServer::buildStatusJson);
+    }
+
+    static void wsGetNotepad(WebServer& s, void* sock, const juce::var&, const juce::String&) {
+        sendSnapshotAsync(s, sock, "notepad", &WebServer::buildNotepadJson);
+    }
+
+    static void wsGetMixer(WebServer& s, void* sock, const juce::var&, const juce::String&) {
+        sendSnapshotAsync(s, sock, "mixer", &WebServer::buildMixerJson);
+    }
+
+    static void wsMirrorSubscribe(WebServer& s, void* sock, const juce::var&, const juce::String&) {
+        s.handleMirrorSubscribe(sock);
+    }
+
+    static void wsMirrorUnsubscribe(WebServer& s, void* sock, const juce::var&, const juce::String&) {
+        s.handleMirrorUnsubscribe(sock);
+    }
+
+    static void wsPluginTouch(WebServer& s, void*, const juce::var&, const juce::String& messageText) {
         // Reverse touch input: {"type":"plugin_touch","action":"down","x":420,"y":180}
         PluginMirrorInputHandler::TouchEvent evt;
         if (!PluginMirrorInputHandler::parseTouchMessage(messageText, evt))
             return;
-        mirrorInput.inject(evt, mirrorCapture->getFrameInfo());
-    } else if (type == "get_mirror_status") {
-        sendWebSocketTextToClient(socketHandle, getPluginMirrorStatusJson());
-    } else if (type == "ping") {
+        s.mirrorInput.inject(evt, s.mirrorCapture->getFrameInfo());
+    }
+
+    static void wsGetMirrorStatus(WebServer& s, void* sock, const juce::var&, const juce::String&) {
+        s.sendWebSocketTextToClient(sock, s.getPluginMirrorStatusJson());
+    }
+
+    static void wsPing(WebServer& s, void* sock, const juce::var& json, const juce::String&) {
         juce::DynamicObject::Ptr root = new juce::DynamicObject();
         root->setProperty("type", "pong");
         root->setProperty("time", json["time"]);
         if (json.hasProperty("cid")) root->setProperty("cid", json["cid"]);
-        sendWebSocketTextToClient(socketHandle, juce::JSON::toString(juce::var(root.get())));
+        s.sendWebSocketTextToClient(sock, juce::JSON::toString(juce::var(root.get())));
     }
+
+    static juce::String postSelectScene(WebServer& s, const juce::var& jsonPayload) {
+        int idx = 0;
+        if (!jsonPayload.isObject() || !tryJsonInt(jsonPayload["index"], idx, 0, 1024))
+            return "{\"ok\":false,\"error\":\"Invalid scene index\"}";
+        selectSceneAsync(s, idx);
+        return "{\"ok\":true}";
+    }
+
+    static juce::String postPanic(WebServer& s, const juce::var&) {
+        s.engine.triggerPanic();
+        return "{\"ok\":true}";
+    }
+
+    static juce::String postMp3Play(WebServer& s, const juce::var&) {
+        return mp3TransportAsync(s, [](Mp3PlayerProcessor* mp3) { mp3->play(); });
+    }
+
+    static juce::String postMp3Pause(WebServer& s, const juce::var&) {
+        return mp3TransportAsync(s, [](Mp3PlayerProcessor* mp3) { mp3->pause(); });
+    }
+
+    static juce::String postMp3Next(WebServer& s, const juce::var&) {
+        return mp3TransportAsync(s, [](Mp3PlayerProcessor* mp3) { mp3->nextTrack(true); });
+    }
+
+    static juce::String postMp3Prev(WebServer& s, const juce::var&) {
+        return mp3TransportAsync(s, [](Mp3PlayerProcessor* mp3) { mp3->prevTrack(); });
+    }
+
+    static juce::String postMp3Bank(WebServer& s, const juce::var& jsonPayload) {
+        int bankIdx = 0;
+        if (!jsonPayload.isObject() || !tryJsonInt(jsonPayload["index"], bankIdx, 0, 256))
+            return "{\"ok\":false,\"error\":\"Invalid bank index\"}";
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, bankIdx]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || !self->serverRunning.load()) return;
+            if (auto* mp3 = self->engine.getMp3Player()) {
+                mp3->loadBank(bankIdx, true);
+                self->notifyMp3Changed();
+            }
+        });
+        return "{\"ok\":true}";
+    }
+
+    static juce::String postMp3Track(WebServer& s, const juce::var& jsonPayload) {
+        int trkIdx = 0;
+        if (!jsonPayload.isObject() || !tryJsonInt(jsonPayload["index"], trkIdx, 0, 100000))
+            return "{\"ok\":false,\"error\":\"Invalid track index\"}";
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        juce::MessageManager::callAsync([self, life, trkIdx]() {
+            if (!life || !life->alive.load(std::memory_order_acquire) || !self->serverRunning.load()) return;
+            if (auto* mp3 = self->engine.getMp3Player()) {
+                mp3->playTrack(trkIdx, true);
+                self->notifyMp3Changed();
+            }
+        });
+        return "{\"ok\":true}";
+    }
+
+    static juce::String postMp3Gain(WebServer& s, const juce::var& jsonPayload) {
+        float g = 1.0f;
+        if (!jsonPayload.isObject() || !tryJsonFloat(jsonPayload["gain"], g, 0.0f, 2.0f))
+            return "{\"ok\":false,\"error\":\"Invalid gain\"}";
+        if (auto* mp3 = s.engine.getMp3Player()) {
+            mp3->setGain(g);
+            s.notifyMp3Changed();
+        }
+        return "{\"ok\":true}";
+    }
+
+    static juce::String postMp3AutoDj(WebServer& s, const juce::var& jsonPayload) {
+        if (!jsonPayload.isObject())
+            return "{\"ok\":false,\"error\":\"Invalid payload\"}";
+        bool a = static_cast<bool>(jsonPayload["enabled"]);
+        if (auto* mp3 = s.engine.getMp3Player()) {
+            mp3->setAutoDjEnabled(a);
+            s.notifyMp3Changed();
+        }
+        return "{\"ok\":true}";
+    }
+
+    static juce::String postMp3Download(WebServer& s, const juce::var& jsonPayload) {
+        if (!jsonPayload.isObject())
+            return "{\"ok\":false,\"error\":\"Invalid payload\"}";
+        juce::String url = jsonPayload["url"].toString().trim();
+        bool playNow = (bool)jsonPayload.getProperty("playNow", false);
+        if (!YoutubeDownloadManager::isValidDownloadUrl(url))
+            return "{\"ok\":false,\"error\":\"Invalid URL: only http:// and https:// URLs are permitted\"}";
+        if (url.isEmpty())
+            return "{\"ok\":false,\"error\":\"Empty URL\"}";
+
+        auto life = s.lifetime;
+        WebServer* self = &s;
+        YoutubeDownloadManager::getInstance().queueDownload(url, playNow,
+            [self, life, playNow](bool success, const juce::File& file, const juce::String& /*title*/, const juce::String& /*err*/) {
+                if (!life || !life->alive.load(std::memory_order_acquire) || !self->serverRunning.load()) return;
+                if (success && file.existsAsFile()) {
+                    if (auto* mp3 = self->engine.getMp3Player()) {
+                        mp3->addFile(file);
+                        if (playNow) {
+                            int newIdx = (int)mp3->getPlaylistSnapshot().size() - 1;
+                            mp3->playTrack(newIdx, true);
+                        }
+                        self->notifyMp3Changed();
+                    }
+                }
+            },
+            [self, life](const juce::String& status, float /*progress*/) {
+                if (!life || !life->alive.load(std::memory_order_acquire) || !self->serverRunning.load()) return;
+                juce::DynamicObject::Ptr root = new juce::DynamicObject();
+                root->setProperty("type", "mp3_download_status");
+                root->setProperty("status", status);
+                self->broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
+            }
+        );
+        return "{\"ok\":true,\"message\":\"Download queued\"}";
+    }
+};
+
+void WebServer::processIncomingWsMessage(void* socketHandle, const juce::String& messageText) {
+    auto json = juce::JSON::parse(messageText);
+    if (!json.isObject()) return;
+
+    const std::string typeKey = json["type"].toString().toStdString();
+    static const std::unordered_map<std::string, Dispatch::WsHandler> kWsHandlers = {
+        { "select_scene",          &Dispatch::wsSelectScene },
+        { "prev_setlist",          &Dispatch::wsPrevSetlist },
+        { "next_setlist",          &Dispatch::wsNextSetlist },
+        { "select_setlist",        &Dispatch::wsSelectSetlist },
+        { "load_song",             &Dispatch::wsLoadSong },
+        { "queue_song",            &Dispatch::wsQueueSong },
+        { "toggle_favorite",       &Dispatch::wsToggleFavorite },
+        { "panic",                 &Dispatch::wsPanic },
+        { "set_fader",             &Dispatch::wsSetFader },
+        { "set_slot_fader",        &Dispatch::wsSetSlotFader },
+        { "set_slot_mute",         &Dispatch::wsSetSlotMute },
+        { "set_notepad_tab",       &Dispatch::wsSetNotepadTab },
+        { "set_notepad_font_size", &Dispatch::wsSetNotepadFontSize },
+        { "set_notepad_monospace", &Dispatch::wsSetNotepadMonospace },
+        { "update_notepad_content",&Dispatch::wsUpdateNotepadContent },
+        { "get_status",            &Dispatch::wsGetStatus },
+        { "get_notepad",           &Dispatch::wsGetNotepad },
+        { "get_mixer",             &Dispatch::wsGetMixer },
+        { "mirror_subscribe",      &Dispatch::wsMirrorSubscribe },
+        { "mirror_unsubscribe",    &Dispatch::wsMirrorUnsubscribe },
+        { "plugin_touch",          &Dispatch::wsPluginTouch },
+        { "get_mirror_status",     &Dispatch::wsGetMirrorStatus },
+        { "ping",                  &Dispatch::wsPing },
+    };
+
+    const auto it = kWsHandlers.find(typeKey);
+    if (it != kWsHandlers.end())
+        it->second(*this, socketHandle, json, messageText);
 }
 
 void WebServer::timerCallback() {
@@ -1273,15 +1593,15 @@ void WebServer::timerCallback() {
     root->setProperty("fohR", FanfareLog::amplitudeToLogScale(engine.getFohPeakR()));
     root->setProperty("iemL", FanfareLog::amplitudeToLogScale(engine.getIemPeakL()));
     root->setProperty("iemR", FanfareLog::amplitudeToLogScale(engine.getIemPeakR()));
-    root->setProperty("cpu", mainComponent ? (float)mainComponent->getCpuUsage() : 0.0f);
+    root->setProperty("cpu", webHost ? (float)webHost->getCpuUsage() : 0.0f);
     if (++telemetryThrottleCount >= 15) {
         telemetryThrottleCount = 0;
-        root->setProperty("underruns", mainComponent ? mainComponent->getAudioUnderruns() : 0);
-        const bool therm = mainComponent ? mainComponent->isThermalWarningActive() : false;
+        root->setProperty("underruns", webHost ? webHost->getAudioUnderruns() : 0);
+        const bool therm = webHost ? webHost->isThermalWarningActive() : false;
         root->setProperty("thermalAlert", therm);
-        root->setProperty("cpuTempC", mainComponent ? mainComponent->getCpuTemperatureCelsius() : -1);
-        if (therm && mainComponent != nullptr)
-            root->setProperty("thermalText", mainComponent->getThermalBadgeText());
+        root->setProperty("cpuTempC", webHost ? webHost->getCpuTemperatureCelsius() : -1);
+        if (therm && webHost != nullptr)
+            root->setProperty("thermalText", webHost->getThermalBadgeText());
     }
 
     const juce::String meterJson = juce::JSON::toString(juce::var(root.get()));
@@ -1350,6 +1670,29 @@ void WebServer::registerPluginMirrorSource(juce::Component* editorContent,
     // Geometry may have changed - refresh subscribed clients.
     if (hasMirrorSubscribers())
         broadcastWebSocket(juce::JSON::toString(buildMirrorInfoJson()));
+}
+
+void WebServer::unregisterPluginMirrorSource(juce::Component* editorContent,
+                                             void* nativeWindowHandle) {
+    if (mirrorCapture == nullptr)
+        return;
+
+    const auto cur = mirrorCapture->getTarget();
+    const bool wildcardClear =
+        (editorContent == nullptr && nativeWindowHandle == nullptr);
+    const bool matchesNative =
+        (cur.kind == PluginMirrorCapture::Target::Kind::NativeWindow &&
+         nativeWindowHandle != nullptr &&
+         cur.nativeWindowHandle == nativeWindowHandle);
+    const bool matchesComponent =
+        (cur.kind == PluginMirrorCapture::Target::Kind::JuceComponent &&
+         editorContent != nullptr &&
+         cur.component.getComponent() == editorContent);
+
+    if (wildcardClear || matchesNative || matchesComponent) {
+        stopPluginMirror();
+        mirrorCapture->clearTarget();
+    }
 }
 
 bool WebServer::startPluginMirror(int targetFps, float jpegQuality) {
@@ -1475,23 +1818,25 @@ bool WebServer::handleHttpRequest(void* socketHandle,
         }
 
         if (method == "GET") {
-            if (path == "/api/status") {
-                sendHttpResponse(socketHandle, 200, "application/json", juce::JSON::toString(buildStatusJson()));
-                return true;
-            } else if (path == "/api/scenes") {
-                sendHttpResponse(socketHandle, 200, "application/json", juce::JSON::toString(buildScenesJson()));
-                return true;
-            } else if (path == "/api/setlist") {
-                sendHttpResponse(socketHandle, 200, "application/json", juce::JSON::toString(buildSetlistJson()));
-                return true;
-            } else if (path == "/api/notepad") {
-                sendHttpResponse(socketHandle, 200, "application/json", juce::JSON::toString(buildNotepadJson()));
-                return true;
-            } else if (path == "/api/mixer") {
-                sendHttpResponse(socketHandle, 200, "application/json", juce::JSON::toString(buildMixerJson()));
-                return true;
-            } else if (path == "/api/mp3") {
-                sendHttpResponse(socketHandle, 200, "application/json", juce::JSON::toString(buildMp3Json()));
+            std::function<juce::var()> builder;
+            if (path == "/api/status")       builder = [this]() { return buildStatusJson(); };
+            else if (path == "/api/scenes")  builder = [this]() { return buildScenesJson(); };
+            else if (path == "/api/setlist") builder = [this]() { return buildSetlistJson(); };
+            else if (path == "/api/notepad") builder = [this]() { return buildNotepadJson(); };
+            else if (path == "/api/mixer")   builder = [this]() { return buildMixerJson(); };
+            else if (path == "/api/mp3")     builder = [this]() { return buildMp3Json(); };
+
+            if (builder) {
+                juce::String jsonOut;
+                const bool ok = runOnMessageThreadSync([&]() {
+                    jsonOut = juce::JSON::toString(builder());
+                });
+                if (!ok) {
+                    sendHttpResponse(socketHandle, 503, "application/json",
+                                     "{\"ok\":false,\"error\":\"Server shutting down or busy\"}");
+                    return false;
+                }
+                sendHttpResponse(socketHandle, 200, "application/json", jsonOut);
                 return true;
             }
             sendHttpResponse(socketHandle, 404, "application/json", "{\"ok\":false,\"error\":\"Not found\"}");
@@ -1524,140 +1869,23 @@ bool WebServer::handleHttpRequest(void* socketHandle,
 }
 
 juce::String WebServer::handleApiPost(const juce::String& path, const juce::var& jsonPayload) {
-    auto life = lifetime;
+    static const std::unordered_map<std::string, Dispatch::PostHandler> kPostHandlers = {
+        { "/api/scenes/select", &Dispatch::postSelectScene },
+        { "/api/panic",         &Dispatch::postPanic },
+        { "/api/mp3/play",      &Dispatch::postMp3Play },
+        { "/api/mp3/pause",     &Dispatch::postMp3Pause },
+        { "/api/mp3/next",      &Dispatch::postMp3Next },
+        { "/api/mp3/prev",      &Dispatch::postMp3Prev },
+        { "/api/mp3/bank",      &Dispatch::postMp3Bank },
+        { "/api/mp3/track",     &Dispatch::postMp3Track },
+        { "/api/mp3/gain",      &Dispatch::postMp3Gain },
+        { "/api/mp3/autodj",    &Dispatch::postMp3AutoDj },
+        { "/api/mp3/download",  &Dispatch::postMp3Download },
+    };
 
-    if (path == "/api/scenes/select") {
-        int idx = 0;
-        if (!jsonPayload.isObject() || !tryJsonInt(jsonPayload["index"], idx, 0, 1024))
-            return "{\"ok\":false,\"error\":\"Invalid scene index\"}";
-        juce::MessageManager::callAsync([this, life, idx]() {
-            if (!life || !life->alive.load(std::memory_order_acquire))
-                return;
-            if (idx < 0 || idx >= engine.getNumScenes())
-                return;
-            if (mainComponent != nullptr) {
-                mainComponent->recallSnapshot(idx);
-            } else {
-                engine.loadScene(idx);
-                notifySceneChanged(idx, engine.getSceneName(idx));
-            }
-        });
-        return "{\"ok\":true}";
-    } else if (path == "/api/panic") {
-        engine.triggerPanic();
-        return "{\"ok\":true}";
-    } else if (path == "/api/mp3/play") {
-        juce::MessageManager::callAsync([this, life]() {
-            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
-            if (auto* mp3 = engine.getMp3Player()) {
-                mp3->play();
-                notifyMp3Changed();
-            }
-        });
-        return "{\"ok\":true}";
-    } else if (path == "/api/mp3/pause") {
-        juce::MessageManager::callAsync([this, life]() {
-            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
-            if (auto* mp3 = engine.getMp3Player()) {
-                mp3->pause();
-                notifyMp3Changed();
-            }
-        });
-        return "{\"ok\":true}";
-    } else if (path == "/api/mp3/next") {
-        juce::MessageManager::callAsync([this, life]() {
-            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
-            if (auto* mp3 = engine.getMp3Player()) {
-                mp3->nextTrack(true);
-                notifyMp3Changed();
-            }
-        });
-        return "{\"ok\":true}";
-    } else if (path == "/api/mp3/prev") {
-        juce::MessageManager::callAsync([this, life]() {
-            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
-            if (auto* mp3 = engine.getMp3Player()) {
-                mp3->prevTrack();
-                notifyMp3Changed();
-            }
-        });
-        return "{\"ok\":true}";
-    } else if (path == "/api/mp3/bank") {
-        int bankIdx = 0;
-        if (!jsonPayload.isObject() || !tryJsonInt(jsonPayload["index"], bankIdx, 0, 256))
-            return "{\"ok\":false,\"error\":\"Invalid bank index\"}";
-        juce::MessageManager::callAsync([this, life, bankIdx]() {
-            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
-            if (auto* mp3 = engine.getMp3Player()) {
-                mp3->loadBank(bankIdx, true);
-                notifyMp3Changed();
-            }
-        });
-        return "{\"ok\":true}";
-    } else if (path == "/api/mp3/track") {
-        int trkIdx = 0;
-        if (!jsonPayload.isObject() || !tryJsonInt(jsonPayload["index"], trkIdx, 0, 100000))
-            return "{\"ok\":false,\"error\":\"Invalid track index\"}";
-        juce::MessageManager::callAsync([this, life, trkIdx]() {
-            if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
-            if (auto* mp3 = engine.getMp3Player()) {
-                mp3->playTrack(trkIdx, true);
-                notifyMp3Changed();
-            }
-        });
-        return "{\"ok\":true}";
-    } else if (path == "/api/mp3/gain") {
-        float g = 1.0f;
-        if (!jsonPayload.isObject() || !tryJsonFloat(jsonPayload["gain"], g, 0.0f, 2.0f))
-            return "{\"ok\":false,\"error\":\"Invalid gain\"}";
-        if (auto* mp3 = engine.getMp3Player()) {
-            mp3->setGain(g);
-            notifyMp3Changed();
-        }
-        return "{\"ok\":true}";
-    } else if (path == "/api/mp3/autodj") {
-        if (!jsonPayload.isObject())
-            return "{\"ok\":false,\"error\":\"Invalid payload\"}";
-        bool a = static_cast<bool>(jsonPayload["enabled"]);
-        if (auto* mp3 = engine.getMp3Player()) {
-            mp3->setAutoDjEnabled(a);
-            notifyMp3Changed();
-        }
-        return "{\"ok\":true}";
-    } else if (path == "/api/mp3/download") {
-        if (!jsonPayload.isObject())
-            return "{\"ok\":false,\"error\":\"Invalid payload\"}";
-        juce::String url = jsonPayload["url"].toString().trim();
-        bool playNow = (bool)jsonPayload.getProperty("playNow", false);
-        if (!YoutubeDownloadManager::isValidDownloadUrl(url))
-            return "{\"ok\":false,\"error\":\"Invalid URL: only http:// and https:// URLs are permitted\"}";
-        if (url.isNotEmpty()) {
-            YoutubeDownloadManager::getInstance().queueDownload(url, playNow,
-                [this, life, playNow](bool success, const juce::File& file, const juce::String& /*title*/, const juce::String& /*err*/) {
-                    if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
-                    if (success && file.existsAsFile()) {
-                        if (auto* mp3 = engine.getMp3Player()) {
-                            mp3->addFile(file);
-                            if (playNow) {
-                                int newIdx = (int)mp3->getPlaylistSnapshot().size() - 1;
-                                mp3->playTrack(newIdx, true);
-                            }
-                            notifyMp3Changed();
-                        }
-                    }
-                },
-                [this, life](const juce::String& status, float /*progress*/) {
-                    if (!life || !life->alive.load(std::memory_order_acquire) || !serverRunning.load()) return;
-                    juce::DynamicObject::Ptr root = new juce::DynamicObject();
-                    root->setProperty("type", "mp3_download_status");
-                    root->setProperty("status", status);
-                    broadcastWebSocket(juce::JSON::toString(juce::var(root.get())));
-                }
-            );
-            return "{\"ok\":true,\"message\":\"Download queued\"}";
-        }
-        return "{\"ok\":false,\"error\":\"Empty URL\"}";
-    }
+    const auto it = kPostHandlers.find(path.toStdString());
+    if (it != kPostHandlers.end())
+        return it->second(*this, jsonPayload);
     return "{\"ok\":false,\"error\":\"endpoint not found\"}";
 }
 
@@ -1734,12 +1962,12 @@ juce::var WebServer::buildStatusJson() {
         obj->setProperty("quickNotesTitle", "Notes");
     }
 
-    obj->setProperty("cpuLoad", mainComponent ? mainComponent->getCpuUsage() : 0.0);
+    obj->setProperty("cpuLoad", webHost ? webHost->getCpuUsage() : 0.0);
     obj->setProperty("ramMb", (int)(FanfareLog::getMemoryStats().workingSetBytes / (1024 * 1024)));
-    obj->setProperty("underruns", mainComponent ? mainComponent->getAudioUnderruns() : 0);
-    obj->setProperty("thermalAlert", mainComponent ? mainComponent->isThermalWarningActive() : false);
-    obj->setProperty("cpuTempC", mainComponent ? mainComponent->getCpuTemperatureCelsius() : -1);
-    obj->setProperty("thermalText", mainComponent ? mainComponent->getThermalBadgeText() : juce::String("THERMAL"));
+    obj->setProperty("underruns", webHost ? webHost->getAudioUnderruns() : 0);
+    obj->setProperty("thermalAlert", webHost ? webHost->isThermalWarningActive() : false);
+    obj->setProperty("cpuTempC", webHost ? webHost->getCpuTemperatureCelsius() : -1);
+    obj->setProperty("thermalText", webHost ? webHost->getThermalBadgeText() : juce::String("THERMAL"));
     obj->setProperty("librarySongs", buildSongsLibraryJson());
 
     return juce::var(obj.get());
@@ -2078,25 +2306,6 @@ bool WebServer::serveStaticFile(void* socketHandle, const juce::String& relative
     }
 
     // 4. Compiled-in Offline Stage Manual Fallback (works from standalone Fanfare.exe with no docs/ folder!)
-    struct EmbeddedAsset {
-        const char* path;
-        const unsigned char* data;
-        size_t len;
-        const char* mime;
-    };
-    static const EmbeddedAsset kEmbeddedManualAssets[] = {
-        { "/manual.html", EmbeddedWebAssets::MANUAL_HTML_DATA, EmbeddedWebAssets::MANUAL_HTML_DATA_LEN, "text/html; charset=utf-8" },
-        { "/Fanfare_Icon.png", EmbeddedWebAssets::MANUAL_ICON_PNG_DATA, EmbeddedWebAssets::MANUAL_ICON_PNG_DATA_LEN, "image/png" },
-        { "/assets-readonly/css/main.css", EmbeddedWebAssets::MANUAL_MAIN_CSS_DATA, EmbeddedWebAssets::MANUAL_MAIN_CSS_DATA_LEN, "text/css; charset=utf-8" },
-        { "/assets-readonly/css/fontawesome-all.min.css", EmbeddedWebAssets::MANUAL_FA_CSS_DATA, EmbeddedWebAssets::MANUAL_FA_CSS_DATA_LEN, "text/css; charset=utf-8" },
-        { "/assets-readonly/js/jquery.min.js", EmbeddedWebAssets::MANUAL_JQUERY_JS_DATA, EmbeddedWebAssets::MANUAL_JQUERY_JS_DATA_LEN, "application/javascript; charset=utf-8" },
-        { "/assets-readonly/js/jquery.scrollex.min.js", EmbeddedWebAssets::MANUAL_SCROLLEX_JS_DATA, EmbeddedWebAssets::MANUAL_SCROLLEX_JS_DATA_LEN, "application/javascript; charset=utf-8" },
-        { "/assets-readonly/js/jquery.scrolly.min.js", EmbeddedWebAssets::MANUAL_SCROLLY_JS_DATA, EmbeddedWebAssets::MANUAL_SCROLLY_JS_DATA_LEN, "application/javascript; charset=utf-8" },
-        { "/assets-readonly/js/browser.min.js", EmbeddedWebAssets::MANUAL_BROWSER_JS_DATA, EmbeddedWebAssets::MANUAL_BROWSER_JS_DATA_LEN, "application/javascript; charset=utf-8" },
-        { "/assets-readonly/js/breakpoints.min.js", EmbeddedWebAssets::MANUAL_BREAKPOINTS_JS_DATA, EmbeddedWebAssets::MANUAL_BREAKPOINTS_JS_DATA_LEN, "application/javascript; charset=utf-8" },
-        { "/assets-readonly/js/util.js", EmbeddedWebAssets::MANUAL_UTIL_JS_DATA, EmbeddedWebAssets::MANUAL_UTIL_JS_DATA_LEN, "application/javascript; charset=utf-8" },
-        { "/assets-readonly/js/main.js", EmbeddedWebAssets::MANUAL_MAIN_JS_DATA, EmbeddedWebAssets::MANUAL_MAIN_JS_DATA_LEN, "application/javascript; charset=utf-8" },
-    };
     for (const auto& asset : kEmbeddedManualAssets) {
         if (cleanPath.equalsIgnoreCase(asset.path)) {
             sendHttpDataResponse(socketHandle, 200, asset.mime, asset.data, asset.len, staticExtraHeader);
@@ -2152,6 +2361,7 @@ void WebServer::sendHttpDataResponse(void* socketHandle, int statusCode, const j
         case 405: statusText = "Method Not Allowed"; break;
         case 413: statusText = "Payload Too Large"; break;
         case 431: statusText = "Request Header Fields Too Large"; break;
+        case 503: statusText = "Service Unavailable"; break;
         default: break;
     }
 
@@ -2187,3 +2397,32 @@ juce::String WebServer::getEmbeddedJs() {
 }
 
 } // namespace OpenRig
+
+namespace Fanfare {
+
+juce::File ensureOfflineManualExtracted() {
+    const juce::File exeDir =
+        juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
+    const juce::File docsManual = exeDir.getChildFile("docs").getChildFile("manual.html");
+    if (docsManual.existsAsFile())
+        return docsManual;
+
+    const juce::File cacheDir =
+        FanfareConstants::getAppDirectory().getChildFile("manual_cache").getChildFile(OPENRIG_VERSION_STRING);
+    if (!cacheDir.exists())
+        cacheDir.createDirectory();
+
+    for (const auto& asset : kEmbeddedManualAssets) {
+        juce::String rel(asset.path);
+        while (rel.startsWithChar('/'))
+            rel = rel.substring(1);
+        juce::File target = cacheDir.getChildFile(rel);
+        target.getParentDirectory().createDirectory();
+        if (!target.existsAsFile() || target.getSize() != (juce::int64)asset.len)
+            target.replaceWithData(asset.data, asset.len);
+    }
+
+    return cacheDir.getChildFile("manual.html");
+}
+
+} // namespace Fanfare

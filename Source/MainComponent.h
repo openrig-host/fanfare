@@ -26,6 +26,7 @@
 #include "IMidiNoteLearner.h"
 #include "FanfareConstants.h"
 #include "FanfareEngine.h"
+#include "GlitchTelemetry.h"
 #include "RackSlotComponent.h"
 #include "RigLibrary.h"
 #include "QueueButtonComponent.h"
@@ -41,6 +42,7 @@
 #include "StartupWelcomeModal.h"
 #include "BackupKeyboardMap.h"
 #include "Web/OpenRigWebServer.h"
+#include "Web/WebHostInterface.h"
 #include "Web/StageHotspotController.h"
 #include "Web/StageRemoteModalOverlay.h"
 #include <JuceHeader.h>
@@ -57,7 +59,8 @@ class MainComponent : public juce::Component,
                       public juce::ChangeListener,
                       public juce::Timer,
                       public juce::KeyListener,
-                      public juce::MenuBarModel {
+                      public juce::MenuBarModel,
+                      public OpenRig::IWebHost {
 public:
   //==============================================================================
   MainComponent();
@@ -111,15 +114,15 @@ public:
     activeMidiNoteLearner = learner;
     hasMidiNoteLearner.store(learner != nullptr, std::memory_order_release);
   }
-  double getCpuUsage() { return deviceManager.getCpuUsage() * 100.0; }
-  int getAudioUnderruns() const { return audioUnderrunCount.load() + engineStallCount.load(); }
-  bool isThermalWarningActive() const { return thermalMonitor.isWarningActive(); }
-  int getCpuTemperatureCelsius() const { return thermalMonitor.getTemperatureCelsius(); }
-  juce::String getThermalBadgeText() const { return thermalMonitor.getSnapshot().badgeText; }
-  void loadRigFromFile(const juce::File &file, int targetSetlistIndex = -1);
+  double getCpuUsage() override { return deviceManager.getCpuUsage() * 100.0; }
+  int getAudioUnderruns() const override { return glitchTelemetry.getTotalUnderruns(); }
+  bool isThermalWarningActive() const override { return thermalMonitor.isWarningActive(); }
+  int getCpuTemperatureCelsius() const override { return thermalMonitor.getTemperatureCelsius(); }
+  juce::String getThermalBadgeText() const override { return thermalMonitor.getSnapshot().badgeText; }
+  void loadRigFromFile(const juce::File &file, int targetSetlistIndex = -1) override;
   void updateStripCollapseStates();
   void refreshThemeDependentStyles();
-  void recallSnapshot(int sceneIdx);
+  void recallSnapshot(int sceneIdx) override;
   void refreshSnapshotRail();
 
 private:
@@ -195,7 +198,6 @@ private:
   std::unique_ptr<MissingPluginsToast> missingPluginsToast;
   std::unique_ptr<ConfigModalOverlay> configOverlay;
   std::unique_ptr<EngineTuningModal> engineTuningModal;
-  std::atomic<juce::int64> suppressGlitchUntilTicks{0};
   EngineTuningModal::Settings engineTuningSettings;
   bool hasExplicitPCoresSetting = false;
 
@@ -242,6 +244,19 @@ private:
   std::unique_ptr<OpenRig::WebServer> webServer;
   std::unique_ptr<OpenRig::StageHotspotController> hotspotController;
   std::unique_ptr<OpenRig::StageRemoteModalOverlay> stageRemoteOverlay;
+  struct WebMp3Listener : Mp3PlayerProcessor::Listener {
+    MainComponent &owner;
+    explicit WebMp3Listener(MainComponent &o) : owner(o) {}
+    void mp3PlayStarted() override { notify(); }
+    void mp3TrackChanged() override { notify(); }
+    void mp3PlaylistChanged() override { notify(); }
+    void mp3BanksChanged() override { notify(); }
+    void notify() {
+      if (owner.webServer)
+        owner.webServer->notifyMp3Changed();
+    }
+  };
+  WebMp3Listener webMp3Listener{*this};
 
   void showResourceInspectorModal();
   void showRigDoctorModal(const juce::File &file = {});
@@ -344,26 +359,7 @@ private:
   juce::Label thermalLabel{"thermalLabel", "THERMAL"};
   ThermalMonitor thermalMonitor;
   UpdateChecker updateChecker;
-  std::atomic<int> audioUnderrunCount{0};
-  std::atomic<int> engineStallCount{0}; // worker-stall silence blocks (engine-side pathway)
-  std::atomic<juce::int64> lastAudioCallbackTicks{0};
-  std::atomic<double> lastGlitchStallMs{0.0};
-  std::atomic<double> pendingGlitchActualMs{0.0};
-  std::atomic<double> pendingGlitchExpectedMs{0.0};
-  // Duration of the previous audio callback (entry -> processAudio returned).
-  // On a glitch this splits "the driver called us late" (small duration) from
-  // "our own callback blocked" (duration ~ the gap).
-  std::atomic<double> lastCallbackDurationMs{0.0};
-  std::atomic<double> pendingGlitchDurationMs{0.0};
-  std::atomic<bool> hasPendingGlitchLog{false};
-
-  // Audio-thread timing telemetry (single writer: the audio callback; drained
-  // by reportAudioJitter on the message thread). Separates "driver woke us
-  // late" (late callbacks, short duration) from "our DSP ran long" (heavy).
-  std::atomic<int> lateCallbackCount{0};
-  std::atomic<int> heavyCallbackCount{0};
-  std::atomic<double> maxCallbackIntervalMs{0.0};
-  std::atomic<double> maxCallbackDurationMs{0.0};
+  Fanfare::GlitchTelemetry glitchTelemetry;
   juce::int64 lastJitterReportMs = 0;
   void reportAudioJitter();
   // Preallocated so the audio thread never touches the heap for incoming MIDI.
@@ -372,10 +368,6 @@ private:
   void reassertProcessShelter();
   void logAudioGlitch(double actualMs, double expectedMs, double cbDurationMs);
   void logAudioNanSpike(int channel, int sampleIndex, float badVal);
-  // Glitch log batching: entries accumulate in memory and flush to disk at
-  // most once per second — storm bursts no longer open the file per entry.
-  juce::String pendingGlitchLogText;
-  juce::CriticalSection glitchLogLock;
   void flushGlitchLog();
 
   juce::Label setupNameLabel{"setupNameLabel", "No song loaded"};

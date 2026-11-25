@@ -14,7 +14,9 @@
 #endif
 #include <limits>
 
+#include "AppSettings.h"
 #include "CCMappingComponent.h"
+#include "CpuTopology.h"
 #include "FanfareLogoData.h"
 #include "HelpLauncher.h"
 #include "MainComponent.h"
@@ -36,72 +38,6 @@
 
 // Self-deleting window for plugin editors
 // Windows managed by MainComponent
-
-//==============================================================================
-//==============================================================================
-#ifdef _WIN32
-struct CpuTopologyMasks {
-  DWORD_PTR sysMask = 0;
-  DWORD_PTR pCoreMask = 0;
-  DWORD_PTR eCoreMask = 0;
-  std::vector<DWORD_PTR> physicalCoreMasks;
-};
-
-static int countBitsInMask(DWORD_PTR m) noexcept {
-  int c = 0;
-  while (m != 0) {
-    m &= (m - 1);
-    ++c;
-  }
-  return c;
-}
-
-static CpuTopologyMasks queryCpuTopology() {
-  CpuTopologyMasks topo;
-  DWORD_PTR procMask = 0, sysMask = 0;
-  if (GetProcessAffinityMask(GetCurrentProcess(), &procMask, &sysMask))
-    topo.sysMask = sysMask;
-
-  DWORD length = 0;
-  GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &length);
-  if (length == 0)
-    return topo;
-  std::vector<char> buffer(length);
-  auto *info =
-      reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data());
-  if (!GetLogicalProcessorInformationEx(RelationProcessorCore, info, &length))
-    return topo;
-
-  BYTE maxEfficiency = 0;
-  DWORD offset = 0;
-  while (offset < length) {
-    auto *cur = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(
-        buffer.data() + offset);
-    if (cur->Relationship == RelationProcessorCore) {
-      if (cur->Processor.EfficiencyClass > maxEfficiency)
-        maxEfficiency = cur->Processor.EfficiencyClass;
-    }
-    offset += cur->Size;
-  }
-
-  offset = 0;
-  while (offset < length) {
-    auto *cur = reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(
-        buffer.data() + offset);
-    if (cur->Relationship == RelationProcessorCore &&
-        cur->Processor.GroupCount > 0) {
-      const DWORD_PTR coreMask = (DWORD_PTR)cur->Processor.GroupMask[0].Mask;
-      topo.physicalCoreMasks.push_back(coreMask);
-      if (maxEfficiency == 0 || cur->Processor.EfficiencyClass == maxEfficiency)
-        topo.pCoreMask |= coreMask;
-      else
-        topo.eCoreMask |= coreMask;
-    }
-    offset += cur->Size;
-  }
-  return topo;
-}
-#endif
 
 MainComponent::MainComponent() {
 #ifdef _WIN32
@@ -312,30 +248,24 @@ MainComponent::MainComponent() {
   Fanfare::FanfareSplashScreen::reportProgress(
       0.90f, "Starting stage remote & telemetry...");
   webServer = std::make_unique<OpenRig::WebServer>(engine, this);
-  webServer->startServer(8080);
+  {
+    auto &settings = Fanfare::AppSettings::getInstance();
+    const auto scope = OpenRig::WebServer::bindScopeFromString(settings.getWebRemoteBindScope());
+    const int port = settings.getWebRemotePort();
+    if (!webServer->startServer(port, scope)) {
+      LOG_WARN("WebServer failed to start on port " + juce::String(port) + ": " +
+               webServer->getLastBindError());
+    }
+  }
   hotspotController = std::make_unique<OpenRig::StageHotspotController>();
-  engine.onNotesChanged = [this]() {
+  engine.addNotesListener(this, [this]() {
     if (webServer)
       webServer->notifyNotesChanged();
-  };
+  });
 
-  if (auto *mp3 = engine.getMp3Player()) {
-    mp3->onPlayStarted = [this]() {
-      if (webServer)
-        webServer->notifyMp3Changed();
-    };
-    mp3->onTrackChanged = [this]() {
-      if (webServer)
-        webServer->notifyMp3Changed();
-    };
-    mp3->onPlaylistChanged = [this]() {
-      if (webServer)
-        webServer->notifyMp3Changed();
-    };
-    mp3->onBanksChanged = [this]() {
-      if (webServer)
-        webServer->notifyMp3Changed();
-    };
+  for (int i = 0; i < engine.getNumSlots(); ++i) {
+    if (auto *s = engine.getSlot(i))
+      s->getMp3Player().addListener(&webMp3Listener);
   }
 
   LOG_INFO("OpenRig initialized successfully");
@@ -354,6 +284,11 @@ void MainComponent::onStartupSplashFinished() {
 }
 
 MainComponent::~MainComponent() {
+  engine.removeNotesListener(this);
+  for (int i = 0; i < engine.getNumSlots(); ++i) {
+    if (auto *s = engine.getSlot(i))
+      s->getMp3Player().removeListener(&webMp3Listener);
+  }
   if (stripWidthSavePending) {
     stripWidthSavePending = false;
     savePreferredStripWidth();
@@ -636,60 +571,18 @@ void MainComponent::StripRulerBar::mouseDown(const juce::MouseEvent &e) {
 
 void MainComponent::logAudioGlitch(double actualMs, double expectedMs,
                                    double cbDurationMs) {
-  juce::String timeStr = juce::Time::getCurrentTime().formatted("%H:%M:%S.");
-  timeStr += juce::String(juce::Time::getCurrentTime().getMilliseconds())
-                 .paddedLeft('0', 3);
-
-  juce::String entry =
-      "[" + timeStr +
-      "] [AUDIO UNDERRUN GLITCH] Buffer stall: " + juce::String(actualMs, 2) +
-      "ms (expected " + juce::String(expectedMs, 2) +
-      "ms) | callback took: " + juce::String(cbDurationMs, 2) +
-      "ms | CPU: " + cpuLabel.getText() + " | RAM: " + ramLabel.getText() +
-      " | " + thermalMonitor.formatGlitchLogTag() + "\n";
-
-  // Batched: appends collect in memory and flush to disk at most once per
-  // second (glitchMonitorTimer). During a storm this replaces ~13 file
-  // opens/second with a single append - the message thread stays responsive.
-  {
-    juce::ScopedLock sl(glitchLogLock);
-    pendingGlitchLogText += entry;
-  }
+  glitchTelemetry.logAudioGlitch(actualMs, expectedMs, cbDurationMs,
+                                 cpuLabel.getText(), ramLabel.getText(),
+                                 thermalMonitor.formatGlitchLogTag());
 }
 
 void MainComponent::logAudioNanSpike(int channel, int sampleIndex,
                                      float badVal) {
-  juce::String timeStr = juce::Time::getCurrentTime().formatted("%H:%M:%S.");
-  timeStr += juce::String(juce::Time::getCurrentTime().getMilliseconds())
-                 .paddedLeft('0', 3);
-
-  juce::String entry = "[" + timeStr + "] [SAMPLE CORRUPTION / NAN SPIKE] Ch " +
-                       juce::String(channel) + " Sample " +
-                       juce::String(sampleIndex) +
-                       " Value: " + juce::String(badVal) + "\n";
-
-  {
-    juce::ScopedLock sl(glitchLogLock);
-    pendingGlitchLogText += entry;
-  }
+  glitchTelemetry.logAudioNanSpike(channel, sampleIndex, badVal);
 }
 
 void MainComponent::flushGlitchLog() {
-  juce::String batch;
-  {
-    juce::ScopedLock sl(glitchLogLock);
-    if (pendingGlitchLogText.isEmpty())
-      return;
-    batch = pendingGlitchLogText;
-    pendingGlitchLogText.clear();
-  }
-  auto appData =
-      juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-          .getChildFile("Fanfare");
-  if (!appData.exists())
-    appData.createDirectory();
-  auto logFile = appData.getChildFile("audio_underrun_log.txt");
-  logFile.appendText(batch);
+  glitchTelemetry.flushGlitchLog();
 }
 
 void MainComponent::audioDeviceIOCallbackWithContext(
@@ -697,52 +590,11 @@ void MainComponent::audioDeviceIOCallbackWithContext(
     float *const *outputChannelData, int numOutputChannels, int numSamples,
     const juce::AudioIODeviceCallbackContext & /*context*/) {
   // Callback interval timing
-  juce::int64 nowTicks = juce::Time::getHighResolutionTicks();
-  juce::int64 prevTicks = lastAudioCallbackTicks.exchange(nowTicks);
-  if (prevTicks > 0) {
-    double elapsedMs =
-        juce::Time::highResolutionTicksToSeconds(nowTicks - prevTicks) * 1000.0;
-    double expectedMs =
-        (double)numSamples /
-        (engine.getCurrentSampleRate() > 0.0 ? engine.getCurrentSampleRate()
-                                             : 44100.0) *
-        1000.0;
-    if (expectedMs > 0.0 && elapsedMs > expectedMs * FanfareConstants::kLateCallbackRatio) {
-      const juce::int64 suppressUntil =
-          suppressGlitchUntilTicks.load(std::memory_order_relaxed);
-      const juce::int64 applyEndTicks = engine.getLastRigApplyEndTicks();
-      const bool postApplySettle =
-          (applyEndTicks > 0) && (juce::Time::highResolutionTicksToSeconds(
-                                      nowTicks - applyEndTicks) < 0.5);
-      const double prevDurationMs =
-          lastCallbackDurationMs.load(std::memory_order_relaxed);
-      const bool isSystemSleepOrSuspendGap =
-          (elapsedMs > 5000.0 && prevDurationMs < 500.0);
-
-      if (isSystemSleepOrSuspendGap) {
-        // Multi-second/multi-hour timestamp jump across OS sleep/hibernate or
-        // USB audio standby: re-arm post-wake settle window without logging a
-        // fake underrun.
-        suppressGlitchDetectionForMs(2000);
-      } else if (nowTicks < suppressUntil || engine.isRigTransitioning() ||
-                 postApplySettle) {
-        // Suppressed during brief device-open settle or active rig state swap
-      } else {
-        lateCallbackCount.fetch_add(1, std::memory_order_relaxed);
-        if (elapsedMs > maxCallbackIntervalMs.load(std::memory_order_relaxed))
-          maxCallbackIntervalMs.store(elapsedMs, std::memory_order_relaxed);
-
-        if (elapsedMs > expectedMs * FanfareConstants::kUnderrunCallbackRatio) {
-          audioUnderrunCount++;
-          lastGlitchStallMs.store(elapsedMs);
-          pendingGlitchActualMs.store(elapsedMs);
-          pendingGlitchExpectedMs.store(expectedMs);
-          pendingGlitchDurationMs.store(prevDurationMs);
-          hasPendingGlitchLog.store(true);
-        }
-      }
-    }
-  }
+  const juce::int64 nowTicks = juce::Time::getHighResolutionTicks();
+  const double sampleRate = engine.getCurrentSampleRate();
+  glitchTelemetry.recordCallbackArrival(
+      nowTicks, numSamples, sampleRate,
+      engine.isRigTransitioning(), engine.getLastRigApplyEndTicks());
 
   // Per-thread hardening, flag-gated per mechanism (bisect - MinHost runs
   // no MMCSS and no shelter, and is clean where Fanfare storms).
@@ -812,17 +664,11 @@ void MainComponent::audioDeviceIOCallbackWithContext(
   const double callbackMs = juce::Time::highResolutionTicksToSeconds(
                                 juce::Time::getHighResolutionTicks() - nowTicks) *
                             1000.0;
-  lastCallbackDurationMs.store(callbackMs, std::memory_order_relaxed);
-
   const double blockMs =
-      (double)numSamples /
-      (engine.getCurrentSampleRate() > 0.0 ? engine.getCurrentSampleRate()
-                                           : 44100.0) *
+      static_cast<double>(numSamples) /
+      (sampleRate > 0.0 ? sampleRate : 44100.0) *
       1000.0;
-  if (callbackMs > blockMs * FanfareConstants::kHeavyCallbackLoad)
-    heavyCallbackCount.fetch_add(1, std::memory_order_relaxed);
-  if (callbackMs > maxCallbackDurationMs.load(std::memory_order_relaxed))
-    maxCallbackDurationMs.store(callbackMs, std::memory_order_relaxed);
+  glitchTelemetry.recordCallbackDurationMs(callbackMs, blockMs);
 }
 
 void MainComponent::stripLegacyDirectSoundDeviceType() {
@@ -1106,8 +952,7 @@ void MainComponent::checkAndRecoverAudioDevice() {
 
   auto *dev = deviceManager.getCurrentAudioDevice();
   const juce::int64 nowTicks = juce::Time::getHighResolutionTicks();
-  const juce::int64 lastCbTicks =
-      lastAudioCallbackTicks.load(std::memory_order_relaxed);
+  const juce::int64 lastCbTicks = glitchTelemetry.getLastCallbackTicks();
   const double msSinceLastCallback =
       (lastCbTicks > 0)
           ? juce::Time::highResolutionTicksToSeconds(nowTicks - lastCbTicks) *
@@ -1357,11 +1202,7 @@ void MainComponent::resetAuxLogoImage() {
 }
 
 void MainComponent::loadAuxLogoPreference() {
-  auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-  if (!f.existsAsFile())
-    return;
-  auto v = juce::JSON::parse(f.loadFileAsString());
-  juce::String p = v.getProperty("auxLogoPath", "").toString();
+  juce::String p = Fanfare::AppSettings::getInstance().getString("auxLogoPath");
   if (p.isEmpty())
     return;
   juce::File imgFile(p);
@@ -1375,26 +1216,13 @@ void MainComponent::loadAuxLogoPreference() {
 }
 
 void MainComponent::saveAuxLogoPreference() const {
-  auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-  juce::var v;
-  if (f.existsAsFile()) {
-    v = juce::JSON::parse(f.loadFileAsString());
-  }
-  if (!v.isObject()) {
-    v = juce::var(new juce::DynamicObject());
-  }
-  if (auto *obj = v.getDynamicObject()) {
-    obj->setProperty("auxLogoPath", auxLogoUserPath);
-  }
-  f.getParentDirectory().createDirectory();
-  f.replaceWithText(juce::JSON::toString(v));
+  Fanfare::AppSettings::getInstance().setString("auxLogoPath", auxLogoUserPath);
 }
 
 void MainComponent::loadEngineTuningSettings() {
-  auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-  if (!f.existsAsFile())
+  auto v = Fanfare::AppSettings::getInstance().getSnapshot();
+  if (!v.isObject())
     return;
-  auto v = juce::JSON::parse(f.loadFileAsString());
   if (v.hasProperty("pCoresOnly")) {
     engineTuningSettings.pCoresOnly = (bool)v["pCoresOnly"];
     hasExplicitPCoresSetting = true;
@@ -1419,83 +1247,41 @@ void MainComponent::loadEngineTuningSettings() {
 }
 
 void MainComponent::saveProgramChangeModePreference() const {
-  auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-  juce::var v;
-  if (f.existsAsFile())
-    v = juce::JSON::parse(f.loadFileAsString());
-  if (!v.isObject())
-    v = juce::var(new juce::DynamicObject());
-  if (auto *obj = v.getDynamicObject())
-    obj->setProperty("programChangeMode", engine.getProgramChangeMode());
-  f.getParentDirectory().createDirectory();
-  f.replaceWithText(juce::JSON::toString(v));
+  Fanfare::AppSettings::getInstance().setInt("programChangeMode",
+                                             engine.getProgramChangeMode());
 }
 
 void MainComponent::saveConfirmOverwritePreference() const {
-  auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-  juce::var v;
-  if (f.existsAsFile())
-    v = juce::JSON::parse(f.loadFileAsString());
-  if (!v.isObject())
-    v = juce::var(new juce::DynamicObject());
-  if (auto *obj = v.getDynamicObject())
-    obj->setProperty("confirmOverwriteOnSave", confirmOverwriteOnSave);
-  f.getParentDirectory().createDirectory();
-  f.replaceWithText(juce::JSON::toString(v));
+  Fanfare::AppSettings::getInstance().setBool("confirmOverwriteOnSave",
+                                              confirmOverwriteOnSave);
 }
 
 void MainComponent::savePreferredStripWidth() const {
-  auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-  juce::var v;
-  if (f.existsAsFile())
-    v = juce::JSON::parse(f.loadFileAsString());
-  if (!v.isObject())
-    v = juce::var(new juce::DynamicObject());
-  if (auto *obj = v.getDynamicObject())
-    obj->setProperty("preferredStripWidth", preferredExpandedWidth);
-  f.getParentDirectory().createDirectory();
-  f.replaceWithText(juce::JSON::toString(v));
+  Fanfare::AppSettings::getInstance().setInt("preferredStripWidth",
+                                             preferredExpandedWidth);
 }
 
 void MainComponent::saveEngineTuningSettings() {
-  auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-  juce::var v;
-  if (f.existsAsFile()) {
-    v = juce::JSON::parse(f.loadFileAsString());
-  }
-  if (!v.isObject()) {
-    v = juce::var(new juce::DynamicObject());
-  }
-  if (auto *obj = v.getDynamicObject()) {
-    obj->setProperty("pCoresOnly", engineTuningSettings.pCoresOnly);
-    obj->setProperty("shelterCpu0", engineTuningSettings.shelterCpu0);
-    obj->setProperty("preventPowerThrottling",
-                     engineTuningSettings.preventPowerThrottling);
-    obj->setProperty("parallelProcessing",
-                     engineTuningSettings.parallelProcessing);
-  }
-  f.getParentDirectory().createDirectory();
-  f.replaceWithText(juce::JSON::toString(v));
+  Fanfare::AppSettings::getInstance().update([this](juce::DynamicObject &obj) {
+    obj.setProperty("pCoresOnly", engineTuningSettings.pCoresOnly);
+    obj.setProperty("shelterCpu0", engineTuningSettings.shelterCpu0);
+    obj.setProperty("preventPowerThrottling",
+                    engineTuningSettings.preventPowerThrottling);
+    obj.setProperty("parallelProcessing",
+                    engineTuningSettings.parallelProcessing);
+  });
 }
 
 void MainComponent::suppressGlitchDetectionForMs(int durationMs) noexcept {
-  const juce::int64 now = juce::Time::getHighResolutionTicks();
-  const juce::int64 delta =
-      juce::Time::secondsToHighResolutionTicks(durationMs * 0.001);
-  const juce::int64 target = now + delta;
-  juce::int64 prev = suppressGlitchUntilTicks.load(std::memory_order_relaxed);
-  while (prev < target && !suppressGlitchUntilTicks.compare_exchange_weak(
-                              prev, target, std::memory_order_release,
-                              std::memory_order_relaxed)) {
-  }
+  glitchTelemetry.suppressForMs(durationMs);
 }
 
 void MainComponent::applyEngineTuningSettings() {
 #ifdef _WIN32
-  const CpuTopologyMasks topo = queryCpuTopology();
+  const Fanfare::CpuTopologyMasks topo = Fanfare::queryCpuTopology();
   int totalPhysicalPCores = 0;
-  for (DWORD_PTR coreMask : topo.physicalCoreMasks) {
-    if ((coreMask & topo.pCoreMask) == coreMask)
+  for (uint64_t rawCoreMask : topo.physicalCoreMasks) {
+    if ((rawCoreMask & topo.pCoreMask) == rawCoreMask)
       ++totalPhysicalPCores;
   }
   if (!hasExplicitPCoresSetting &&
@@ -1504,16 +1290,17 @@ void MainComponent::applyEngineTuningSettings() {
     engineTuningSettings.pCoresOnly = false;
   }
   const DWORD_PTR fullSysMask =
-      (topo.sysMask != 0) ? topo.sysMask : ~(DWORD_PTR)0;
+      (topo.sysMask != 0) ? static_cast<DWORD_PTR>(topo.sysMask)
+                          : ~(DWORD_PTR)0;
 
   // 1. PROCESS AFFINITY: Shelter ONLY CPU 0 (if enabled) while keeping ALL
   // Efficiency
   //    cores open so Windows + Intel Thread Director steer Kontakt disk
   //    threads, Roland background threads, Direct2D GUI, and USB ASIO helper
   //    threads off the P-cores!
-  DWORD_PTR procMaskToApply = topo.sysMask;
+  DWORD_PTR procMaskToApply = static_cast<DWORD_PTR>(topo.sysMask);
   if (engineTuningSettings.shelterCpu0 &&
-      countBitsInMask(procMaskToApply & ~(DWORD_PTR)1) >= 1) {
+      Fanfare::countBitsInMask(procMaskToApply & ~(DWORD_PTR)1) >= 1) {
     procMaskToApply &= ~(DWORD_PTR)1;
   }
   if (procMaskToApply != 0) {
@@ -1526,10 +1313,10 @@ void MainComponent::applyEngineTuningSettings() {
   // P-cores
   //    (excluding CPU 0 when sheltered).
   DWORD_PTR rtDspMask = (engineTuningSettings.pCoresOnly && topo.pCoreMask != 0)
-                            ? topo.pCoreMask
+                            ? static_cast<DWORD_PTR>(topo.pCoreMask)
                             : fullSysMask;
   if (engineTuningSettings.shelterCpu0 &&
-      countBitsInMask(rtDspMask & ~(DWORD_PTR)1) >= 1) {
+      Fanfare::countBitsInMask(rtDspMask & ~(DWORD_PTR)1) >= 1) {
     rtDspMask &= ~(DWORD_PTR)1;
   }
   rtDspMask &= procMaskToApply;
@@ -1542,7 +1329,8 @@ void MainComponent::applyEngineTuningSettings() {
   // separate physical cores so two Priority-15 real-time threads never collide
   // on Hyper-Threads of the same P-core.
   juce::Array<DWORD_PTR> pCoreSlices;
-  for (DWORD_PTR coreMask : topo.physicalCoreMasks) {
+  for (uint64_t rawCoreMask : topo.physicalCoreMasks) {
+    const DWORD_PTR coreMask = static_cast<DWORD_PTR>(rawCoreMask);
     const DWORD_PTR slice = coreMask & rtDspMask;
     // Never pin real-time DSP workers onto a partial physical core whose
     // sibling HT was masked out by shelterCpu0 (e.g. CPU 0's sibling 0x02).
@@ -1550,7 +1338,8 @@ void MainComponent::applyEngineTuningSettings() {
       pCoreSlices.add(slice);
   }
   if (pCoreSlices.isEmpty()) {
-    for (DWORD_PTR coreMask : topo.physicalCoreMasks) {
+    for (uint64_t rawCoreMask : topo.physicalCoreMasks) {
+      const DWORD_PTR coreMask = static_cast<DWORD_PTR>(rawCoreMask);
       const DWORD_PTR slice = coreMask & rtDspMask;
       if (slice != 0)
         pCoreSlices.add(slice);
@@ -1558,9 +1347,9 @@ void MainComponent::applyEngineTuningSettings() {
   }
   int dspPhysicalCores = pCoreSlices.size();
   if (dspPhysicalCores <= 0)
-    dspPhysicalCores = juce::jmax(1, countBitsInMask(rtDspMask) / 2);
+    dspPhysicalCores = juce::jmax(1, Fanfare::countBitsInMask(rtDspMask) / 2);
 
-  const int logicalInDspMask = countBitsInMask(rtDspMask);
+  const int logicalInDspMask = Fanfare::countBitsInMask(rtDspMask);
   const int helperLimit = (logicalInDspMask >= 2 && dspPhysicalCores >= 2)
                               ? juce::jlimit(1, 4, dspPhysicalCores - 1)
                               : 0;
@@ -1595,8 +1384,9 @@ void MainComponent::applyEngineTuningSettings() {
   //    P-cores!
   DWORD_PTR bgMask = procMaskToApply;
   if (engineTuningSettings.pCoresOnly && topo.eCoreMask != 0) {
-    const DWORD_PTR candidateECores = topo.eCoreMask & procMaskToApply;
-    if (countBitsInMask(candidateECores) >= 2)
+    const DWORD_PTR candidateECores =
+        static_cast<DWORD_PTR>(topo.eCoreMask) & procMaskToApply;
+    if (Fanfare::countBitsInMask(candidateECores) >= 2)
       bgMask = candidateECores;
   }
   engine.setBackgroundAffinityMask(bgMask);
@@ -1742,7 +1532,7 @@ void MainComponent::audioDeviceAboutToStart(juce::AudioIODevice *device) {
   // Forget the previous device session's last callback time: otherwise the
   // first callback of the new session measures a gap against a stale
   // timestamp and logs a giant false "glitch" (the 800ms log entries).
-  lastAudioCallbackTicks.store(0);
+  glitchTelemetry.resetLastCallbackTicks();
 }
 
 void MainComponent::audioDeviceStopped() {}
@@ -1764,7 +1554,7 @@ void MainComponent::refreshThemeDependentStyles() {
   ramLabel.setColour(juce::Label::textColourId, t.textDim);
   latencyLabel.setColour(juce::Label::textColourId, t.textDim);
   xrunsLabel.setColour(juce::Label::textColourId,
-                       (audioUnderrunCount.load() + engineStallCount.load() > 0)
+                       (glitchTelemetry.getTotalUnderruns() > 0)
                            ? t.warn
                            : t.ok);
   thermalLabel.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -2366,13 +2156,11 @@ void MainComponent::reportAudioJitter() {
     return;
   lastJitterReportMs = nowMs;
 
-  const int late = lateCallbackCount.exchange(0, std::memory_order_relaxed);
-  const int heavy = heavyCallbackCount.exchange(0, std::memory_order_relaxed);
-  const double maxInterval =
-      maxCallbackIntervalMs.exchange(0.0, std::memory_order_relaxed);
-  const double maxDuration =
-      maxCallbackDurationMs.exchange(0.0, std::memory_order_relaxed);
-  if (late == 0 && heavy == 0)
+  int late = 0;
+  int heavy = 0;
+  double maxInterval = 0.0;
+  double maxDuration = 0.0;
+  if (!glitchTelemetry.drainJitterStats(late, heavy, maxInterval, maxDuration))
     return;
 
   LOG_WARN("Audio timing (last " +
@@ -2509,14 +2297,14 @@ void MainComponent::timerCallback() {
   // Surface any audio underruns: callback-gap count + engine-side stalls,
   // tallied separately so the meter matches what the ears hear while the
   // two pathways stay distinguishable.
-  int xruns = audioUnderrunCount.load();
-  int stalls = engineStallCount.load();
+  int xruns = glitchTelemetry.getAudioUnderruns();
+  int stalls = glitchTelemetry.getEngineStalls();
   if (xruns + stalls > 0) {
     juce::String txt = "XRUNS: " + juce::String(xruns + stalls);
     if (stalls > 0)
       txt += " (" + juce::String(xruns) + " gap / " + juce::String(stalls) +
              " stall)";
-    txt += " [" + juce::String(lastGlitchStallMs.load(), 1) + "ms]";
+    txt += " [" + juce::String(glitchTelemetry.getLastGlitchStallMs(), 1) + "ms]";
     xrunsLabel.setText(txt, juce::dontSendNotification);
     xrunsLabel.setColour(juce::Label::textColourId,
                          ThemeManager::get(Theme::Role::warn));
@@ -2530,19 +2318,15 @@ void MainComponent::timerCallback() {
     // Engine-side stall (worker didn't finish, rack mid-transition): the block
     // was genuinely silent - count it in XRUNS so the meter matches the ears,
     // but tally it separately from callback-gap underruns.
-    engineStallCount++;
+    glitchTelemetry.incrementEngineStall();
     FanfareLog::log(FanfareLog::Level::Warning,
                     "Audio underrun: a block emitted silence "
                     "(worker stall or rack not prepared).");
   }
 
-  if (hasPendingGlitchLog.exchange(false)) {
-    double actual = pendingGlitchActualMs.exchange(0.0);
-    double expected = pendingGlitchExpectedMs.exchange(0.0);
-    double cbDur = pendingGlitchDurationMs.exchange(0.0);
-    if (actual > 0.0) {
-      logAudioGlitch(actual, expected, cbDur);
-    }
+  double actual = 0.0, expected = 0.0, cbDur = 0.0;
+  if (glitchTelemetry.consumePendingGlitch(actual, expected, cbDur)) {
+    logAudioGlitch(actual, expected, cbDur);
   }
 
   // Flush batched glitch-log appends at most once per second (this timer's
@@ -2617,12 +2401,10 @@ void MainComponent::mouseDown(const juce::MouseEvent &e) {
     return;
   }
   if (e.originalComponent == &xrunsLabel) {
-    audioUnderrunCount.store(0);
-    engineStallCount.store(0);
-    auto appData =
-        juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-            .getChildFile("Fanfare");
-    auto logFile = appData.getChildFile("audio_underrun_log.txt");
+    glitchTelemetry.resetUnderrunCounts();
+    auto logFile = Fanfare::GlitchTelemetry::getDefaultLogFile();
+    if (!logFile.getParentDirectory().exists())
+      logFile.getParentDirectory().createDirectory();
     if (!logFile.existsAsFile())
       logFile.replaceWithText("No audio underruns detected yet.\n");
     logFile.startAsProcess();

@@ -1,6 +1,8 @@
 #pragma once
 
+#include "FanfareConstants.h"
 #include "Scene.h"
+#include "StripState.h"
 #include <JuceHeader.h>
 #include <vector>
 #include <set>
@@ -54,42 +56,6 @@ struct CCMapping {
 struct CCPassthrough {
     int incomingCC = -1;
     int outgoingCC = -1;
-};
-
-struct ChannelStripSettings {
-    bool gateEnabled = false;
-    float gateThreshold = -40.0f;
-    bool eqEnabled = false;
-    bool eqCurveMode = false;
-    float hpfFreq = 20.0f;
-    float lowShelfGain = 0.0f;
-    float highShelfGain = 0.0f;
-    float eqVolGain = 0.0f;
-    float eqMasterGain = 0.0f;
-    float eqBands[10] = {};
-    bool compEnabled = false;
-    float compAmount = 0.0f;
-    bool chorusEnabled = false;
-    float chorusRate = 1.0f;
-    float chorusMix = 0.0f;
-    bool delayEnabled = false;
-    int delayMode = 0; // 0 = Stereo, 1 = Ping-Pong, 2 = Mono, 3 = Tape Warm
-    float delayTimeMs = 375.0f;
-    float delayFeedback = 0.35f;
-    float delayTone = 6500.0f;
-    float delayMix = 0.25f;
-    bool reverbEnabled = false;
-    float reverbSize = 0.5f;
-    float reverbMix = 0.0f;
-    bool irEnabled = false;
-    float irMix = 0.3f;
-    juce::String irPath;
-    bool musetteEnabled = false;
-    float musetteCents = 6.0f;
-    bool musette3Reed = false;
-    int musetteMode = 0; // 0 = 2-Reed MM, 1 = 3-Reed MMM, 2 = Wide Musette
-    float musetteMix = 0.25f;
-    int channelMode = 0; // 0 = Stereo, 1 = Mono (L+R), 2 = Mono (Left), 3 = Mono (Right)
 };
 
 struct SamplerSlotSettings {
@@ -168,22 +134,8 @@ struct SongSlot {
     std::vector<CCMapping> ccMappings;
     std::vector<CCPassthrough> ccPassthroughs;
 
-struct ArpParams {
-    bool enabled = false;
-    float bpm = 127.0f;
-    int octavesUp = 2;
-    int octavesDown = 0;
-    float gate = 0.75f;
-    int patternIdx = 3; // 0=Up, 1=Down, 2=UpDown, 3=Random
-};
-
-struct HarmParams {
-    bool enabled = false;
-    int octavesUp = 1;
-    int octavesDown = 0;
-    int africaMode = 0;
-    int harmonyTargetSlot = -1; // -1 = local VST, >=0 = route generated notes to this slot
-};
+    using ArpParams = Fanfare::ArpParams;
+    using HarmParams = Fanfare::HarmParams;
 
     ArpParams arpeggiator;
     HarmParams harmonizer;

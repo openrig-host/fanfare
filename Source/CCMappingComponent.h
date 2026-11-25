@@ -70,6 +70,18 @@ public:
                              "Open the CC Assignments & Inverse Drawbar "
                              "section of the User's Manual");
     addAndMakeVisible(helpBtn);
+    closeBtn.setButtonText("CLOSE");
+    Fanfare::setButtonRole(closeBtn, Fanfare::ButtonRole::Danger);
+    closeBtn.setTooltip("Close CC Assignment Manager");
+    closeBtn.onClick = [this] {
+      disarmQuickLearn();
+      LearnBus::getInstance().disarm();
+      if (auto *co = findParentComponentOfClass<juce::CallOutBox>())
+        co->dismiss();
+      else if (auto *dw = findParentComponentOfClass<juce::DialogWindow>())
+        dw->exitModalState(0);
+    };
+    addAndMakeVisible(closeBtn);
     fohLabel.setText("FOH CC:", juce::dontSendNotification);
     addAndMakeVisible(fohCCEditor);
     fohCCEditor.setText(formatOptionalCC(slot.getFohCC()),
@@ -1034,7 +1046,8 @@ public:
 
   void resized() override {
     auto r = getLocalBounds().reduced(12);
-    helpBtn.setBounds(getWidth() - 78, 8, 64, 24);
+    closeBtn.setBounds(getWidth() - 78, 8, 64, 24);
+    helpBtn.setBounds(getWidth() - 150, 8, 64, 24);
     r.removeFromTop(38);
 
     const int rowH = 26;
@@ -1203,7 +1216,7 @@ private:
   juce::TextButton fohLearnBtn, iemLearnBtn, muteLearnBtn, swapLearnBtn,
       learnBtn, mapBtn, selLearnBtn, delBtn, passBtn, ck88PresetBtn,
       editProfileBtn, invBtn, togBtn, selInvBtn, selTogBtn, quickLearnBtn,
-      helpBtn;
+      helpBtn, closeBtn;
   juce::ListBox mappingList;
 
   struct MappingItem {

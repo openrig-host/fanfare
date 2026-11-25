@@ -218,9 +218,18 @@ void MainComponent::openExternalPluginEditor(juce::AudioPluginInstance *plugin,
       activePluginWindows.add(w);
       openPluginWindowCount.store(activePluginWindows.size(),
                                   std::memory_order_release);
+      void *nativeHandle =
+          w->getPeer() ? w->getPeer()->getNativeHandle() : nullptr;
+      w->onBeforeDestroyEditor = [safeThis, nativeHandle](
+                                     juce::Component *editorComp,
+                                     void *closingHandle) {
+        if (safeThis != nullptr && safeThis->webServer != nullptr) {
+          safeThis->webServer->unregisterPluginMirrorSource(
+              editorComp, closingHandle != nullptr ? closingHandle : nativeHandle);
+        }
+      };
       if (webServer != nullptr)
-        webServer->registerPluginMirrorSource(
-            editor, w->getPeer() ? w->getPeer()->getNativeHandle() : nullptr, name);
+        webServer->registerPluginMirrorSource(editor, nativeHandle, name);
     }
   }
 }

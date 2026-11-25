@@ -2,6 +2,7 @@
 // FanfareEngine.h mechanically (see nov8mistral.md). Hot path (processAudio)
 // and small inline getters remain in the header.
 #include "FanfareEngine.h"
+#include "StripStateLive.h"
 
 FanfareEngine::FanfareEngine() 
 {
@@ -234,54 +235,10 @@ void FanfareEngine::loadScene(int index)
         slot->setMidiChannelOverride(st.midiChannelOverride);
       }
 
-      // DSP
-      auto& dsp = slot->getStrip();
-      dsp.gateEnabled.store(st.gateEnabled);
-      dsp.gateThreshold.store(st.gateThreshold);
-      dsp.eqEnabled.store(st.eqEnabled);
-      dsp.eqCurveMode.store(st.eqCurveMode);
-      dsp.hpfFreq.store(st.hpfFreq);
-      dsp.lowShelfGain.store(st.lowShelfGain);
-      dsp.highShelfGain.store(st.highShelfGain);
-      dsp.eqVolGain.store(st.eqVolGain);
-      dsp.eqMasterGain.store(st.eqMasterGain);
-      for (int b = 0; b < 10; ++b)
-        dsp.eqBands[b].store(st.eqBands[b]);
-      dsp.compEnabled.store(st.compEnabled);
-      dsp.compAmount.store(st.compAmount);
-      dsp.chorusEnabled.store(st.chorusEnabled);
-      dsp.chorusRate.store(st.chorusRate);
-      dsp.chorusMix.store(st.chorusMix);
-      dsp.delayEnabled.store(st.delayEnabled);
-      dsp.delayMode.store(st.delayMode);
-      dsp.delayTimeMs.store(st.delayTimeMs);
-      dsp.delayFeedback.store(st.delayFeedback);
-      dsp.delayTone.store(st.delayTone);
-      dsp.delayMix.store(st.delayMix);
-      dsp.reverbEnabled.store(st.reverbEnabled);
-      dsp.reverbSize.store(st.reverbSize);
-      dsp.reverbMix.store(st.reverbMix);
-      dsp.irEnabled.store(st.irEnabled);
-      dsp.irMix.store(st.irMix);
-      if (st.irPath.isNotEmpty())
-        dsp.getIRReverb().loadPathOrPreset(st.irPath);
-
-      // Arpeggiator
-      auto& arp = slot->getArpeggiator();
-      arp.enabled.store(st.arpEnabled);
-      arp.bpm.store(st.arpBpm);
-      arp.octavesUp.store(st.arpOctavesUp);
-      arp.octavesDown.store(st.arpOctavesDown);
-      arp.gate.store(st.arpGate);
-      arp.patternIdx.store(st.arpPatternIdx);
-
-      // Harmonizer
-      auto& harm = slot->getHarmonizer();
-      harm.enabled.store(st.harmEnabled);
-      harm.octavesUp.store(st.harmOctavesUp);
-      harm.octavesDown.store(st.harmOctavesDown);
-      harm.africaMode.store(st.harmAfricaMode);
-      harm.harmonyTargetSlot.store(st.harmTargetSlot);
+      // DSP, Arpeggiator, Harmonizer
+      Fanfare::applyStrip(slot->getStrip(), st.strip, st.hasMusetteAndChannelMode, true, false);
+      Fanfare::applyArp(slot->getArpeggiator(), st.arp);
+      Fanfare::applyHarm(slot->getHarmonizer(), st.harm);
 
       // Sampler
       slot->getSampler().enabled.store(st.samplerEnabled);
@@ -361,53 +318,11 @@ void FanfareEngine::saveCurrentStateToScene(int index)
       st.lowNote = slot->getLowNote();
       st.highNote = slot->getHighNote();
 
-      // DSP
-      const auto& dsp = slot->getStrip();
-      st.gateEnabled = dsp.gateEnabled.load();
-      st.gateThreshold = dsp.gateThreshold.load();
-      st.eqEnabled = dsp.eqEnabled.load();
-      st.eqCurveMode = dsp.eqCurveMode.load();
-      st.hpfFreq = dsp.hpfFreq.load();
-      st.lowShelfGain = dsp.lowShelfGain.load();
-      st.highShelfGain = dsp.highShelfGain.load();
-      st.eqVolGain = dsp.eqVolGain.load();
-      st.eqMasterGain = dsp.eqMasterGain.load();
-      for (int b = 0; b < 10; ++b)
-        st.eqBands[b] = dsp.eqBands[b].load();
-      st.compEnabled = dsp.compEnabled.load();
-      st.compAmount = dsp.compAmount.load();
-      st.chorusEnabled = dsp.chorusEnabled.load();
-      st.chorusRate = dsp.chorusRate.load();
-      st.chorusMix = dsp.chorusMix.load();
-      st.delayEnabled = dsp.delayEnabled.load();
-      st.delayMode = dsp.delayMode.load();
-      st.delayTimeMs = dsp.delayTimeMs.load();
-      st.delayFeedback = dsp.delayFeedback.load();
-      st.delayTone = dsp.delayTone.load();
-      st.delayMix = dsp.delayMix.load();
-      st.reverbEnabled = dsp.reverbEnabled.load();
-      st.reverbSize = dsp.reverbSize.load();
-      st.reverbMix = dsp.reverbMix.load();
-      st.irEnabled = dsp.irEnabled.load();
-      st.irMix = dsp.irMix.load();
-      st.irPath = dsp.getIRReverb().getLoadedPath();
-
-      // Arpeggiator
-      const auto& arp = slot->getArpeggiator();
-      st.arpEnabled = arp.enabled.load();
-      st.arpBpm = arp.bpm.load();
-      st.arpOctavesUp = arp.octavesUp.load();
-      st.arpOctavesDown = arp.octavesDown.load();
-      st.arpGate = arp.gate.load();
-      st.arpPatternIdx = arp.patternIdx.load();
-
-      // Harmonizer
-      const auto& harm = slot->getHarmonizer();
-      st.harmEnabled = harm.enabled.load();
-      st.harmOctavesUp = harm.octavesUp.load();
-      st.harmOctavesDown = harm.octavesDown.load();
-      st.harmAfricaMode = harm.africaMode.load();
-      st.harmTargetSlot = harm.harmonyTargetSlot.load();
+      // DSP, Arpeggiator, Harmonizer
+      st.strip = Fanfare::captureStrip(slot->getStrip());
+      st.hasMusetteAndChannelMode = true;
+      st.arp = Fanfare::captureArp(slot->getArpeggiator());
+      st.harm = Fanfare::captureHarm(slot->getHarmonizer());
 
       // Sampler
       st.samplerEnabled = slot->getSampler().enabled.load();
@@ -467,53 +382,11 @@ void FanfareEngine::createNewScene(const juce::String &name)
       st.lowNote = slot->getLowNote();
       st.highNote = slot->getHighNote();
 
-      // DSP
-      const auto& dsp = slot->getStrip();
-      st.gateEnabled = dsp.gateEnabled.load();
-      st.gateThreshold = dsp.gateThreshold.load();
-      st.eqEnabled = dsp.eqEnabled.load();
-      st.eqCurveMode = dsp.eqCurveMode.load();
-      st.hpfFreq = dsp.hpfFreq.load();
-      st.lowShelfGain = dsp.lowShelfGain.load();
-      st.highShelfGain = dsp.highShelfGain.load();
-      st.eqVolGain = dsp.eqVolGain.load();
-      st.eqMasterGain = dsp.eqMasterGain.load();
-      for (int b = 0; b < 10; ++b)
-        st.eqBands[b] = dsp.eqBands[b].load();
-      st.compEnabled = dsp.compEnabled.load();
-      st.compAmount = dsp.compAmount.load();
-      st.chorusEnabled = dsp.chorusEnabled.load();
-      st.chorusRate = dsp.chorusRate.load();
-      st.chorusMix = dsp.chorusMix.load();
-      st.delayEnabled = dsp.delayEnabled.load();
-      st.delayMode = dsp.delayMode.load();
-      st.delayTimeMs = dsp.delayTimeMs.load();
-      st.delayFeedback = dsp.delayFeedback.load();
-      st.delayTone = dsp.delayTone.load();
-      st.delayMix = dsp.delayMix.load();
-      st.reverbEnabled = dsp.reverbEnabled.load();
-      st.reverbSize = dsp.reverbSize.load();
-      st.reverbMix = dsp.reverbMix.load();
-      st.irEnabled = dsp.irEnabled.load();
-      st.irMix = dsp.irMix.load();
-      st.irPath = dsp.getIRReverb().getLoadedPath();
-
-      // Arpeggiator
-      const auto& arp = slot->getArpeggiator();
-      st.arpEnabled = arp.enabled.load();
-      st.arpBpm = arp.bpm.load();
-      st.arpOctavesUp = arp.octavesUp.load();
-      st.arpOctavesDown = arp.octavesDown.load();
-      st.arpGate = arp.gate.load();
-      st.arpPatternIdx = arp.patternIdx.load();
-
-      // Harmonizer
-      const auto& harm = slot->getHarmonizer();
-      st.harmEnabled = harm.enabled.load();
-      st.harmOctavesUp = harm.octavesUp.load();
-      st.harmOctavesDown = harm.octavesDown.load();
-      st.harmAfricaMode = harm.africaMode.load();
-      st.harmTargetSlot = harm.harmonyTargetSlot.load();
+      // DSP, Arpeggiator, Harmonizer
+      st.strip = Fanfare::captureStrip(slot->getStrip());
+      st.hasMusetteAndChannelMode = true;
+      st.arp = Fanfare::captureArp(slot->getArpeggiator());
+      st.harm = Fanfare::captureHarm(slot->getHarmonizer());
 
       // Sampler
       st.samplerEnabled = slot->getSampler().enabled.load();
@@ -906,45 +779,7 @@ void FanfareEngine::loadPluginList()
 
       // Save Channel Strip Settings
       auto *stripObj = new juce::DynamicObject();
-      auto &strip = s->getStrip();
-      stripObj->setProperty("gateEnabled", (bool)strip.gateEnabled);
-      stripObj->setProperty("gateThreshold", (double)strip.gateThreshold);
-      stripObj->setProperty("eqEnabled", (bool)strip.eqEnabled);
-      stripObj->setProperty("eqCurveMode", strip.eqCurveMode.load());
-      stripObj->setProperty("hpfFreq", (double)strip.hpfFreq);
-      stripObj->setProperty("eqLow", (double)strip.lowShelfGain);
-      stripObj->setProperty("eqHigh", (double)strip.highShelfGain);
-      stripObj->setProperty("eqVolGain", (double)strip.eqVolGain.load());
-      stripObj->setProperty("eqMasterGain", (double)strip.eqMasterGain.load());
-      {
-        juce::Array<juce::var> bandsArr;
-        for (int b = 0; b < 10; ++b)
-          bandsArr.add((double)strip.eqBands[b].load());
-        stripObj->setProperty("eqBands", bandsArr);
-      }
-      stripObj->setProperty("compEnabled", (bool)strip.compEnabled);
-      stripObj->setProperty("compAmount", (double)strip.compAmount);
-      stripObj->setProperty("chorusEnabled", (bool)strip.chorusEnabled);
-      stripObj->setProperty("chorusRate", (double)strip.chorusRate);
-      stripObj->setProperty("chorusMix", (double)strip.chorusMix);
-      stripObj->setProperty("delayEnabled", strip.delayEnabled.load());
-      stripObj->setProperty("delayMode", strip.delayMode.load());
-      stripObj->setProperty("delayTimeMs", (double)strip.delayTimeMs.load());
-      stripObj->setProperty("delayFeedback", (double)strip.delayFeedback.load());
-      stripObj->setProperty("delayTone", (double)strip.delayTone.load());
-      stripObj->setProperty("delayMix", (double)strip.delayMix.load());
-      stripObj->setProperty("reverbEnabled", (bool)strip.reverbEnabled);
-      stripObj->setProperty("reverbSize", (double)strip.reverbSize);
-      stripObj->setProperty("reverbMix", (double)strip.reverbMix);
-      stripObj->setProperty("irEnabled", (bool)strip.irEnabled);
-      stripObj->setProperty("irMix", (double)strip.irMix);
-      stripObj->setProperty("irPath", strip.getIRReverb().getLoadedPath());
-      stripObj->setProperty("musetteEnabled", strip.musetteEnabled.load());
-      stripObj->setProperty("musetteCents", (double)strip.musetteCents.load());
-      stripObj->setProperty("musette3Reed", (bool)(strip.musetteMode.load() == 1));
-      stripObj->setProperty("musetteMode", strip.musetteMode.load());
-      stripObj->setProperty("musetteMix", (double)strip.musetteMix.load());
-      stripObj->setProperty("channelMode", strip.channelMode.load());
+      Fanfare::writeStripToObject(*stripObj, Fanfare::captureStrip(s->getStrip()), true);
       st->setProperty("strip", stripObj);
 
       // Save Sampler Settings
@@ -993,23 +828,12 @@ void FanfareEngine::loadPluginList()
 
       // Save Arpeggiator Settings
       auto *arpObj = new juce::DynamicObject();
-      auto &arp = s->getArpeggiator();
-      arpObj->setProperty("enabled", arp.enabled.load());
-      arpObj->setProperty("bpm", (double)arp.bpm.load());
-      arpObj->setProperty("octavesUp", arp.octavesUp.load());
-      arpObj->setProperty("octavesDown", arp.octavesDown.load());
-      arpObj->setProperty("gate", (double)arp.gate.load());
-      arpObj->setProperty("patternIdx", arp.patternIdx.load());
+      Fanfare::writeArpToObject(*arpObj, Fanfare::captureArp(s->getArpeggiator()), false);
       st->setProperty("arpeggiator", arpObj);
 
       // Save Harmonizer Settings
       auto *harmObj = new juce::DynamicObject();
-      auto &harm = s->getHarmonizer();
-      harmObj->setProperty("enabled", harm.enabled.load());
-      harmObj->setProperty("octavesUp", harm.octavesUp.load());
-      harmObj->setProperty("octavesDown", harm.octavesDown.load());
-      harmObj->setProperty("africaMode", harm.africaMode.load());
-      harmObj->setProperty("harmonyTargetSlot", harm.harmonyTargetSlot.load());
+      Fanfare::writeHarmToObject(*harmObj, Fanfare::captureHarm(s->getHarmonizer()), false);
       st->setProperty("harmonizer", harmObj);
 
       // Save CC-to-Parameter mappings
@@ -1038,60 +862,47 @@ void FanfareEngine::loadPluginList()
       }
       st->setProperty("ccPassthroughs", ccPassthroughNodes);
 
+      auto writeChainMeta = [](juce::DynamicObject* pObj,
+                               const RackSlot::ChainSlotSettings& cs) {
+        pObj->setProperty("lowNote", cs.lowNote.load());
+        pObj->setProperty("highNote", cs.highNote.load());
+        pObj->setProperty("level", (double)cs.level.load());
+        pObj->setProperty("enabled", cs.enabled.load());
+        if (int layerCh = cs.midiChannel.load(); layerCh != 0)
+          pObj->setProperty("midiChannel", juce::jlimit(0, 16, layerCh));
+      };
       juce::Array<juce::var> chainNodes;
       for (int pIdx = 0; pIdx < s->getChainSize(); ++pIdx) {
         auto plugin = s->getPluginInstance(pIdx);
         if (plugin) {
           auto pluginVar = getPluginVar(plugin);
-          if (pIdx < 3 && pluginVar.isObject()) {
-            auto* pObj = pluginVar.getDynamicObject();
-            auto& cs = s->getChainSlotSettings(pIdx);
-            pObj->setProperty("lowNote", cs.lowNote.load());
-            pObj->setProperty("highNote", cs.highNote.load());
-            pObj->setProperty("level", (double)cs.level.load());
-            pObj->setProperty("enabled", cs.enabled.load());
-          }
+          if (pIdx < 3 && pluginVar.isObject())
+            writeChainMeta(pluginVar.getDynamicObject(), s->getChainSlotSettings(pIdx));
           chainNodes.add(pluginVar);
         } else if (pIdx < 3 && s->isChainSlotSynth(pIdx)) {
           auto* pObj = new juce::DynamicObject();
-          auto& cs = s->getChainSlotSettings(pIdx);
           pObj->setProperty("isSynth", true);
           pObj->setProperty("synthState", s->getSynth(pIdx).getState());
-          pObj->setProperty("lowNote", cs.lowNote.load());
-          pObj->setProperty("highNote", cs.highNote.load());
-          pObj->setProperty("level", (double)cs.level.load());
-          pObj->setProperty("enabled", cs.enabled.load());
+          writeChainMeta(pObj, s->getChainSlotSettings(pIdx));
           chainNodes.add(juce::var(pObj));
         } else if (pIdx < 3 && s->isChainSlotFm(pIdx)) {
           auto* pObj = new juce::DynamicObject();
-          auto& cs = s->getChainSlotSettings(pIdx);
           pObj->setProperty("isFm", true);
           pObj->setProperty("fmState", s->getFmSynth(pIdx).getState());
-          pObj->setProperty("lowNote", cs.lowNote.load());
-          pObj->setProperty("highNote", cs.highNote.load());
-          pObj->setProperty("level", (double)cs.level.load());
-          pObj->setProperty("enabled", cs.enabled.load());
+          writeChainMeta(pObj, s->getChainSlotSettings(pIdx));
           chainNodes.add(juce::var(pObj));
         } else if (pIdx < 3 && s->isChainSlotB3(pIdx)) {
           auto* pObj = new juce::DynamicObject();
-          auto& cs = s->getChainSlotSettings(pIdx);
           pObj->setProperty("isB3", true);
           pObj->setProperty("b3State", s->getB3Organ(pIdx).getState());
-          pObj->setProperty("lowNote", cs.lowNote.load());
-          pObj->setProperty("highNote", cs.highNote.load());
-          pObj->setProperty("level", (double)cs.level.load());
-          pObj->setProperty("enabled", cs.enabled.load());
+          writeChainMeta(pObj, s->getChainSlotSettings(pIdx));
           chainNodes.add(juce::var(pObj));
         } else if (pIdx < 3 && s->isChainSlotMidiOut(pIdx)) {
           auto* pObj = new juce::DynamicObject();
-          auto& cs = s->getChainSlotSettings(pIdx);
           pObj->setProperty("isMidiOut", true);
           pObj->setProperty("midiOutDevice", s->getChainSlotMidiOutIdentifier(pIdx));
           pObj->setProperty("midiOutChannel", s->getChainSlotMidiOutChannel(pIdx));
-          pObj->setProperty("lowNote", cs.lowNote.load());
-          pObj->setProperty("highNote", cs.highNote.load());
-          pObj->setProperty("level", (double)cs.level.load());
-          pObj->setProperty("enabled", cs.enabled.load());
+          writeChainMeta(pObj, s->getChainSlotSettings(pIdx));
           chainNodes.add(juce::var(pObj));
         } else {
           chainNodes.add(juce::var());
@@ -1159,54 +970,10 @@ void FanfareEngine::loadPluginList()
         stateObj->setProperty("lowNote", st.lowNote);
         stateObj->setProperty("highNote", st.highNote);
 
-        // DSP
-        stateObj->setProperty("gateEnabled", st.gateEnabled);
-        stateObj->setProperty("gateThreshold", (double)st.gateThreshold);
-        stateObj->setProperty("eqEnabled", st.eqEnabled);
-        stateObj->setProperty("eqCurveMode", st.eqCurveMode);
-        stateObj->setProperty("hpfFreq", (double)st.hpfFreq);
-        stateObj->setProperty("eqLow", (double)st.lowShelfGain);
-        stateObj->setProperty("eqHigh", (double)st.highShelfGain);
-        stateObj->setProperty("eqVolGain", (double)st.eqVolGain);
-        stateObj->setProperty("eqMasterGain", (double)st.eqMasterGain);
-        {
-          juce::Array<juce::var> bandsArr;
-          for (int b = 0; b < 10; ++b)
-            bandsArr.add((double)st.eqBands[b]);
-          stateObj->setProperty("eqBands", bandsArr);
-        }
-        stateObj->setProperty("compEnabled", st.compEnabled);
-        stateObj->setProperty("compAmount", (double)st.compAmount);
-        stateObj->setProperty("chorusEnabled", st.chorusEnabled);
-        stateObj->setProperty("chorusRate", (double)st.chorusRate);
-        stateObj->setProperty("chorusMix", (double)st.chorusMix);
-        stateObj->setProperty("delayEnabled", st.delayEnabled);
-        stateObj->setProperty("delayMode", st.delayMode);
-        stateObj->setProperty("delayTimeMs", (double)st.delayTimeMs);
-        stateObj->setProperty("delayFeedback", (double)st.delayFeedback);
-        stateObj->setProperty("delayTone", (double)st.delayTone);
-        stateObj->setProperty("delayMix", (double)st.delayMix);
-        stateObj->setProperty("reverbEnabled", st.reverbEnabled);
-        stateObj->setProperty("reverbSize", (double)st.reverbSize);
-        stateObj->setProperty("reverbMix", (double)st.reverbMix);
-        stateObj->setProperty("irEnabled", st.irEnabled);
-        stateObj->setProperty("irMix", (double)st.irMix);
-        stateObj->setProperty("irPath", st.irPath);
-
-        // Arpeggiator
-        stateObj->setProperty("arpEnabled", st.arpEnabled);
-        stateObj->setProperty("arpBpm", (double)st.arpBpm);
-        stateObj->setProperty("arpOctavesUp", st.arpOctavesUp);
-        stateObj->setProperty("arpOctavesDown", st.arpOctavesDown);
-        stateObj->setProperty("arpGate", (double)st.arpGate);
-        stateObj->setProperty("arpPatternIdx", st.arpPatternIdx);
-
-        // Harmonizer
-        stateObj->setProperty("harmEnabled", st.harmEnabled);
-        stateObj->setProperty("harmOctavesUp", st.harmOctavesUp);
-        stateObj->setProperty("harmOctavesDown", st.harmOctavesDown);
-        stateObj->setProperty("harmAfricaMode", st.harmAfricaMode);
-        stateObj->setProperty("harmTargetSlot", st.harmTargetSlot);
+        // DSP, Arpeggiator, Harmonizer
+        Fanfare::writeStripToObject(*stateObj, st.strip, st.hasMusetteAndChannelMode);
+        Fanfare::writeArpToObject(*stateObj, st.arp, true);
+        Fanfare::writeHarmToObject(*stateObj, st.harm, true);
 
         // Sampler
         stateObj->setProperty("samplerEnabled", st.samplerEnabled);
@@ -1376,94 +1143,25 @@ void FanfareEngine::applyRig(const juce::var &rig)
         if (auto *stripObj =
                 v.getProperty("strip", juce::var()).getDynamicObject()) {
           auto &strip = s->getStrip();
-          strip.gateEnabled = stripObj->getProperty("gateEnabled");
-          strip.gateThreshold = (float)stripObj->getProperty("gateThreshold");
-          strip.eqEnabled = stripObj->getProperty("eqEnabled");
-          strip.eqCurveMode.store(stripObj->hasProperty("eqCurveMode") ? (bool)stripObj->getProperty("eqCurveMode") : false);
-          strip.hpfFreq = (float)stripObj->getProperty("hpfFreq");
-          strip.lowShelfGain = (float)stripObj->getProperty("eqLow");
-          strip.highShelfGain = (float)stripObj->getProperty("eqHigh");
-          strip.eqVolGain.store(stripObj->hasProperty("eqVolGain") ? (float)stripObj->getProperty("eqVolGain") : 0.0f);
-          strip.eqMasterGain.store(stripObj->hasProperty("eqMasterGain") ? (float)stripObj->getProperty("eqMasterGain") : 0.0f);
-          if (auto *bandsArr = stripObj->getProperty("eqBands").getArray()) {
-            for (int b = 0; b < 10 && b < bandsArr->size(); ++b)
-              strip.eqBands[b].store((float)bandsArr->getReference(b));
-          }
-          strip.compEnabled = stripObj->getProperty("compEnabled");
-          strip.compAmount = (float)stripObj->getProperty("compAmount");
-          if (stripObj->hasProperty("chorusEnabled"))
-            strip.chorusEnabled.store((bool)stripObj->getProperty("chorusEnabled"));
-          if (stripObj->hasProperty("chorusRate"))
-            strip.chorusRate.store((float)stripObj->getProperty("chorusRate"));
-          if (stripObj->hasProperty("chorusMix"))
-            strip.chorusMix.store((float)stripObj->getProperty("chorusMix"));
-          if (stripObj->hasProperty("delayEnabled"))
-            strip.delayEnabled.store((bool)stripObj->getProperty("delayEnabled"));
-          if (stripObj->hasProperty("delayMode"))
-            strip.delayMode.store((int)stripObj->getProperty("delayMode"));
-          if (stripObj->hasProperty("delayTimeMs"))
-            strip.delayTimeMs.store((float)stripObj->getProperty("delayTimeMs"));
-          if (stripObj->hasProperty("delayFeedback"))
-            strip.delayFeedback.store((float)stripObj->getProperty("delayFeedback"));
-          if (stripObj->hasProperty("delayTone"))
-            strip.delayTone.store((float)stripObj->getProperty("delayTone"));
-          if (stripObj->hasProperty("delayMix"))
-            strip.delayMix.store((float)stripObj->getProperty("delayMix"));
-          if (stripObj->hasProperty("reverbEnabled"))
-            strip.reverbEnabled.store((bool)stripObj->getProperty("reverbEnabled"));
-          if (stripObj->hasProperty("reverbSize"))
-            strip.reverbSize.store((float)stripObj->getProperty("reverbSize"));
-          if (stripObj->hasProperty("reverbMix"))
-            strip.reverbMix.store((float)stripObj->getProperty("reverbMix"));
-          if (stripObj->hasProperty("musetteEnabled"))
-            strip.musetteEnabled.store((bool)stripObj->getProperty("musetteEnabled"));
-          if (stripObj->hasProperty("musetteCents"))
-            strip.musetteCents.store((float)stripObj->getProperty("musetteCents"));
-          if (stripObj->hasProperty("musette3Reed"))
-            strip.musette3Reed.store((bool)stripObj->getProperty("musette3Reed"));
-          if (stripObj->hasProperty("musetteMode"))
-            strip.musetteMode.store((int)stripObj->getProperty("musetteMode"));
-          else if (stripObj->hasProperty("musette3Reed"))
-            strip.musetteMode.store((bool)stripObj->getProperty("musette3Reed") ? 1 : 0);
-          if (stripObj->hasProperty("musetteMix"))
-            strip.musetteMix.store((float)stripObj->getProperty("musetteMix"));
-          if (stripObj->hasProperty("channelMode"))
-            strip.channelMode.store((int)stripObj->getProperty("channelMode"));
-          if (stripObj->hasProperty("irEnabled"))
-            strip.irEnabled.store((bool)stripObj->getProperty("irEnabled"));
-          if (stripObj->hasProperty("irMix"))
-            strip.irMix.store((float)stripObj->getProperty("irMix"));
+          Fanfare::ChannelStripSettings cs;
+          Fanfare::readStripFromObject(juce::var(stripObj), cs, true);
+          Fanfare::applyStrip(strip, cs, true, false, false);
           // Re-prepare first so sample rate is set before generating any built-in IR
           strip.prepare(currentSampleRate, currentBlockSize > 0 ? currentBlockSize : 8192);
-          if (stripObj->hasProperty("irPath")) {
-            auto irP = stripObj->getProperty("irPath").toString();
-            if (irP.isNotEmpty())
-              strip.getIRReverb().loadPathOrPreset(irP);
-          }
+          if (cs.irPath.isNotEmpty())
+            strip.getIRReverb().loadPathOrPreset(cs.irPath);
         }
 
         // Restore Arpeggiator Settings
         if (auto *arpObj = v.getProperty("arpeggiator", juce::var()).getDynamicObject()) {
-          auto &arp = s->getArpeggiator();
-          arp.enabled.store((bool)arpObj->getProperty("enabled"));
-          arp.bpm.store((float)arpObj->getProperty("bpm"));
-          arp.octavesUp.store((int)arpObj->getProperty("octavesUp"));
-          arp.octavesDown.store((int)arpObj->getProperty("octavesDown"));
-          arp.gate.store((float)arpObj->getProperty("gate"));
-          arp.patternIdx.store((int)arpObj->getProperty("patternIdx"));
+          Fanfare::ArpParams ap;
+          Fanfare::readArpFromObject(juce::var(arpObj), ap, false);
+          Fanfare::applyArp(s->getArpeggiator(), ap);
         }
         if (auto *harmObj = v.getProperty("harmonizer", juce::var()).getDynamicObject()) {
-          auto &harm = s->getHarmonizer();
-          harm.enabled.store((bool)harmObj->getProperty("enabled"));
-          harm.octavesUp.store((int)harmObj->getProperty("octavesUp"));
-          harm.octavesDown.store((int)harmObj->getProperty("octavesDown"));
-          harm.africaMode.store(harmObj->hasProperty("africaMode")
-                                    ? (int)harmObj->getProperty("africaMode")
-                                    : 0);
-          harm.harmonyTargetSlot.store(
-              harmObj->hasProperty("harmonyTargetSlot")
-                  ? (int)harmObj->getProperty("harmonyTargetSlot")
-                   : -1);
+          Fanfare::HarmParams hp;
+          Fanfare::readHarmFromObject(juce::var(harmObj), hp, false);
+          Fanfare::applyHarm(s->getHarmonizer(), hp);
         }
 
         // Restore Sampler Settings
@@ -1625,14 +1323,21 @@ void FanfareEngine::applyRig(const juce::var &rig)
                 cs.highNote.store((int)pv.getProperty("highNote", 127));
                 cs.level.store((float)pv.getProperty("level", 1.0));
                 cs.enabled.store((bool)pv.getProperty("enabled", true));
+                cs.midiChannel.store(juce::jlimit(0, 16, (int)pv.getProperty("midiChannel", 0)));
               }
             } else if (p < 3) {
               s->clearChainSlotMidiOut(p);
               s->clearChainSlotSynth(p);
               s->clearChainSlotFm(p);
               s->clearChainSlotB3(p);
+              s->getChainSlotSettings(p).midiChannel.store(0);
             }
           }
+          for (int p = chainArr->size(); p < 3; ++p)
+            s->getChainSlotSettings(p).midiChannel.store(0);
+        } else {
+          for (int p = 0; p < 3; ++p)
+            s->getChainSlotSettings(p).midiChannel.store(0);
         }
         // Legacy migration: if the channel had a top-level enabled synth and no
         // chain slot was explicitly flagged isSynth, bind it into the first free
@@ -1752,56 +1457,18 @@ void FanfareEngine::applyRig(const juce::var &rig)
               st.lowNote = stv.getProperty("lowNote", 0);
               st.highNote = stv.getProperty("highNote", 127);
 
-              // DSP
-              st.gateEnabled = stv.getProperty("gateEnabled", false);
-              st.gateThreshold = (float)stv.getProperty("gateThreshold", -60.0);
-              st.eqEnabled = stv.getProperty("eqEnabled", false);
-              st.eqCurveMode = stv.getProperty("eqCurveMode", false);
-              st.hpfFreq = (float)stv.getProperty("hpfFreq", 20.0);
-              st.lowShelfGain = (float)stv.getProperty("eqLow", 0.0);
-              st.highShelfGain = (float)stv.getProperty("eqHigh", 0.0);
-              st.eqVolGain = (float)stv.getProperty("eqVolGain", 0.0);
-              st.eqMasterGain = (float)stv.getProperty("eqMasterGain", 0.0);
-              if (auto *bandsArr = stv.getProperty("eqBands", juce::var()).getArray()) {
-                for (int b = 0; b < 10 && b < bandsArr->size(); ++b)
-                  st.eqBands[b] = (float)bandsArr->getReference(b);
-              }
-              st.compEnabled = stv.getProperty("compEnabled", false);
-              st.compAmount = (float)stv.getProperty("compAmount", 0.0);
-              st.chorusEnabled = stv.getProperty("chorusEnabled", false);
-              st.chorusRate = (float)stv.getProperty("chorusRate", 1.0);
-              st.chorusMix = (float)stv.getProperty("chorusMix", 0.0);
-              st.delayEnabled = stv.getProperty("delayEnabled", false);
-              st.delayMode = stv.getProperty("delayMode", 0);
-              st.delayTimeMs = (float)stv.getProperty("delayTimeMs", 375.0);
-              st.delayFeedback = (float)stv.getProperty("delayFeedback", 0.35);
-              st.delayTone = (float)stv.getProperty("delayTone", 6500.0);
-              st.delayMix = (float)stv.getProperty("delayMix", 0.25);
-              st.reverbEnabled = stv.getProperty("reverbEnabled", false);
-              st.reverbSize = (float)stv.getProperty("reverbSize", 0.5);
-              st.reverbMix = (float)stv.getProperty("reverbMix", 0.0);
-              st.irEnabled = stv.getProperty("irEnabled", false);
-              st.irMix = (float)stv.getProperty("irMix", 0.3);
-              st.irPath = stv.getProperty("irPath", juce::String()).toString();
-
-              // Arpeggiator
-              st.arpEnabled = stv.getProperty("arpEnabled", false);
-              st.arpBpm = (float)stv.getProperty("arpBpm", 120.0);
-              st.arpOctavesUp = stv.getProperty("arpOctavesUp", 1);
-              st.arpOctavesDown = stv.getProperty("arpOctavesDown", 0);
-              st.arpGate = (float)stv.getProperty("arpGate", 0.9);
-              st.arpPatternIdx = stv.getProperty("arpPatternIdx", 0);
-
-              // Harmonizer
-              st.harmEnabled = stv.getProperty("harmEnabled", false);
-              st.harmOctavesUp = stv.getProperty("harmOctavesUp", 1);
-              st.harmOctavesDown = stv.getProperty("harmOctavesDown", 0);
-              st.harmAfricaMode = stv.getProperty("harmAfricaMode", 0);
-              st.harmTargetSlot = stv.getProperty("harmTargetSlot", -1);
+              // DSP, Arpeggiator, Harmonizer
+              auto* stDyn = stv.getDynamicObject();
+              st.hasMusetteAndChannelMode = stDyn != nullptr &&
+                                            (stDyn->hasProperty("musetteEnabled") ||
+                                             stDyn->hasProperty("channelMode"));
+              Fanfare::readStripFromObject(stv, st.strip, st.hasMusetteAndChannelMode);
+              Fanfare::readArpFromObject(stv, st.arp, true);
+              Fanfare::readHarmFromObject(stv, st.harm, true);
 
               // Sampler
               st.samplerEnabled = stv.getProperty("samplerEnabled", false);
-              if (auto* stDyn = stv.getDynamicObject()) {
+              if (stDyn != nullptr) {
                 st.hasMidiCcState = stDyn->hasProperty("fohCC") ||
                                     stDyn->hasProperty("iemCC") ||
                                     stDyn->hasProperty("muteCC") ||
@@ -2013,56 +1680,9 @@ Fanfare::SongSlot FanfareEngine::exportSlot(int slotIdx)
     songSlot.midiChannelOverride = s->getMidiChannelOverride();
     songSlot.outputTarget = s->getOutputTarget();
 
-    auto& stripData = s->getStrip();
-    songSlot.strip.gateEnabled = stripData.gateEnabled;
-    songSlot.strip.gateThreshold = stripData.gateThreshold;
-    songSlot.strip.eqEnabled = stripData.eqEnabled;
-    songSlot.strip.eqCurveMode = stripData.eqCurveMode.load();
-    songSlot.strip.hpfFreq = stripData.hpfFreq;
-    songSlot.strip.lowShelfGain = stripData.lowShelfGain;
-    songSlot.strip.highShelfGain = stripData.highShelfGain;
-    songSlot.strip.eqVolGain = stripData.eqVolGain.load();
-    songSlot.strip.eqMasterGain = stripData.eqMasterGain.load();
-    for (int b = 0; b < 10; ++b)
-      songSlot.strip.eqBands[b] = stripData.eqBands[b].load();
-    songSlot.strip.compEnabled = stripData.compEnabled;
-    songSlot.strip.compAmount = stripData.compAmount;
-    songSlot.strip.chorusEnabled = stripData.chorusEnabled;
-    songSlot.strip.chorusRate = stripData.chorusRate;
-    songSlot.strip.chorusMix = stripData.chorusMix;
-    songSlot.strip.delayEnabled = stripData.delayEnabled.load();
-    songSlot.strip.delayMode = stripData.delayMode.load();
-    songSlot.strip.delayTimeMs = stripData.delayTimeMs.load();
-    songSlot.strip.delayFeedback = stripData.delayFeedback.load();
-    songSlot.strip.delayTone = stripData.delayTone.load();
-    songSlot.strip.delayMix = stripData.delayMix.load();
-    songSlot.strip.reverbEnabled = stripData.reverbEnabled;
-    songSlot.strip.reverbSize = stripData.reverbSize;
-    songSlot.strip.reverbMix = stripData.reverbMix;
-    songSlot.strip.irEnabled = stripData.irEnabled;
-    songSlot.strip.irMix = stripData.irMix;
-    songSlot.strip.irPath = stripData.getIRReverb().getLoadedPath();
-    songSlot.strip.musetteEnabled = stripData.musetteEnabled.load();
-    songSlot.strip.musetteCents = stripData.musetteCents.load();
-    songSlot.strip.musette3Reed = stripData.musette3Reed.load();
-    songSlot.strip.musetteMode = stripData.musetteMode.load();
-    songSlot.strip.musetteMix = stripData.musetteMix.load();
-    songSlot.strip.channelMode = stripData.channelMode.load();
-
-    auto& arpData = s->getArpeggiator();
-    songSlot.arpeggiator.enabled = arpData.enabled.load();
-    songSlot.arpeggiator.bpm = arpData.bpm.load();
-    songSlot.arpeggiator.octavesUp = arpData.octavesUp.load();
-    songSlot.arpeggiator.octavesDown = arpData.octavesDown.load();
-    songSlot.arpeggiator.gate = arpData.gate.load();
-    songSlot.arpeggiator.patternIdx = arpData.patternIdx.load();
-
-    auto& harmData = s->getHarmonizer();
-    songSlot.harmonizer.enabled = harmData.enabled.load();
-    songSlot.harmonizer.octavesUp = harmData.octavesUp.load();
-    songSlot.harmonizer.octavesDown = harmData.octavesDown.load();
-    songSlot.harmonizer.africaMode = harmData.africaMode.load();
-    songSlot.harmonizer.harmonyTargetSlot = harmData.harmonyTargetSlot.load();
+    songSlot.strip = Fanfare::captureStrip(s->getStrip());
+    songSlot.arpeggiator = Fanfare::captureArp(s->getArpeggiator());
+    songSlot.harmonizer = Fanfare::captureHarm(s->getHarmonizer());
 
     auto& samplerLive = s->getSampler();
     songSlot.sampler.enabled = samplerLive.enabled.load();
@@ -2140,6 +1760,7 @@ Fanfare::SongSlot FanfareEngine::exportSlot(int slotIdx)
       ps.highNote = cs.highNote.load();
       ps.level = cs.level.load();
       ps.enabled = cs.enabled.load();
+      ps.midiChannel = cs.midiChannel.load();
       // MIDI OUT target (mutually exclusive with a plugin instance)
       ps.isMidiOut = s->isChainSlotMidiOut(pIdx);
       ps.midiOutDevice = s->getChainSlotMidiOutIdentifier(pIdx);
@@ -2201,59 +1822,15 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
     s->setOutputTarget(tgt);
 
     auto& stripData = s->getStrip();
-    stripData.gateEnabled = songSlot.strip.gateEnabled;
-    stripData.gateThreshold = songSlot.strip.gateThreshold;
-    stripData.eqEnabled = songSlot.strip.eqEnabled;
-    stripData.eqCurveMode.store(songSlot.strip.eqCurveMode);
-    stripData.hpfFreq = songSlot.strip.hpfFreq;
-    stripData.lowShelfGain = songSlot.strip.lowShelfGain;
-    stripData.highShelfGain = songSlot.strip.highShelfGain;
-    stripData.eqVolGain.store(songSlot.strip.eqVolGain);
-    stripData.eqMasterGain.store(songSlot.strip.eqMasterGain);
-    for (int b = 0; b < 10; ++b)
-      stripData.eqBands[b].store(songSlot.strip.eqBands[b]);
-    stripData.compEnabled = songSlot.strip.compEnabled;
-    stripData.compAmount = songSlot.strip.compAmount;
-    stripData.chorusEnabled = songSlot.strip.chorusEnabled;
-    stripData.chorusRate = songSlot.strip.chorusRate;
-    stripData.chorusMix = songSlot.strip.chorusMix;
-    stripData.delayEnabled.store(songSlot.strip.delayEnabled);
-    stripData.delayMode.store(songSlot.strip.delayMode);
-    stripData.delayTimeMs.store(songSlot.strip.delayTimeMs);
-    stripData.delayFeedback.store(songSlot.strip.delayFeedback);
-    stripData.delayTone.store(songSlot.strip.delayTone);
-    stripData.delayMix.store(songSlot.strip.delayMix);
-    stripData.reverbEnabled = songSlot.strip.reverbEnabled;
-    stripData.reverbSize = songSlot.strip.reverbSize;
-    stripData.reverbMix = songSlot.strip.reverbMix;
-    stripData.irEnabled = songSlot.strip.irEnabled;
-    stripData.irMix = songSlot.strip.irMix;
-    stripData.musetteEnabled.store(songSlot.strip.musetteEnabled);
-    stripData.musetteCents.store(songSlot.strip.musetteCents);
-    stripData.musette3Reed.store(songSlot.strip.musette3Reed);
-    stripData.musetteMode.store(songSlot.strip.musetteMode);
-    stripData.musetteMix.store(songSlot.strip.musetteMix);
-    stripData.channelMode.store(songSlot.strip.channelMode);
+    Fanfare::applyStrip(stripData, songSlot.strip, true, false, false);
     stripData.prepare(currentSampleRate);
     if (songSlot.strip.irPath.isNotEmpty())
       stripData.getIRReverb().loadPathOrPreset(songSlot.strip.irPath);
     else
       stripData.getIRReverb().clear();
 
-    auto& arpLive = s->getArpeggiator();
-    arpLive.enabled.store(songSlot.arpeggiator.enabled);
-    arpLive.bpm.store(songSlot.arpeggiator.bpm);
-    arpLive.octavesUp.store(songSlot.arpeggiator.octavesUp);
-    arpLive.octavesDown.store(songSlot.arpeggiator.octavesDown);
-    arpLive.gate.store(songSlot.arpeggiator.gate);
-    arpLive.patternIdx.store(songSlot.arpeggiator.patternIdx);
-
-    auto& harmLive = s->getHarmonizer();
-    harmLive.enabled.store(songSlot.harmonizer.enabled);
-    harmLive.octavesUp.store(songSlot.harmonizer.octavesUp);
-    harmLive.octavesDown.store(songSlot.harmonizer.octavesDown);
-    harmLive.africaMode.store(songSlot.harmonizer.africaMode);
-    harmLive.harmonyTargetSlot.store(songSlot.harmonizer.harmonyTargetSlot);
+    Fanfare::applyArp(s->getArpeggiator(), songSlot.arpeggiator);
+    Fanfare::applyHarm(s->getHarmonizer(), songSlot.harmonizer);
 
     auto& samplerLive = s->getSampler();
     samplerLive.enabled.store(songSlot.sampler.enabled);
@@ -2383,7 +1960,10 @@ void FanfareEngine::importSlot(int slotIdx, const Fanfare::SongSlot& songSlot)
       cs.highNote.store(songSlot.chain[p].highNote);
       cs.level.store(songSlot.chain[p].level);
       cs.enabled.store(songSlot.chain[p].enabled);
+      cs.midiChannel.store(juce::jlimit(0, 16, songSlot.chain[p].midiChannel));
     }
+    for (int p = (int)songSlot.chain.size(); p < 3; ++p)
+      s->getChainSlotSettings(p).midiChannel.store(0);
 
     // Re-resolve CC mappings now that the plugin chain is loaded — the
     // mappings were restored above, before the plugin swap, so their cached

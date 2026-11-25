@@ -443,8 +443,7 @@ void MainComponent::loadRigAsync(const juce::File &file,
               safeThis->closeOrphanedPluginWindows();
               if (ok) {
                 safeThis->suppressGlitchDetectionForMs(500);
-                safeThis->audioUnderrunCount.store(0);
-                safeThis->engineStallCount.store(0);
+                safeThis->glitchTelemetry.resetUnderrunCounts();
                 safeThis->currentRigFile = file;
                 Fanfare::RecentSongs::record(file);
                 safeThis->setupNameLabel.setText(fileName,

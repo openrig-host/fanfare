@@ -94,10 +94,16 @@ public:
         std::vector<TrackInfo> tracks;
     };
 
-    std::function<void()> onPlayStarted;
-    std::function<void()> onTrackChanged;
-    std::function<void()> onPlaylistChanged;
-    std::function<void()> onBanksChanged;
+    struct Listener {
+        virtual ~Listener() = default;
+        virtual void mp3PlayStarted() {}
+        virtual void mp3TrackChanged() {}
+        virtual void mp3PlaylistChanged() {}
+        virtual void mp3BanksChanged() {}
+    };
+
+    void addListener(Listener* l) { listeners.add(l); }
+    void removeListener(Listener* l) { listeners.remove(l); }
 
     Mp3PlayerProcessor() {
         if (!kMp3DecksEnabled) return;
@@ -130,10 +136,32 @@ public:
 
 private:
     void handleAsyncUpdate() override {
+        if (isShuttingDown.load()) return;
         if (deckAStopPending.exchange(false, std::memory_order_acq_rel))
             deckA.transportSource.stop();
         if (deckBStopPending.exchange(false, std::memory_order_acq_rel))
             deckB.transportSource.stop();
+        if (autoDjAdvancePending.exchange(false, std::memory_order_acq_rel))
+            nextTrack(true);
+        if (trackFinishPending.exchange(false, std::memory_order_acq_rel))
+            onTrackFinished();
+    }
+
+    void notifyPlayStarted() {
+        if (!isShuttingDown.load())
+            listeners.call([](Listener& l) { l.mp3PlayStarted(); });
+    }
+    void notifyTrackChanged() {
+        if (!isShuttingDown.load())
+            listeners.call([](Listener& l) { l.mp3TrackChanged(); });
+    }
+    void notifyPlaylistChanged() {
+        if (!isShuttingDown.load())
+            listeners.call([](Listener& l) { l.mp3PlaylistChanged(); });
+    }
+    void notifyBanksChanged() {
+        if (!isShuttingDown.load())
+            listeners.call([](Listener& l) { l.mp3BanksChanged(); });
     }
 public:
 
@@ -388,19 +416,13 @@ public:
                 if (autoDjEnabled.load() && remaining <= (double)xfadeSec && remaining > 0.1) {
                     // One-shot latch prevents queueing hundreds of full-track decodes while message thread loads next song
                     if (!autoDjAdvanceLatched.exchange(true, std::memory_order_acq_rel)) {
-                        auto alive = aliveToken;
-                        juce::MessageManager::callAsync([this, alive]() {
-                            if (alive && alive->load(std::memory_order_acquire) && !isShuttingDown.load())
-                                nextTrack(true);
-                        });
+                        autoDjAdvancePending.store(true, std::memory_order_release);
+                        triggerAsyncUpdate();
                     }
                 } else if (remaining <= 0.05 || curDeck.transportSource.hasStreamFinished()) {
                     if (!trackFinishLatched.exchange(true, std::memory_order_acq_rel)) {
-                        auto alive = aliveToken;
-                        juce::MessageManager::callAsync([this, alive]() {
-                            if (alive && alive->load(std::memory_order_acquire) && !isShuttingDown.load())
-                                onTrackFinished();
-                        });
+                        trackFinishPending.store(true, std::memory_order_release);
+                        triggerAsyncUpdate();
                     }
                 }
             }
@@ -421,15 +443,17 @@ public:
 
         if (curDeck.isLoaded.load()) {
             autoDjAdvanceLatched.store(false, std::memory_order_release);
+            autoDjAdvancePending.store(false, std::memory_order_release);
             trackFinishLatched.store(false, std::memory_order_release);
+            trackFinishPending.store(false, std::memory_order_release);
             if (curDeck.transportSource.hasStreamFinished()) {
                 curDeck.transportSource.setPosition(curDeck.trackInfo.cueInSeconds > 0.0 ? curDeck.trackInfo.cueInSeconds : 0.0);
             }
             curDeck.transportSource.start();
             curDeck.isPlaying.store(true);
             playing.store(true);
-            if (onPlayStarted) onPlayStarted();
-            if (onTrackChanged) onTrackChanged();
+            notifyPlayStarted();
+            notifyTrackChanged();
         }
     }
 
@@ -439,16 +463,18 @@ public:
         deckA.isPlaying.store(false);
         deckB.isPlaying.store(false);
         playing.store(false);
-        if (onTrackChanged) onTrackChanged();
+        notifyTrackChanged();
     }
 
     void stop() {
         autoDjAdvanceLatched.store(false, std::memory_order_release);
+        autoDjAdvancePending.store(false, std::memory_order_release);
         trackFinishLatched.store(false, std::memory_order_release);
+        trackFinishPending.store(false, std::memory_order_release);
         stopDeckInternal(0);
         stopDeckInternal(1);
         playing.store(false);
-        if (onTrackChanged) onTrackChanged();
+        notifyTrackChanged();
     }
 
     void playTrack(int index, bool startPlaying = true) {
@@ -456,7 +482,9 @@ public:
         if (index < 0 || index >= (int)playlist.size()) return;
 
         autoDjAdvanceLatched.store(false, std::memory_order_release);
+        autoDjAdvancePending.store(false, std::memory_order_release);
         trackFinishLatched.store(false, std::memory_order_release);
+        trackFinishPending.store(false, std::memory_order_release);
         currentTrackIndex = index;
         const auto& track = playlist[index];
 
@@ -512,7 +540,7 @@ public:
             }
         }
 
-        if (onTrackChanged) onTrackChanged();
+        notifyTrackChanged();
     }
 
     void nextTrack(bool autoCrossfade = true) {
@@ -686,7 +714,7 @@ public:
             if (info.bpm <= 0.0f) {
                 analyzeTrackBpm(-1, file);
             }
-            if (onTrackChanged) onTrackChanged();
+            notifyTrackChanged();
         }
         return loaded;
     }
@@ -694,6 +722,10 @@ public:
     void playDeck(int deckId) {
         Deck& d = (deckId == 0) ? deckA : deckB;
         if (d.isLoaded.load()) {
+            autoDjAdvanceLatched.store(false, std::memory_order_release);
+            autoDjAdvancePending.store(false, std::memory_order_release);
+            trackFinishLatched.store(false, std::memory_order_release);
+            trackFinishPending.store(false, std::memory_order_release);
             if (d.transportSource.hasStreamFinished()) {
                 d.transportSource.setPosition(d.trackInfo.cueInSeconds > 0.0 ? d.trackInfo.cueInSeconds : 0.0);
             }
@@ -701,8 +733,8 @@ public:
             d.isPlaying.store(true);
             playing.store(true);
             activeDeckIndex.store(deckId);
-            if (onPlayStarted) onPlayStarted();
-            if (onTrackChanged) onTrackChanged();
+            notifyPlayStarted();
+            notifyTrackChanged();
         }
     }
 
@@ -713,7 +745,7 @@ public:
         if (!deckA.isPlaying.load() && !deckB.isPlaying.load()) {
             playing.store(false);
         }
-        if (onTrackChanged) onTrackChanged();
+        notifyTrackChanged();
     }
 
     void stopDeck(int deckId) {
@@ -721,7 +753,7 @@ public:
         if (!deckA.isPlaying.load() && !deckB.isPlaying.load()) {
             playing.store(false);
         }
-        if (onTrackChanged) onTrackChanged();
+        notifyTrackChanged();
     }
 
     double getDeckPosition(int deckId) const {
@@ -742,7 +774,9 @@ public:
 
     void setDeckPosition(int deckId, double seconds) {
         autoDjAdvanceLatched.store(false, std::memory_order_release);
+        autoDjAdvancePending.store(false, std::memory_order_release);
         trackFinishLatched.store(false, std::memory_order_release);
+        trackFinishPending.store(false, std::memory_order_release);
         juce::SpinLock::ScopedLockType al(audioLock);
         Deck& d = (deckId == 0) ? deckA : deckB;
         if (d.isLoaded.load()) {
@@ -773,13 +807,13 @@ public:
     void setDeckTempoRatio(int deckId, float ratio) {
         Deck& d = (deckId == 0) ? deckA : deckB;
         d.setTempoRatio(ratio);
-        if (onTrackChanged) onTrackChanged();
+        notifyTrackChanged();
     }
 
     void resetDeckTempo(int deckId) {
         Deck& d = (deckId == 0) ? deckA : deckB;
         d.setTempoRatio(1.0f);
-        if (onTrackChanged) onTrackChanged();
+        notifyTrackChanged();
     }
 
     void setBeatSyncEnabled(bool enabled) {
@@ -793,7 +827,7 @@ public:
     void setSyncMode(SyncMode mode) {
         syncMode.store(mode);
         saveBanksToSettings();
-        if (onTrackChanged) onTrackChanged();
+        notifyTrackChanged();
     }
 
     SyncMode getSyncMode() const {
@@ -832,7 +866,7 @@ public:
                 }
             }
 
-            if (onTrackChanged) onTrackChanged();
+            notifyTrackChanged();
         }
     }
 
@@ -863,7 +897,7 @@ public:
             playing.store(true);
         }
         manualCrossfadePos.store(-1.0f);
-        if (onTrackChanged) onTrackChanged();
+        notifyTrackChanged();
     }
 
     // --- Playlist & Bank Management ---
@@ -894,7 +928,7 @@ public:
             analyzeTrackBpm(newIdx, file);
         }
 
-        if (onPlaylistChanged) onPlaylistChanged();
+        notifyPlaylistChanged();
     }
 
     void addFile(const juce::File& file) {
@@ -932,7 +966,7 @@ public:
                 analyzeTrackBpm(newIdx, file);
             }
 
-            if (onPlaylistChanged) onPlaylistChanged();
+            notifyPlaylistChanged();
         }
     }
 
@@ -955,7 +989,7 @@ public:
             } else if (currentTrackIndex > index) {
                 currentTrackIndex--;
             }
-            if (onPlaylistChanged) onPlaylistChanged();
+            notifyPlaylistChanged();
         }
     }
 
@@ -976,7 +1010,7 @@ public:
             currentTrackIndex++;
         }
 
-        if (onPlaylistChanged) onPlaylistChanged();
+        notifyPlaylistChanged();
     }
 
     void clearPlaylist() {
@@ -984,7 +1018,7 @@ public:
         juce::ScopedLock sl(playlistLock);
         playlist.clear();
         currentTrackIndex = -1;
-        if (onPlaylistChanged) onPlaylistChanged();
+        notifyPlaylistChanged();
     }
 
     const std::vector<TrackInfo>& getPlaylist() const { return playlist; }
@@ -1006,7 +1040,7 @@ public:
                 saveBpmCache();
             }
             Fanfare::LibraryDatabase::getInstance().updateBpm(path, bpm, playlist[trackIdx].firstBeatSeconds);
-            if (onPlaylistChanged) onPlaylistChanged();
+            notifyPlaylistChanged();
         }
     }
 
@@ -1026,8 +1060,8 @@ public:
                 Deck& curDeck = (activeIdx == 0) ? deckA : deckB;
                 curDeck.trackInfo.cueInSeconds = playlist[trackIndex].cueInSeconds;
             }
-            if (onPlaylistChanged) onPlaylistChanged();
-            if (onTrackChanged) onTrackChanged();
+            notifyPlaylistChanged();
+            notifyTrackChanged();
         }
     }
 
@@ -1047,8 +1081,8 @@ public:
                 Deck& curDeck = (activeIdx == 0) ? deckA : deckB;
                 curDeck.trackInfo.cueOutSeconds = playlist[trackIndex].cueOutSeconds;
             }
-            if (onPlaylistChanged) onPlaylistChanged();
-            if (onTrackChanged) onTrackChanged();
+            notifyPlaylistChanged();
+            notifyTrackChanged();
         }
     }
 
@@ -1071,8 +1105,8 @@ public:
                 curDeck.trackInfo.cueInSeconds = 0.0;
                 curDeck.trackInfo.cueOutSeconds = 0.0;
             }
-            if (onPlaylistChanged) onPlaylistChanged();
-            if (onTrackChanged) onTrackChanged();
+            notifyPlaylistChanged();
+            notifyTrackChanged();
         }
     }
 
@@ -1096,8 +1130,8 @@ public:
                     }
                 }
             }
-            if (onPlaylistChanged) onPlaylistChanged();
-            if (onTrackChanged) onTrackChanged();
+            notifyPlaylistChanged();
+            notifyTrackChanged();
         }
     }
 
@@ -1121,8 +1155,8 @@ public:
                     }
                 }
             }
-            if (onPlaylistChanged) onPlaylistChanged();
-            if (onTrackChanged) onTrackChanged();
+            notifyPlaylistChanged();
+            notifyTrackChanged();
         }
     }
 
@@ -1148,8 +1182,8 @@ public:
                     }
                 }
             }
-            if (onPlaylistChanged) onPlaylistChanged();
-            if (onTrackChanged) onTrackChanged();
+            notifyPlaylistChanged();
+            notifyTrackChanged();
         }
     }
 
@@ -1191,7 +1225,7 @@ public:
             }
         }
 
-        if (onPlaylistChanged) onPlaylistChanged();
+        notifyPlaylistChanged();
     }
 
     void sortPlaylistMinimalDelta(int startTrackIndex = 0) {
@@ -1248,7 +1282,7 @@ public:
             }
         }
 
-        if (onPlaylistChanged) onPlaylistChanged();
+        notifyPlaylistChanged();
     }
 
     void sortPlaylistEnergyWave() {
@@ -1311,7 +1345,7 @@ public:
             }
         }
 
-        if (onPlaylistChanged) onPlaylistChanged();
+        notifyPlaylistChanged();
     }
 
     void fitPlaylistToDuration(double targetMinutes) {
@@ -1339,7 +1373,7 @@ public:
             if (currentTrackIndex >= (int)playlist.size()) {
                 currentTrackIndex = 0;
             }
-            if (onPlaylistChanged) onPlaylistChanged();
+            notifyPlaylistChanged();
         }
     }
 
@@ -1396,7 +1430,7 @@ public:
         }
 
         saveBanksToSettings();
-        if (onBanksChanged) onBanksChanged();
+        notifyBanksChanged();
     }
 
     void loadBank(int bankIndex, bool startPlaying = true) {
@@ -1423,8 +1457,8 @@ public:
             currentTrackIndex = 0;
         }
 
-        if (onPlaylistChanged) onPlaylistChanged();
-        if (onBanksChanged) onBanksChanged();
+        notifyPlaylistChanged();
+        notifyBanksChanged();
 
         // Trigger background BPM detection for unanalyzed tracks in bank
         for (int i = 0; i < (int)playlist.size(); ++i) {
@@ -1665,7 +1699,7 @@ public:
                             }
                         }
                     }
-                    if (onPlaylistChanged) onPlaylistChanged();
+                    notifyPlaylistChanged();
                     return;
                 }
             }
@@ -1720,7 +1754,7 @@ public:
                 nextCueOut = 0.0;
             }
         }
-        if (onPlaylistChanged) onPlaylistChanged();
+        notifyPlaylistChanged();
     }
 
     void loadBpmCache() {
@@ -1787,7 +1821,7 @@ private:
                     playlist[trackIndex].firstBeatSeconds = it->second.firstBeatSeconds;
                     playlist[trackIndex].cueInSeconds = it->second.cueInSeconds;
                     playlist[trackIndex].cueOutSeconds = it->second.cueOutSeconds;
-                    if (onPlaylistChanged) onPlaylistChanged();
+                    notifyPlaylistChanged();
                 }
                 return;
             }
@@ -1828,8 +1862,8 @@ private:
                         deckB.trackInfo.firstBeatSeconds = res.firstBeatSeconds;
                     }
                 }
-                if (onPlaylistChanged) onPlaylistChanged();
-                if (onTrackChanged) onTrackChanged();
+                notifyPlaylistChanged();
+                notifyTrackChanged();
             });
         });
     }
@@ -1857,7 +1891,10 @@ private:
 
     std::shared_ptr<std::atomic<bool>> aliveToken = std::make_shared<std::atomic<bool>>(true);
     std::atomic<bool> autoDjAdvanceLatched{false};
+    std::atomic<bool> autoDjAdvancePending{false};
     std::atomic<bool> trackFinishLatched{false};
+    std::atomic<bool> trackFinishPending{false};
+    juce::ListenerList<Listener> listeners;
     std::atomic<bool> playing{false};
     std::atomic<bool> isShuttingDown{false};
     std::atomic<bool> deckAStopPending{false};

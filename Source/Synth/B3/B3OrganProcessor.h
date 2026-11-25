@@ -76,7 +76,7 @@ public:
     masterFx.prepare(sr);
     const int scratchLen = juce::jmax(maxBlock, 8192);
     scratchCapacity = scratchLen;
-    woodRoomIr.prepare(sr, scratchLen);
+    woodRoomIr.prepare(sr, maxBlock);
     woodRoomIr.loadPresetByIndex(0); // Built-In: Studio Wood Room (0.55s)
     woodIrScratch.setSize(2, scratchLen, false, false, true);
     // Reserve 2x headroom so the defensive resize in processBlock stays within

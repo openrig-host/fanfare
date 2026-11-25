@@ -526,10 +526,19 @@ void MainComponent::setupSlotComponents() {
           safeThis->activePluginWindows.add(w);
           safeThis->openPluginWindowCount.store(
               safeThis->activePluginWindows.size(), std::memory_order_release);
+          void *nativeHandle =
+              w->getPeer() ? w->getPeer()->getNativeHandle() : nullptr;
+          w->onBeforeDestroyEditor = [safeThis, nativeHandle](
+                                         juce::Component *editorComp,
+                                         void *closingHandle) {
+            if (safeThis != nullptr && safeThis->webServer != nullptr) {
+              safeThis->webServer->unregisterPluginMirrorSource(
+                  editorComp, closingHandle != nullptr ? closingHandle : nativeHandle);
+            }
+          };
           if (safeThis->webServer != nullptr)
             safeThis->webServer->registerPluginMirrorSource(
-                editor, w->getPeer() ? w->getPeer()->getNativeHandle() : nullptr,
-                slot->getPluginName(chainIndex));
+                editor, nativeHandle, slot->getPluginName(chainIndex));
         } else if (!ok) {
           juce::AlertWindow::showMessageBoxAsync(
               juce::MessageBoxIconType::WarningIcon, "Editor Error",
@@ -1120,10 +1129,19 @@ void MainComponent::setupSlotComponents() {
           safeThis->activePluginWindows.add(w);
           safeThis->openPluginWindowCount.store(
               safeThis->activePluginWindows.size(), std::memory_order_release);
+          void *nativeHandle =
+              w->getPeer() ? w->getPeer()->getNativeHandle() : nullptr;
+          w->onBeforeDestroyEditor = [safeThis, nativeHandle](
+                                         juce::Component *editorComp,
+                                         void *closingHandle) {
+            if (safeThis != nullptr && safeThis->webServer != nullptr) {
+              safeThis->webServer->unregisterPluginMirrorSource(
+                  editorComp, closingHandle != nullptr ? closingHandle : nativeHandle);
+            }
+          };
           if (safeThis->webServer != nullptr)
             safeThis->webServer->registerPluginMirrorSource(
-                editor, w->getPeer() ? w->getPeer()->getNativeHandle() : nullptr,
-                slot->getPluginName(chainIndex));
+                editor, nativeHandle, slot->getPluginName(chainIndex));
         } else if (!ok) {
           juce::AlertWindow::showMessageBoxAsync(
               juce::MessageBoxIconType::WarningIcon, "Editor Error",

@@ -1,170 +1,91 @@
-# Bugfix & UX Log — 2026-11-11 (ZCode, THINKPAD)
+actually Nov 23
 
-Executes the 2026-11-11 audit list (12 bug fixes) plus the strip-tools UX rework
-requested by Dave the same day. Base: trunk `8eca1c5` (v1.60, "The 1984 Keyboard
-Rig Edition" line). `Fanfare.exe` rebuilt Release via CMake; selftest relinked
-from fresh objects; corpus parse suite **38/38 OK** after every change round.
+## Verdict
 
-## Part 1 — Audit bugfixes
+The real-time core is disciplined and worth keeping. In every `processBlock` I scanned, cross-thread access is atomics and try-locks, buffers are pre-sized, and plugins are evicted under a lock and destroyed outside it. One lapse: two latched `callAsync` calls on the audio thread in the MP3 player.
 
-### 1. IEM level ignored in the mix — FIXED (was real)
-- `RackSlot.h` `sumToBuses` / `sumToIemBus`: IEM bus gain was always
-  `fohLevel * iemOffset`; the rack IEM fader (`iemLevel`) was saved, restored,
-  MIDI-learnable — and had zero effect on audio.
-- Now: `iemBase = iemLevel * iemOffset` (IEM fader = base level, IEM TRIM in
-  DYN = relative trim, 0..2). Rack IEM fader is live.
-- MIDI-CC learn for IEM now writes `iemLevel` only (previously also stomped
-  `iemOffset = norm*2`, which would double-apply under the new formula).
-- Comments + tooltips updated: trim is "relative to the IEM fader"
-  (`RackSlotComponent.cpp` IEM badge tooltips, `ChannelStripComponent.h` DYN
-  IEM TRIM tooltip, `docs/manual.html` IEM TRIM section).
-- Behaviour note: strips saved with the IEM fader untouched (0.8 default) now
-  hear 0.8 x trim on the IEM bus instead of the FOH fader value x trim. On a
-  default rig (both faders 0.8, trim 1.0) the mix is identical.
+The structural problem is that the same knowledge is written down in many places and the layers leak into each other. Adding one strip parameter means editing about fifteen sites, and that has already produced defects.
 
-### 2. Song JSON round-trip dropped unknown fields — FIXED (was real)
-- `RigModel.h`: `Song` gained `juce::var extra`.
-- `RigSerializer.cpp`: `varToSong` stashes every top-level key the struct does
-  not model into `Song::extra` (new `isKnownSongKey` list, includes legacy
-  top-level `name`); `songToVar` re-attaches extras that the struct still
-  doesn't model. Newer-schema or third-party keys now survive save/load.
+## Defects the structure has already caused
 
-### 3. Save-history atomicity / restore failures — ALREADY FIXED in tree
-- Commit `975d47f` already shipped temp+rename snapshots
-  (`SaveHistory.h` 233-260) and checked restore (`VersionHistoryModal.h`
-  195-201). Nothing to do.
-- Live remnant fixed: `SetlistManager::saveSetlist` wrote a raw
-  `FileOutputStream` straight onto the target. Now stages through a `.tmp`
-  sibling + `moveFileTo` (MOVEFILE_REPLACE_EXISTING), same pattern as
-  `RigSerializer::save`.
+| Defect | Evidence | Effect |
+|---|---|---|
+| Compressor makeup gain and preset are saved by no path | Only their own UI handlers store them ([ChannelStripComponent.h:330](Z:/davecore/Source/ChannelStripComponent.h), line 314) | Both reset on every rig reload |
+| Per-layer MIDI channel is saved by no path | Set at [RackSlotComponent.cpp:368](Z:/davecore/Source/RackSlotComponent.cpp); `exportSlot` omits it ([FanfareEngine.cpp:2138](Z:/davecore/Source/FanfareEngine.cpp)) | Layer channel reverts to "Strip" on reload |
+| Arpeggiator defaults disagree across four copies | 127 BPM / 0 octaves ([SimpleArpeggiator.h:235](Z:/davecore/Source/SimpleArpeggiator.h)), 120 / 1 ([Scene.h:57](Z:/davecore/Source/Scene.h)), 127 / 2 / gate 0.75 ([RigModel.h:173](Z:/davecore/Source/RigModel.h)), plus read-time literals at `FanfareEngine.cpp:1789` | New scenes and songs get different defaults depending on the code path |
+| MP3 play callback is overwritten | [RackSlot.h:35](Z:/davecore/Source/RackSlot.h) sets auto-un-bypass on play; [MainComponent.cpp:323](Z:/davecore/Source/MainComponent.cpp) replaces it with a web notification | Slot 10's deck no longer un-mutes its strip, and the web layer only hears slot 10 |
 
-### 4. Static file path traversal — ALREADY MITIGATED
-- `OpenRigWebServer.cpp` `serveStaticFile` already rejects `..`, `:`, `\`,
-  NUL, protocol-relative and non-`/`-prefixed paths after URL-decoding,
-  enforces an extension whitelist, and re-checks `isAChildOf` + symlink.
-  Verified, no change needed.
+All four are small patches and worth doing before any refactor.
 
-### 5. Unauthenticated control endpoints — ALREADY MITIGATED
-- All `/api/*` + WebSocket upgrades already require a 128-bit session token
-  (header/query/cookie, constant-time compare) plus an origin check; the
-  token ships in the QR-paired URL. Verified, no change needed.
+## Recommendations, in priority order
 
-### 6. yt-dlp invocation — hardening applied
-- `YoutubeDownloadManager.h`: invocation was already a `ChildProcess` argv
-  array (no shell). Added `--` end-of-options separator before the pasted URL
-  in both call sites (`fetchVideoInfoAsync`, download job) so a URL starting
-  with `-` can never be parsed as a yt-dlp flag.
+### 1. One definition of strip state (highest leverage)
+- **Problem:** strip settings exist as live atomics, as `SlotState`, as the `Fanfare::SongSlot` model, and as hand-built JSON. The 10-band EQ field alone is enumerated at 15 sites (9 in `FanfareEngine.cpp`, 6 in `RigSerializer.cpp`). `RigSerializer.h` itself calls the engine path "shims during migration".
+- **Change:** make one plain `StripSettings` struct the only definition, with capture, apply and JSON conversion beside it. Scenes, rig export/import, strip files and the web remote all go through it.
+- **Compatibility:** keep existing JSON keys exactly; add the missing fields as new optional keys.
+- **Risk and effort:** low to medium risk, medium effort. It is mostly mechanical, and `selftest` already has a byte-stable round-trip check to verify against.
 
-### 7. MIDI status segment showed song text — FIXED (was real)
-- `MainComponent_RigOps.cpp`: the two `SONG: ...` completion messages moved
-  off `midiMonitorLabel` onto `preloadStatusLabel` with a 5-second hold
-  (`showSongStatus`, honoured by `updatePreloadStatus` so preload text can't
-  wipe the message instantly).
-- `MainComponent.h/.cpp`: the left status segment is now a real MIDI readout.
-  `handleIncomingMidiMessage` formats the last event (note-on/off with name
-  and velocity, CC, PC, bend, aftertouch, channel pressure; clock/active-sense
-  floods ignored) into a SpinLock-guarded stash; `timerCallback` drains it on
-  the message thread. Click-to-open MIDI monitor behaviour unchanged.
+### 2. Put a core layer between the GUI and the engine
+- **Problem:** `MainComponent` inherits seven roles and is the audio callback and MIDI router. It privately owns the engine and device manager, and holds the Windows power-plan and CPU-affinity logic ([MainComponent.h:54](Z:/davecore/Source/MainComponent.h), lines 128, 208–236, 444–455). The web server takes a `MainComponent*` and includes its header.
+- **Change:** a non-Component `AppHost` owning the device manager, engine and MIDI routing. The UI observes it and the web layer talks to it.
+- **Benefit:** removes the two-way dependency between the web server and the main window, and makes everything except widgets testable headless.
+- **Risk and effort:** medium risk, high effort, but incremental. Extract glitch telemetry, MIDI trigger routing and CPU topology first; leave the audio callback forwarding for last.
 
-### 8. ConfigModalOverlay re-centre — ALREADY FIXED in tree
-- `MainComponent.cpp` `resized()` already re-centres `configOverlay`
-  (`centreWithSize`). Verified, no change needed.
+### 3. Make rack location and chain-slot source proper types
+- **Problem:** rack positions are magic integers (≥100 means aux return, negative means master bus, with a bool named `isFohOrChannel`). A chain slot's kind is five separate flags with hand-maintained exclusion; one copy already misses a term ([RackSlot.h:332](Z:/davecore/Source/RackSlot.h)). Three near-identical 60-line render branches plus a fourth copy of the drain logic sit in `RackSlot::processBlock`. Every strip owns nine built-in synths, so the app constructs 234 at startup.
+- **Change:** a `RackLocation` struct and a `SourceKind` enum with one render helper. The three synths already share the same method surface and differ only in panic naming. Optionally construct synths on first use, later.
+- **Risk and effort:** medium on both, because it touches the audio path. Do it as pure extraction after the test harness in the order below.
 
-### 9. Version resource + stale docs — FIXED
-- Root cause for the stale/empty VERSIONINFO: JUCE's juceaide-generated
-  `Fanfare_resources.rc` only re-fires on icon changes, so the exe shipped
-  1.5.2 metadata while `project(VERSION)` said 1.6.0. `CMakeLists.txt` now
-  deletes the generated rc at configure time so every build regenerates it.
-  Verified: rebuilt exe reports FileVersion/ProductVersion 1.6.0.
-- Projucer route: `Builds/VisualStudio2026/resources.rc` updated
-  1.55 -> 1.60.
-- `docs/manual.html`: four "(v1.55)" chapter tags -> v1.60.
+### 4. One plugin build service
+- **Problem:** the create, configure and prepare sequence appears three times in `FanfareEngine.cpp`. Two of those spawn a thread and pump window messages while waiting, which on the fallback path happens inside `applyRig` with the rack half-applied. There are 21 plugin-release sites and seven different timeouts. B3 external plugins are built inside the audio-silence window (line 1607), which lengthens rig-load dropouts.
+- **Change:** an async build that returns to the event loop instead of pumping, one retire-and-reap helper, and a single plugin-quirks table (build thread, layout, timeouts) that users can override.
+- **Risk and effort:** medium-high risk because this is where the October hang work lives. Do it after 1 and 2.
 
-### 10. Hard-coded colours off the theme system — FIXED
-- `LibraryPanel.cpp` `detectBadgeColour`: the five stage-tape badge hues are
-  kept for dark themes; on light themes (background perceived brightness
-  > 0.5) they get a `darker(0.35f)` pass so badges stay readable.
-- Reviewed and left alone: `0xFF1D2023` exists only in the `Golden_Aug30`
-  archive snapshot, and the near-white Panic ink `0xFFFFF8F6` is correct on
-  every theme's red panic cap.
+### 5. Split the engine along its existing seams
+- **Problem:** `processAudio` is 672 lines inline in the header ([FanfareEngine.h:175](Z:/davecore/Source/FanfareEngine.h)). `applyRig` is 616 lines. The audio engine also holds the gig notepad, scene store, plugin registry and legacy file migration. FOH and IEM master-bus code is copy-pasted.
+- **Change:** extract a DSP work pool, a `MasterBus` used twice, a plugin registry, a scene store and a notes store. Split `processAudio` into named stages in a `.cpp`.
+- **Risk and effort:** low risk if it is pure movement with an offline render test, medium effort.
 
-### 11. FM msfa FIXMEs — ADDRESSED
-- MPE switchable: `FmEngine::setMpeEnabled(bool, int bendRange)` (+ getters)
-  added; `controllers.h` FIXME replaced with a pointer to the switch. Note:
-  the vendored msfa has no per-channel MIDI decode layer that reads these
-  flags yet, so a UI toggle would be cosmetic; true per-note MPE tracking is
-  future work.
-- `env.cc` low-level TODO: finished envelopes (post-release) that park at the
-  16<<16 floor now snap to true silence so operators stop grinding
-  denormal-range math. Nonzero-R4 hold levels park above the floor and keep
-  their authentic hold. Upstream attack-accuracy TODO left as-is (risky,
-  low value).
+### 6. Settings and notification services
+- **Problem:** JUCE's `ApplicationProperties` is never used. About twenty hand-rolled settings and state files each have their own read/write code, and three have two owners. There are eight hand-rolled singletons. Callbacks are single-subscriber, which is what caused the overwritten MP3 hook.
+- **Change:** one typed settings service and multicast listeners.
+- **Risk and effort:** low on both.
 
-### 12. Studio button focus ring — FIXED
-- `BoutiqueLookAndFeel.cpp`: Studio `drawButtonBackground` branch now draws a
-  1px accent outline when `button.hasKeyboardFocus(false)`. Front Panel
-  (hardware-look) themes intentionally unchanged.
+### 7. Close the web layer's boundary
+- **Problem:** the server always starts on all interfaces on port 8080 and the result is ignored ([MainComponent.cpp:315](Z:/davecore/Source/MainComponent.cpp)). The in-app Help depends on it ([HelpLauncher.h:18](Z:/davecore/Source/HelpLauncher.h)). Commands are 40 string comparisons across three chains; the survey found 11 with no client. GET builders run on network threads while WebSocket equivalents use `callAsync`.
+- **Change:** a table-driven command path, an off / loopback / LAN setting, Help that does not need the server, and mirror targets that unregister when a plugin window closes.
+- **Risk and effort:** low on both. More relevant now that the app is published.
 
-## Part 2 — Strip tools UX (Dave's same-day request)
+### 8. Build and file hygiene
+- **Problem:** 69% of hand-written code is in headers (52K of 75K lines), so any core-header edit recompiles nearly everything. Projucer and CMake lists are synced by hand (identical today). Twelve comments cite `nov8mistral.md`, which is not in the repo. `DWORD_PTR` is used unguarded, so the macOS branch cannot compile. Your personal hardware CCs, input mapping, default scenes and plugin paths are compiled in ([FanfareConstants.h:66](Z:/davecore/Source/FanfareConstants.h), [FanfareEngine.h:1262](Z:/davecore/Source/FanfareEngine.h)).
+- **Change:** glob sources in CMake, move header code to `.cpp` as files are touched, and ship your rig as a first-run template instead of constants.
+- **Risk and effort:** low on both.
 
-Problem: Studio strips buried 12 actions behind `CC | DYN | ...`; the menu's
-"Note range & transpose..." item lied (transpose lived only in the MIDI FX
-dialog). Decision (Dave, via options): smart row + right-click, transpose
-moved into the note-range dialog.
+### 9. Consolidate the UI kits gradually
+- **Problem:** about 100 colour literals sit outside the theme (350 total, but 220 are the B3 walnut panel and the look-and-feel). FM and B3 each carry their own knob, fader, header, patch display and keyboard alongside the shared kit.
+- **Change:** converge onto the existing shared kit as each editor is touched, and add a check that blocks new colour literals. No third-party framework.
 
-- **KEY button in the strip row.** `noteRangeButton` relabelled NR -> KEY,
-  now visible on all non-return strips in Studio too. Row is
-  `CC | DYN | KEY | ...` (normal) and `CC | KEY | ...` (monitor-in).
-  Front Panel themes keep their existing full button rows (relabelled).
-- **Menu regrouped.** `showStripActionsMenu` now: strip name header,
-  **Performance** (MIDI FX, 8-pad sampler, BLEEP-216, CoplanDX, MP3 deck),
-  **Strip** (save/load preset, rename, colour). KEY/DYN/CC items removed
-  (they are buttons); right-click on a Studio strip still opens the menu
-  (pre-existing behaviour, verified).
-- **Amber tool lights.** Strip timer drives a `toolActive` button property;
-  `studioButtonTextColour` renders it in `Theme::warn`. KEY lights when the
-  strip note filter is narrowed or transpose is non-zero; `...` lights when
-  arp / harmonizer / sampler / any chain synth or FM / MP3 deck is active.
-- **Transpose in the note-range dialog.** `NoteRangeComponent` gained a
-  TRANSPOSE bar: -48..+48 slider (same `slot.setTransposeSemis` setting as
-  the MIDI FX dialog, so the two stay in sync), quick buttons
-  -12 / -1 / 0 / +1 / +12, live readout, recessed-well chrome, external-change
-  sync via the existing 25 Hz timer. Dialog 860x310 -> 860x358 (all four
-  launch sites updated); title now "NOTE RANGES, SPLITS & TRANSPOSE".
-- **Docs**: manual strip-action-row and note-range chapters updated for KEY,
-  the regrouped menu, the lights, the transpose bar, and the corrected IEM
-  TRIM semantics.
+## Leave alone
+- The real-time discipline: the quiet window, try-locks and bail-to-silence.
+- The JSON rig format: wrap it, do not redesign it.
+- The DSP code itself: it scanned clean.
 
-## Verification
+## Suggested order
+1. Patch the four defects and make `selftest` a build target, with an offline render harness and the audio-path scan as tests.
+2. Items 1 and 6, which touch no audio code.
+3. Items 2 and 7, which remove the UI, engine and web cycle.
+4. Items 3 and 4, outside gig season.
+5. Items 5, 8 and 9, opportunistically.
 
-- Release build via CMake (VS 18 toolchain): clean.
-- `build/selftest.exe` relinked from fresh Release objects each round.
-- `.vibe-runtests.py parse`: **38/38 corpus files OK** (songs+sets+strips).
-- VERSIONINFO verified on the rebuilt exe (1.6.0).
-- Full-engine load run (selftest `full`) was skipped by Dave's call — plugin
-  builds exceed short timeouts and he went straight to live testing.
+If you want one starting point, it is item 1 plus the test harness. It fixes real data loss and makes every later step verifiable.
 
-## Part 3 — FM mode bar "LAYER" / "8-WAVE" chips (Dave's second ask)
 
-Dave suspected the arch chips on the CoplanDX mode cards do nothing. Confirmed
-with nuance: the whole mode card is the real control (click selects the mode);
-the chips are painted labels (FmModeBar.h) with no hit areas — commit
-`92f7563` even calls its own icons "eyecandy". The labels are honest (8-WAVE
-is a real feature: per-operator W1-W8 via `FmOpWaveButton` + `FmWaves.h`;
-LAYER describes the real dual detuned engine) but were drawn with a fill +
-border identical to actual toggles. Fix (Dave's pick): restyled as passive
-text tags — no fill/border, `textFaint` (dim accent when selected) — so
-nothing reads as a switch. UI-only paint change; rebuilt clean.
 
-## Deferred / open
 
-- Enhancement backlog from the same audit (per-strip widths, songs sidebar,
-  F11 stage mode, docked inspector, tablet HUD restyle, history mirror,
-  README roadmap) — untouched.
-- Full MPE decode layer for the FM synth (the switch API exists; nothing
-  reads it yet).
-- Remaining direct-write saves flagged by the audit explorer
-  (`LibraryPanel.cpp:39`, `MainComponent.cpp:1138/1171/1190`,
-  `MainComponent_RigOps.cpp:383`) — candidates for the same tmp+rename
-  pattern next pass.
-- Working tree left uncommitted for Dave's review; no tag/bump (still v1.60).
+
+
+
+
+
+
+

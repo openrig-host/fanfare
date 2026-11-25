@@ -34,7 +34,9 @@ public:
 
     // Transformer core slew-softness inside 4x oversampled loop
     xformerSlewCoef = 1.0f - std::exp(-kTwoPi * std::min(7500.0f, srF * 0.35f) / (4.0f * srF));
-    rippleInc = 120.0f / srF; // 120 Hz full-wave tube rectifier B+ ripple
+    const float rippleW = kTwoPi * 120.0f / srF; // 120 Hz full-wave tube rectifier B+ ripple
+    rippleCosInc = std::cos(rippleW);
+    rippleSinInc = std::sin(rippleW);
 
     reset();
   }
@@ -51,7 +53,8 @@ public:
     osLpZ1 = osLpZ2 = 0.0f;
     xformerZ = 0.0f;
     biasEnv = 0.0f;
-    ripplePhase = 0.0f;
+    rippleCos = 1.0f;
+    rippleSin = 0.0f;
     swellSmoothed = swellTarget;
   }
 
@@ -108,20 +111,23 @@ public:
       // 3. Dynamic cathode-bias, power-supply sag & signal-gated 120 Hz B+ tube ripple
       const float absIn = std::abs(curIn);
       biasEnv += (absIn > biasEnv ? biasAtkCoef : biasRelCoef) * (absIn - biasEnv);
-      ripplePhase += rippleInc;
-      if (ripplePhase >= 1.0f) ripplePhase -= 1.0f;
-      const float bPlusRipple = std::sin(kTwoPi * ripplePhase) * (0.011f * dCurve * std::min(1.0f, biasEnv * 2.5f));
+      const float nextRippleCos = rippleCos * rippleCosInc - rippleSin * rippleSinInc;
+      rippleSin = rippleSin * rippleCosInc + rippleCos * rippleSinInc;
+      rippleCos = nextRippleCos;
+      const float bPlusRipple = rippleSin * (0.011f * dCurve * std::min(1.0f, biasEnv * 2.5f));
       // Matching-transformer LF flux intermodulation: sub-fundamentals gently bias upper harmonics
       const float xformerFluxBias = 0.08f * dCurve * subSplitZ;
       const float dynBias = dCurve * (0.14f + 0.24f * std::min(1.2f, biasEnv)) + xformerFluxBias;
+      const float biasOffset = fastAtan(dynBias * 0.78f) * (1.0f / 0.78f);
       const float sagGain = preGain * (1.0f + bPlusRipple) * (1.0f / (1.0f + 0.24f * dCurve * biasEnv));
+      const float powerDrive = 0.85f + 0.65f * dCurve;
 
       // 4. 4x oversampled warm triode + 6550 + transformer core saturation
       const float delta = 0.25f * (curIn - prevSample);
       float u = prevSample;
       for (int os = 0; os < 4; ++os) {
         u += delta;
-        const float y = warmTubeAndTransformer(u * sagGain, dynBias, dCurve);
+        const float y = warmTubeAndTransformer(u * sagGain, dynBias, biasOffset, powerDrive);
         osLpZ1 += osLpCoef * (y - osLpZ1);
         osLpZ2 += osLpCoef * (osLpZ1 - osLpZ2);
       }
@@ -135,7 +141,7 @@ public:
 
       // 6. Sub-bass chest restoration + warm 210 Hz transformer weight
       const float subRestore =
-          std::tanh(subSplitZ * (1.0f + 0.85f * dCurve)) * (0.52f * dCurve);
+          fastTanh(subSplitZ * (1.0f + 0.85f * dCurve)) * (0.52f * dCurve);
       const float leveled = dcOut * compGain + subRestore;
 
       warmBodyZ += warmBodyCoef * (leveled - warmBodyZ);
@@ -147,23 +153,63 @@ public:
 
       data[s] = toneZ2;
     }
+
+    const float rippleMagSq = rippleCos * rippleCos + rippleSin * rippleSin;
+    if (rippleMagSq > 1.0e-6f) {
+      const float invMag = 1.0f / std::sqrt(rippleMagSq);
+      rippleCos *= invMag;
+      rippleSin *= invMag;
+    } else {
+      rippleCos = 1.0f;
+      rippleSin = 0.0f;
+    }
   }
 
 private:
-  inline float warmTubeAndTransformer(float x, float bias, float driveAmt) noexcept {
+  static inline float fastAtan(float x) noexcept {
+    constexpr float kHalfPi = 1.5707963267948966f;
+    const float ax = std::abs(x);
+    const bool gt1 = ax > 1.0f;
+    const float z = gt1 ? (1.0f / ax) : ax;
+    const float z2 = z * z;
+    float r = z * (0.99997726f +
+                   z2 * (-0.33262347f +
+                         z2 * (0.19354346f +
+                               z2 * (-0.11643287f +
+                                     z2 * (0.05265332f - 0.01172120f * z2)))));
+    if (gt1)
+      r = kHalfPi - r;
+    return x < 0.0f ? -r : r;
+  }
+
+  static inline float fastTanhUnit(float z) noexcept {
+    const float z2 = z * z;
+    return z * (945.0f + z2 * (105.0f + z2)) /
+           (945.0f + z2 * (420.0f + 15.0f * z2));
+  }
+
+  static inline float fastTanh(float z) noexcept {
+    if (z >= 5.0f) return 1.0f;
+    if (z <= -5.0f) return -1.0f;
+    const float z2 = z * z;
+    return z * (135135.0f + z2 * (17325.0f + z2 * (378.0f + z2))) /
+           (135135.0f + z2 * (62370.0f + z2 * (3150.0f + 28.0f * z2)));
+  }
+
+  inline float warmTubeAndTransformer(float x, float bias, float biasOffset,
+                                      float powerDrive) noexcept {
     // Stage 1: Soft asymmetric triode (rich 2nd harmonic warmth)
     const float xb = x + bias;
-    const float triode = std::atan(xb * 0.78f) * (1.0f / 0.78f) -
-                         std::atan(bias * 0.78f) * (1.0f / 0.78f);
+    const float triode = fastAtan(xb * 0.78f) * (1.0f / 0.78f) - biasOffset;
 
     // Transformer magnetic core slew softness between driver and power tubes
     xformerZ += xformerSlewCoef * (triode - xformerZ);
     const float xf = 0.65f * xformerZ + 0.35f * triode;
 
     // Stage 2: 6550 push-pull soft saturation
-    const float p = xf * (0.85f + 0.65f * driveAmt);
+    const float p = xf * powerDrive;
     const float power = p / std::sqrt(1.0f + 0.85f * p * p);
-    return 0.78f * power + 0.22f * std::tanh(power * 1.15f);
+    return 0.78f * power + 0.22f * fastTanhUnit(power * 1.15f);
   }
 
   double sr = 44100.0;
@@ -180,8 +226,10 @@ private:
   float biasRelCoef = 0.0003f;
   float osLpCoef = 0.45f;
   float xformerSlewCoef = 0.55f;
-  float rippleInc = 120.0f / 44100.0f;
-  float ripplePhase = 0.0f;
+  float rippleCosInc = 0.99985f;
+  float rippleSinInc = 0.01709f;
+  float rippleCos = 1.0f;
+  float rippleSin = 0.0f;
 
   float swellBassZ = 0.0f;
   float subSplitZ = 0.0f;

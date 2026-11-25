@@ -298,8 +298,8 @@ public:
         chBufR[(size_t)chPos] = closeR;
         chPh1 += chInc1; if (chPh1 >= 1.0f) chPh1 -= 1.0f;
         chPh2 += chInc2; if (chPh2 >= 1.0f) chPh2 -= 1.0f;
-        const float l1 = std::sin(kTwoPi * chPh1);
-        const float l2 = std::sin(kTwoPi * chPh2);
+        const float l1 = fastSinNorm(chPh1);
+        const float l2 = fastSinNorm(chPh2);
         const float wetL = 0.62f * chRead(chBufL, (0.0105f + 0.0009f * l1) * srF) +
                            0.38f * chRead(chBufR, (0.0178f + 0.0007f * l2) * srF);
         const float wetR = 0.62f * chRead(chBufR, (0.0125f - 0.0009f * l1) * srF) +
@@ -433,12 +433,13 @@ private:
       const float hDly = baseOffsetSamples + (hornDopp + 0.0005f + hornDopp * sinH) * srF;
       const float rDly1 = baseOffsetSamples + (0.00195f - 0.00024f * wallSwirl * sinH) * srF;
       const float rDly2 = baseOffsetSamples + (0.00290f - 0.00017f * wallSwirl * cosH) * srF;
-      const float rDly3 = baseOffsetSamples + (0.00430f - 0.00066f * cosH) * srF;
 
       const float hornDirect = readCubic(hornBuf.data(), writePos, hDly);
-      const float hornRear = (rearGain > 0.0f)
-                                 ? rearGain * readCubic(hornBuf.data(), writePos, rDly3)
-                                 : 0.0f;
+      const float hornRear =
+          (rearGain > 0.0f)
+              ? rearGain * readCubic(hornBuf.data(), writePos,
+                                     baseOffsetSamples + (0.00430f - 0.00066f * cosH) * srF)
+              : 0.0f;
       const float hornWall = 0.65f * readCubic(hornBuf.data(), writePos, rDly1) +
                              0.35f * readCubic(hornBuf.data(), writePos, rDly2) - hornRear;
 
@@ -644,10 +645,8 @@ private:
   int chSize = 0, chMask = 0, chPos = 0;
   float chPh1 = 0.0f, chPh2 = 0.25f, chInc1 = 0.0f, chInc2 = 0.0f;
 
-  inline float chRead(const std::vector<float> &b, float dly) const {
-    float rp = (float)chPos - dly;
-    while (rp < 0.0f)
-      rp += (float)chSize;
+  inline float chRead(const std::vector<float> &b, float dly) const noexcept {
+    const float rp = (float)(chPos + chSize) - dly;
     const int i0 = (int)rp;
     const float f = rp - (float)i0;
     const float a = b[(size_t)(i0 & chMask)];
@@ -708,17 +707,24 @@ private:
     sOut = s0 + f * (sinLut[(size_t)i1] - s0);
   }
 
+  inline float fastSinNorm(float phase01) const noexcept {
+    const float idx = phase01 * (float)kTrigSize;
+    const int i0 = ((int)idx) & (kTrigSize - 1);
+    const int i1 = (i0 + 1) & (kTrigSize - 1);
+    const float f = idx - (float)(int)idx;
+    const float s0 = sinLut[(size_t)i0];
+    return s0 + f * (sinLut[(size_t)i1] - s0);
+  }
+
   float rpmToRadPerSample(double rpm) const {
     return (float)((rpm / 60.0) * 6.28318530717958647692 / sr);
   }
 
-  inline float readCubic(const float *buf, int write, float dlySamples) const {
+  inline float readCubic(const float *buf, int write, float dlySamples) const noexcept {
     const float maxDly = (float)(dlySize - 4);
     const float clamped =
         dlySamples < 1.0f ? 1.0f : (dlySamples > maxDly ? maxDly : dlySamples);
-    float rp = (float)write - clamped;
-    while (rp < 2.0f)
-      rp += (float)dlySize;
+    const float rp = (float)(write + dlySize) - clamped;
     const int base = (int)rp;
     const float x = rp - (float)base;
 

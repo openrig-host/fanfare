@@ -6,8 +6,21 @@
 
 namespace OpenRig {
 
-StageRemoteModalOverlay::StageRemoteModalOverlay(StageHotspotController& hotspotCtrl, int webServerPort, const juce::String& authToken)
-    : hotspotController(hotspotCtrl), port(webServerPort), sessionToken(authToken) {
+StageRemoteModalOverlay::StageRemoteModalOverlay(
+    StageHotspotController& hotspotCtrl,
+    int webServerPort,
+    const juce::String& authToken,
+    WebServer::BindScope initialScope,
+    bool initialRunning,
+    const juce::String& initialBindError,
+    std::function<bool(WebServer::BindScope, juce::String&)> onScopeChange)
+    : hotspotController(hotspotCtrl),
+      port(webServerPort),
+      sessionToken(authToken),
+      bindScope(initialScope),
+      webRunning(initialRunning),
+      bindError(initialBindError),
+      onBindScopeChanged(std::move(onScopeChange)) {
     setOpaque(false);
     const auto& t = ThemeManager::getInstance().active();
 
@@ -87,6 +100,31 @@ StageRemoteModalOverlay::StageRemoteModalOverlay(StageHotspotController& hotspot
     webTitleLabel.setColour(juce::Label::textColourId, t.accent);
     addAndMakeVisible(webTitleLabel);
 
+    bindScopeLabel.setFont(BoutiqueLookAndFeel::condensedFont(11.5f, 0.06f));
+    bindScopeLabel.setColour(juce::Label::textColourId, t.engrave);
+    addAndMakeVisible(bindScopeLabel);
+
+    bindScopeCombo.addItem("Off", 1);
+    bindScopeCombo.addItem("Localhost Only (127.0.0.1)", 2);
+    bindScopeCombo.addItem("LAN / Stage Wi-Fi", 3);
+    bindScopeCombo.setSelectedId((int)bindScope + 1, juce::dontSendNotification);
+    bindScopeCombo.onChange = [this]() {
+        const int sel = bindScopeCombo.getSelectedId() - 1;
+        auto newScope = WebServer::BindScope::Loopback;
+        if (sel == 0) newScope = WebServer::BindScope::Off;
+        else if (sel == 2) newScope = WebServer::BindScope::Lan;
+
+        juce::String err;
+        bool ok = true;
+        if (onBindScopeChanged)
+            ok = onBindScopeChanged(newScope, err);
+        updateWebStatus(newScope, ok && newScope != WebServer::BindScope::Off, err);
+    };
+    addAndMakeVisible(bindScopeCombo);
+
+    webStatusLabel.setFont(BoutiqueLookAndFeel::uiFont(11.5f, false));
+    addAndMakeVisible(webStatusLabel);
+
     primaryUrlLabel.setFont(BoutiqueLookAndFeel::monoFont(14.0f, true));
     primaryUrlLabel.setColour(juce::Label::textColourId, t.text);
     addAndMakeVisible(primaryUrlLabel);
@@ -121,7 +159,7 @@ StageRemoteModalOverlay::StageRemoteModalOverlay(StageHotspotController& hotspot
     usbInfoLabel.setColour(juce::Label::textColourId, t.ok);
     addAndMakeVisible(usbInfoLabel);
 
-    updateQrCodes();
+    updateWebStatus(bindScope, webRunning, bindError);
     updateStatusDisplay(hotspotController.getState(), "");
 
     hotspotController.onStateChanged = [this](StageHotspotController::State st, const juce::String& msg) {
@@ -138,6 +176,32 @@ void StageRemoteModalOverlay::timerCallback() {
     copyUrlBtn.setButtonText("COPY URL");
 }
 
+void StageRemoteModalOverlay::updateWebStatus(WebServer::BindScope scope, bool running, const juce::String& err) {
+    const auto& t = ThemeManager::getInstance().active();
+    bindScope = scope;
+    webRunning = running;
+    bindError = err;
+
+    const bool canConnect = (scope != WebServer::BindScope::Off) && running;
+    copyUrlBtn.setEnabled(canConnect);
+    openBrowserBtn.setEnabled(canConnect);
+
+    if (err.isNotEmpty()) {
+        webStatusLabel.setText("Error: " + err, juce::dontSendNotification);
+        webStatusLabel.setColour(juce::Label::textColourId, t.danger);
+    } else if (scope == WebServer::BindScope::Off) {
+        webStatusLabel.setText("Web Remote: OFF", juce::dontSendNotification);
+        webStatusLabel.setColour(juce::Label::textColourId, t.textDim);
+    } else if (scope == WebServer::BindScope::Loopback) {
+        webStatusLabel.setText("Web Remote: LOCALHOST (127.0.0.1:" + juce::String(port) + ")", juce::dontSendNotification);
+        webStatusLabel.setColour(juce::Label::textColourId, t.ok);
+    } else {
+        webStatusLabel.setText("Web Remote: LAN / STAGE WI-FI (port " + juce::String(port) + ")", juce::dontSendNotification);
+        webStatusLabel.setColour(juce::Label::textColourId, t.ok);
+    }
+    updateQrCodes();
+}
+
 void StageRemoteModalOverlay::updateQrCodes() {
     juce::String ssid = ssidEditor.getText().trim();
     if (ssid.isEmpty()) ssid = "Fanfare-Stage";
@@ -145,6 +209,23 @@ void StageRemoteModalOverlay::updateQrCodes() {
     if (pass.isEmpty()) pass = hotspotController.getPassword();
 
     wifiQrComponent.setPayload(QrCodeGenerator::makeWifiPayload(ssid, pass));
+
+    if (bindScope == WebServer::BindScope::Off) {
+        primaryUrlLabel.setText("Web Remote is OFF", juce::dontSendNotification);
+        webQrComponent.setPayload("http://127.0.0.1");
+        otherIpsLabel.setText("Select Localhost or LAN above to enable HUD.", juce::dontSendNotification);
+        return;
+    }
+
+    if (bindScope == WebServer::BindScope::Loopback) {
+        juce::String url = "http://127.0.0.1:" + juce::String(port);
+        if (sessionToken.isNotEmpty())
+            url += "/?token=" + juce::URL::addEscapeChars(sessionToken, true);
+        primaryUrlLabel.setText(url, juce::dontSendNotification);
+        webQrComponent.setPayload(url);
+        otherIpsLabel.setText("Bound to loopback only (127.0.0.1)", juce::dontSendNotification);
+        return;
+    }
 
     auto ips = StageHotspotController::getAvailableIpAddresses();
     juce::String primaryIp = ips[0];
@@ -255,18 +336,25 @@ void StageRemoteModalOverlay::resized() {
 
     // Right Column (Web Companion HUD)
     webTitleLabel.setBounds(rightCol.removeFromTop(24));
-    rightCol.removeFromTop(6);
+    rightCol.removeFromTop(4);
 
-    primaryUrlLabel.setBounds(rightCol.removeFromTop(28));
+    auto scopeRow = rightCol.removeFromTop(26);
+    bindScopeLabel.setBounds(scopeRow.removeFromLeft(65));
+    bindScopeCombo.setBounds(scopeRow);
+    rightCol.removeFromTop(2);
+    webStatusLabel.setBounds(rightCol.removeFromTop(20));
+    rightCol.removeFromTop(4);
 
-    auto btnRow = rightCol.removeFromTop(32);
+    primaryUrlLabel.setBounds(rightCol.removeFromTop(26));
+
+    auto btnRow = rightCol.removeFromTop(30);
     copyUrlBtn.setBounds(btnRow.removeFromLeft(btnRow.getWidth() / 2 - 4));
     openBrowserBtn.setBounds(btnRow.removeFromRight(btnRow.getWidth() - 4));
 
-    otherIpsLabel.setBounds(rightCol.removeFromTop(26));
+    otherIpsLabel.setBounds(rightCol.removeFromTop(22));
 
-    rightCol.removeFromTop(10);
-    auto webQrArea = rightCol.removeFromTop(180).withSizeKeepingCentre(180, 180);
+    rightCol.removeFromTop(6);
+    auto webQrArea = rightCol.removeFromTop(150).withSizeKeepingCentre(150, 150);
     webQrComponent.setBounds(webQrArea);
     rightCol.removeFromTop(4);
     webQrCaption.setBounds(rightCol.removeFromTop(20));

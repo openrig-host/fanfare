@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "FanfareConstants.h"
 #include <atomic>
 #include <random>
 #include <algorithm>
@@ -232,11 +233,11 @@ public:
 
     // --- Parameters (atomic) ---
     std::atomic<bool> enabled{false};
-    std::atomic<float> bpm{127.0f};
-    std::atomic<int> octavesUp{0};
-    std::atomic<int> octavesDown{0};
-    std::atomic<float> gate{0.9f};
-    std::atomic<int> patternIdx{(int)Pattern::Random};
+    std::atomic<float> bpm{FanfareConstants::kDefaultArpBpm};
+    std::atomic<int> octavesUp{FanfareConstants::kDefaultArpOctavesUp};
+    std::atomic<int> octavesDown{FanfareConstants::kDefaultArpOctavesDown};
+    std::atomic<float> gate{FanfareConstants::kDefaultArpGate};
+    std::atomic<int> patternIdx{FanfareConstants::kDefaultArpPatternIdx};
 
 private:
     void buildNoteList(int up, int down) {

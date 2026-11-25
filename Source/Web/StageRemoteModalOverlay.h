@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "OpenRigWebServer.h"
 #include "StageHotspotController.h"
 #include "QrCodeGenerator.h"
 
@@ -12,7 +13,14 @@ namespace OpenRig {
  */
 class StageRemoteModalOverlay : public juce::Component, public juce::Timer {
 public:
-    StageRemoteModalOverlay(StageHotspotController& hotspotCtrl, int webServerPort = 8080, const juce::String& authToken = {});
+    StageRemoteModalOverlay(
+        StageHotspotController& hotspotCtrl,
+        int webServerPort = 8080,
+        const juce::String& authToken = {},
+        WebServer::BindScope initialScope = WebServer::BindScope::Loopback,
+        bool initialRunning = false,
+        const juce::String& initialBindError = {},
+        std::function<bool(WebServer::BindScope, juce::String&)> onScopeChange = {});
     ~StageRemoteModalOverlay() override;
 
     void paint(juce::Graphics& g) override;
@@ -24,10 +32,15 @@ private:
     void timerCallback() override;
     void updateQrCodes();
     void updateStatusDisplay(StageHotspotController::State state, const juce::String& msg);
+    void updateWebStatus(WebServer::BindScope scope, bool running, const juce::String& err);
 
     StageHotspotController& hotspotController;
     int port = 8080;
     juce::String sessionToken;
+    WebServer::BindScope bindScope = WebServer::BindScope::Loopback;
+    bool webRunning = false;
+    juce::String bindError;
+    std::function<bool(WebServer::BindScope, juce::String&)> onBindScopeChanged;
 
     juce::TextButton closeBtn{"CLOSE"};
     juce::TextButton helpBtn{"Help"};
@@ -43,6 +56,9 @@ private:
 
     // Web Remote Section
     juce::Label webTitleLabel;
+    juce::Label bindScopeLabel{"bindScope", "ACCESS:"};
+    juce::ComboBox bindScopeCombo;
+    juce::Label webStatusLabel;
     juce::Label primaryUrlLabel;
     juce::TextButton copyUrlBtn{"COPY URL"};
     juce::TextButton openBrowserBtn{"OPEN IN BROWSER"};

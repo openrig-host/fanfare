@@ -1,5 +1,7 @@
 #pragma once
 
+#include <JuceHeader.h>
+
 // Per-build bisect overrides (generated before each test build; optional).
 #if __has_include("FanfareBisectFlags.h")
 #include "FanfareBisectFlags.h"
@@ -88,6 +90,13 @@ constexpr int kDefaultMidiChannel = 1;
 constexpr int kSustainPedalCC = 64;
 constexpr int kMidiMaxVelocity = 127;
 constexpr int kMidiMaxCCValue = 127;
+
+// --- Arpeggiator Defaults ---
+constexpr float kDefaultArpBpm = 120.0f;
+constexpr int kDefaultArpOctavesUp = 1;
+constexpr int kDefaultArpOctavesDown = 0;
+constexpr float kDefaultArpGate = 0.9f;
+constexpr int kDefaultArpPatternIdx = 0; // SimpleArpeggiator::Pattern::Up
 
 // --- Reliability Configuration ---
 constexpr int kMaxPluginExceptionsBeforeBypass = 5;

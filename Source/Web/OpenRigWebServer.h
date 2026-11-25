@@ -4,6 +4,7 @@
 #include "PluginMirrorCapture.h"
 #include "PluginMirrorInput.h"
 #include "PluginMirrorStreamer.h"
+#include "WebHostInterface.h"
 #include <vector>
 #include <string>
 #include <memory>
@@ -17,7 +18,6 @@
 #include <unordered_set>
 
 class FanfareEngine;
-class MainComponent;
 
 namespace OpenRig {
 
@@ -48,14 +48,38 @@ struct LiveTelemetry {
  */
 class WebServer : public juce::Thread, private juce::Timer {
 public:
-    WebServer(FanfareEngine& engine, MainComponent* mainComponent = nullptr);
+    WebServer(FanfareEngine& engine, IWebHost* webHost = nullptr);
     ~WebServer() override;
 
+    enum class BindScope {
+        Off = 0,
+        Loopback = 1,
+        Lan = 2
+    };
+
+    static BindScope bindScopeFromString(const juce::String& s) {
+        const auto norm = s.trim().toLowerCase();
+        if (norm == "off") return BindScope::Off;
+        if (norm == "lan") return BindScope::Lan;
+        return BindScope::Loopback;
+    }
+
+    static juce::String bindScopeToString(BindScope scope) {
+        switch (scope) {
+            case BindScope::Off: return "off";
+            case BindScope::Lan: return "lan";
+            case BindScope::Loopback:
+            default: return "loopback";
+        }
+    }
+
     // Server lifecycle
-    bool startServer(int port = 8080);
+    bool startServer(int port = 8080, BindScope scope = BindScope::Lan);
     void stopServer();
     bool isRunning() const { return serverRunning.load(); }
     int getPort() const { return serverPort; }
+    BindScope getBindScope() const { return activeBindScope.load(std::memory_order_acquire); }
+    juce::String getLastBindError() const;
     const juce::String& getSessionToken() const noexcept { return sessionToken; }
 
     // IP Addresses helper for UI display (e.g., http://192.168.1.50:8080)
@@ -85,6 +109,16 @@ public:
     void registerPluginMirrorSource(juce::Component* editorContent,
                                     void* nativeWindowHandle,
                                     const juce::String& name);
+    void unregisterPluginMirrorSource(juce::Component* editorContent,
+                                      void* nativeWindowHandle);
+    bool hasPluginMirrorTarget() const {
+        return mirrorCapture != nullptr && mirrorCapture->hasTarget();
+    }
+
+    /** Direct POST command entry point for local tests without opening a TCP port. */
+    juce::String dispatchApiPost(const juce::String& path, const juce::var& jsonPayload) {
+        return handleApiPost(path, jsonPayload);
+    }
 
     /** Starts the capture/stream loop (message thread). Usually auto-called
         when the first client sends mirror_subscribe. */
@@ -122,6 +156,7 @@ private:
     // Auth & Origin validation
     bool isAuthorizedRequest(const juce::String& headers, const juce::String& query) const;
     bool isOriginAllowed(const juce::String& headers, bool requireOrigin) const;
+    bool runOnMessageThreadSync(std::function<void()> fn, int timeoutMs = 2000);
 
     // REST API Handlers
     juce::var buildStatusJson();
@@ -156,13 +191,18 @@ private:
     static juce::String getEmbeddedCss();
     static juce::String getEmbeddedJs();
 
+    struct Dispatch;
+
     FanfareEngine& engine;
-    MainComponent* mainComponent;
+    IWebHost* webHost = nullptr;
 
     juce::String sessionToken;
     std::shared_ptr<LifetimeState> lifetime = std::make_shared<LifetimeState>();
 
     std::atomic<bool> serverRunning{false};
+    std::atomic<BindScope> activeBindScope{BindScope::Off};
+    mutable std::mutex bindErrorMutex;
+    juce::String lastBindError;
     int serverPort = 8080;
     void* listenSocket = nullptr; // Raw socket descriptor (SOCKET / int)
 

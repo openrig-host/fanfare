@@ -12,6 +12,7 @@
 #endif
 #include <limits>
 
+#include "AppSettings.h"
 #include "CCMappingComponent.h"
 #include "FanfareLogoData.h"
 #include "HelpLauncher.h"
@@ -563,11 +564,27 @@ void MainComponent::showWebRemoteDialog() {
   if (hotspotController == nullptr) {
     hotspotController = std::make_unique<OpenRig::StageHotspotController>();
   }
-  const int port = webServer ? webServer->getPort() : 8080;
+  const int port = webServer ? webServer->getPort()
+                           : Fanfare::AppSettings::getInstance().getWebRemotePort();
   const juce::String token =
       webServer ? webServer->getSessionToken() : juce::String();
+  const auto scope = webServer
+      ? webServer->getBindScope()
+      : OpenRig::WebServer::bindScopeFromString(
+            Fanfare::AppSettings::getInstance().getWebRemoteBindScope());
+  const bool running = webServer && webServer->isRunning();
+  const juce::String bindErr = webServer ? webServer->getLastBindError() : juce::String();
   stageRemoteOverlay = std::make_unique<OpenRig::StageRemoteModalOverlay>(
-      *hotspotController, port, token);
+      *hotspotController, port, token, scope, running, bindErr,
+      [this, port](OpenRig::WebServer::BindScope newScope, juce::String& outErr) -> bool {
+        Fanfare::AppSettings::getInstance().setWebRemoteBindScope(
+            OpenRig::WebServer::bindScopeToString(newScope));
+        if (!webServer)
+          return false;
+        const bool ok = webServer->startServer(port, newScope);
+        outErr = webServer->getLastBindError();
+        return ok;
+      });
   stageRemoteOverlay->onClose = [this]() {
     stageRemoteOverlay.reset();
     repaint();

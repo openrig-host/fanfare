@@ -32,9 +32,11 @@ class RackSlot {
 public:
   RackSlot(const juce::String &name) : slotName(name) {
     setDefaultCCs();
-    mp3Player.onPlayStarted = [this] { setBypass(false); };
+    mp3Player.addListener(&mp3AutoUnbypassListener);
   }
-  ~RackSlot() = default;
+  ~RackSlot() {
+    mp3Player.removeListener(&mp3AutoUnbypassListener);
+  }
 
   std::function<void(juce::AudioPluginInstance *)> onBeforePluginDestroyed;
 
@@ -1294,6 +1296,7 @@ public:
       clearChainSlotSynth(i);
       clearChainSlotFm(i);
       clearChainSlotB3(i);
+      chainSettings[i].midiChannel.store(0);
     }
   }
 
@@ -1998,6 +2001,13 @@ public:
   void setEstimatedRamBytes(size_t bytes) { estimatedRamBytes.store(bytes); }
 
 private:
+
+  struct Mp3AutoUnbypassListener : Mp3PlayerProcessor::Listener {
+    RackSlot &owner;
+    explicit Mp3AutoUnbypassListener(RackSlot &o) : owner(o) {}
+    void mp3PlayStarted() override { owner.setBypass(false); }
+  };
+  Mp3AutoUnbypassListener mp3AutoUnbypassListener{*this};
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RackSlot)
 };

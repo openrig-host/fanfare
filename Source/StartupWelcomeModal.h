@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "AppSettings.h"
 #include "BoutiqueLookAndFeel.h"
 #include "ButtonRoles.h"
 #include "FanfareConstants.h"
@@ -135,34 +136,11 @@ private:
 // Persists "Show on startup" toggle in ui_settings.json (default: true).
 struct WelcomePrefs {
     static bool getShowOnStartup() {
-        const auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-        if (!f.existsAsFile())
-            return true;
-        const auto v = juce::JSON::parse(f.loadFileAsString());
-        if (v.isObject() && v.hasProperty("showWelcomeOnStartup"))
-            return (bool)v["showWelcomeOnStartup"];
-        return true;
+        return Fanfare::AppSettings::getInstance().getBool("showWelcomeOnStartup", true);
     }
 
     static void setShowOnStartup(bool show) {
-        auto f = FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-        juce::var v;
-        if (f.existsAsFile()) {
-            const auto raw = f.loadFileAsString().trim();
-            if (raw.isNotEmpty()) {
-                v = juce::JSON::parse(raw);
-                if (!v.isObject())
-                    return; // Corrupt ui_settings.json — abort rather than wiping unrelated settings
-            }
-        }
-        if (!v.isObject())
-            v = juce::var(new juce::DynamicObject());
-        if (auto* obj = v.getDynamicObject())
-            obj->setProperty("showWelcomeOnStartup", show);
-        f.getParentDirectory().createDirectory();
-        juce::TemporaryFile tmp(f);
-        if (tmp.getFile().replaceWithText(juce::JSON::toString(v)))
-            tmp.overwriteTargetFileWithTemporary();
+        Fanfare::AppSettings::getInstance().setBool("showWelcomeOnStartup", show);
     }
 };
 
@@ -487,14 +465,14 @@ private:
     void paintWhatsNew(juce::Graphics& g, juce::Rectangle<int> area, const Theme& t) const {
         struct Bullet { const char* title; const char* detail; };
         static constexpr Bullet kItems[] = {
-            {"The 1984 Keyboard Rig: BLEEP-216 + CoplanDX FM",
-             "Native 16-voice Juno-style polysynth (69 presets) + 6-op/4-op DX7/TX81Z/DX100 FM synth (558 presets) onboard."},
-            {"Multi-synth chain stacking & 11 hybrid strips",
-             "Layer BLEEP-216, CoplanDX, and VST3s across 3 slots per strip with per-slot key ranges, plus 11 FM+Analog strips."},
-            {"Rig Doctor & two-phase VST3 loader",
-             "Deadlock-free STA -> MTA song loading with [X/N] progress bar, plus surgical JSON setup diagnostics and repair."},
-            {"Stage-hardened v1.60 performance engine",
-             "Next-Up preload capsule, 1-9 Scene hotkeys, Lush FDN Reverb, Controller Profiles, Save Version History, and USB hotplug recovery."},
+            {"B3 Organ & Low-CPU Convolution / DSP Engine",
+             "91-tonewheel B3 & Dual Leslie 122 in a walnut console - now with non-uniform IR convolution and fast-math DSP for much lower CPU."},
+            {"Snapshots Rail & Permanent Top Setlist Bar",
+             "Stationary far-right Snapshots Rail for instant 0 ms mix/mute/split recall with zero VST reloads, plus a permanent Top Setlist Bar."},
+            {"Stage Essentials: IEM Click, Backup Keys & Reset Audio",
+             "Built-in IEM-only Click Track & count-in, global Backup Keyboard Remap (channel/transpose/CC), and 1-second Reset Audio recovery."},
+            {"Hardened Real-Time Engine & Hybrid CPU Tuning",
+             "Lock-free RT audio path, hybrid P/E-core affinity, improved Stage Remote, plus onboard BLEEP-216 analog and CoplanDX FM synths."},
         };
 
         int y = area.getY();

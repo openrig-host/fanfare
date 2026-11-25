@@ -47,6 +47,7 @@ public:
     // Slightly relaxed 6.25 Hz synchronous scanner for creamy, non-seasick motion
     scannerInc = 6.25f / (float)sr;
     driftInc = 0.19f / (float)sr;
+    buildLuts();
     reset();
   }
 
@@ -107,7 +108,8 @@ public:
 
     // Scale excursion smoothly by userDepth (0 = static phase richness, 1 = full sweep)
     const float halfSpan = baseHalfSpan * userDepth;
-    constexpr float kTwoPi = 6.28318530717958647692f;
+    if (!lutsReady)
+      buildLuts();
 
     for (int s = 0; s < n; ++s) {
       const float in = data[s];
@@ -131,14 +133,14 @@ public:
       driftPhase += driftInc;
       if (driftPhase >= 1.0f)
         driftPhase -= 1.0f;
-      const float slip = 1.0f + 0.006f * std::sin(kTwoPi * driftPhase);
+      const float slip = 1.0f + 0.006f * fastSinNorm(driftPhase);
 
       lfoPhase += scannerInc * slip;
       if (lfoPhase >= 1.0f)
         lfoPhase -= 1.0f;
 
       const float tri = 1.0f - 2.0f * std::abs(2.0f * lfoPhase - 1.0f);
-      const float sinSwp = -std::cos(kTwoPi * lfoPhase);
+      const float sinSwp = -fastCosNorm(lfoPhase);
       const float bipolar = 0.45f * tri + 0.55f * sinSwp;
 
       const float scanPos =
@@ -146,12 +148,12 @@ public:
 
       float wet = 0.0f;
       float wSum = 0.0f;
-      const int minTap = std::max(0, (int)std::floor(scanPos - 1.70f));
-      const int maxTap = std::min(kNumTaps - 1, (int)std::ceil(scanPos + 1.70f));
+      const int minTap = std::max(0, (int)(scanPos - 1.70f));
+      const int maxTap = std::min(kNumTaps - 1, (int)(scanPos + 1.70f) + 1);
       for (int t = minTap; t <= maxTap; ++t) {
         const float dist = std::abs((float)t - scanPos) * (1.0f / 1.75f);
         if (dist < 1.0f) {
-          const float w = 0.5f + 0.5f * std::cos(3.14159265f * dist);
+          const float w = fastHann(dist);
           wet += taps[t] * w;
           wSum += w;
         }
@@ -170,6 +172,50 @@ public:
   }
 
 private:
+  static constexpr int kTrigSize = 1024;
+  static constexpr int kHannSize = 512;
+
+  void buildLuts() {
+    constexpr double kTwoPi = 6.28318530717958647692;
+    constexpr double kPi = 3.14159265358979323846;
+    for (int i = 0; i < kTrigSize; ++i) {
+      const double a = (double)i * (kTwoPi / (double)kTrigSize);
+      sinLut[(size_t)i] = (float)std::sin(a);
+      cosLut[(size_t)i] = (float)std::cos(a);
+    }
+    for (int i = 0; i <= kHannSize; ++i) {
+      const double u = (double)i / (double)kHannSize;
+      hannLut[(size_t)i] = (float)(0.5 + 0.5 * std::cos(kPi * u));
+    }
+    lutsReady = true;
+  }
+
+  inline float fastSinNorm(float phase01) const noexcept {
+    const float idx = phase01 * (float)kTrigSize;
+    const int i0 = ((int)idx) & (kTrigSize - 1);
+    const int i1 = (i0 + 1) & (kTrigSize - 1);
+    const float f = idx - (float)(int)idx;
+    const float a = sinLut[(size_t)i0];
+    return a + f * (sinLut[(size_t)i1] - a);
+  }
+
+  inline float fastCosNorm(float phase01) const noexcept {
+    const float idx = phase01 * (float)kTrigSize;
+    const int i0 = ((int)idx) & (kTrigSize - 1);
+    const int i1 = (i0 + 1) & (kTrigSize - 1);
+    const float f = idx - (float)(int)idx;
+    const float a = cosLut[(size_t)i0];
+    return a + f * (cosLut[(size_t)i1] - a);
+  }
+
+  inline float fastHann(float u01) const noexcept {
+    const float idx = u01 * (float)kHannSize;
+    const int i0 = (int)idx;
+    const float f = idx - (float)i0;
+    const float a = hannLut[(size_t)i0];
+    return a + f * (hannLut[(size_t)(i0 + 1)] - a);
+  }
+
   struct LcSection {
     float a1 = 0.0f, a2 = 0.0f;
     float lpCoef = 0.5f;
@@ -177,6 +223,10 @@ private:
   };
 
   std::array<LcSection, kNumSections> sec{};
+  std::array<float, kTrigSize> sinLut{};
+  std::array<float, kTrigSize> cosLut{};
+  std::array<float, kHannSize + 1> hannLut{};
+  bool lutsReady = false;
   float dryToneCoef = 0.5f;
   float dryToneZ = 0.0f;
   float lfoPhase = 0.0f;

@@ -48,6 +48,7 @@ juce::Image createGearImage(int size, juce::Colour colour) {
 class PluginWindow : public juce::DocumentWindow {
 public:
   std::function<void()> onWindowClosed;
+  std::function<void(juce::Component*, void*)> onBeforeDestroyEditor;
   juce::AudioPluginInstance* pluginInstance = nullptr;
   bool editorDestroyed = false;
 
@@ -73,6 +74,10 @@ public:
     if (editorDestroyed)
       return;
     editorDestroyed = true;
+    if (auto beforeDestroy = std::move(onBeforeDestroyEditor)) {
+      void* nativeHandle = getPeer() ? getPeer()->getNativeHandle() : nullptr;
+      beforeDestroy(getContentComponent(), nativeHandle);
+    }
     setVisible(false);
     if (getContentComponent() != nullptr) {
       FanfareLog::safeExecutePluginCall([this]() {

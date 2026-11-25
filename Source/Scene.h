@@ -1,6 +1,8 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "FanfareConstants.h"
+#include "StripState.h"
 #include <vector>
 
 /**
@@ -21,51 +23,11 @@ struct SlotState {
   int transposeOctaves = 0;
   int transposeSemitones = 0;
 
-  // DSP (EQ / Dynamics)
-  bool gateEnabled = false;
-  float gateThreshold = -60.0f;
-  bool eqEnabled = false;
-  bool eqCurveMode = false;
-  float hpfFreq = 20.0f;
-  float lowShelfGain = 0.0f;
-  float highShelfGain = 0.0f;
-  float eqVolGain = 0.0f;
-  float eqMasterGain = 0.0f;
-  float eqBands[10] = {};
-  bool compEnabled = false;
-  float compAmount = 0.0f;
-  bool chorusEnabled = false;
-  float chorusRate = 1.0f;
-  float chorusMix = 0.0f;
-  bool delayEnabled = false;
-  int delayMode = 0;
-  float delayTimeMs = 375.0f;
-  float delayFeedback = 0.35f;
-  float delayTone = 6500.0f;
-  float delayMix = 0.25f;
-  bool reverbEnabled = false;
-  float reverbSize = 0.5f;
-  float reverbMix = 0.0f;
-
-  // IR / convolution reverb
-  bool irEnabled = false;
-  float irMix = 0.3f;
-  juce::String irPath;
-
-  // Arpeggiator
-  bool arpEnabled = false;
-  float arpBpm = 120.0f;
-  int arpOctavesUp = 1;
-  int arpOctavesDown = 0;
-  float arpGate = 0.9f;
-  int arpPatternIdx = 0;
-
-  // Harmonizer
-  bool harmEnabled = false;
-  int harmOctavesUp = 1;
-  int harmOctavesDown = 0;
-  int harmAfricaMode = 0;
-  int harmTargetSlot = -1;
+  // DSP, Arpeggiator, Harmonizer (canonical unified structs)
+  Fanfare::ChannelStripSettings strip;
+  bool hasMusetteAndChannelMode = false;
+  Fanfare::ArpParams arp;
+  Fanfare::HarmParams harm;
 
   // Sampler
   bool samplerEnabled = false;

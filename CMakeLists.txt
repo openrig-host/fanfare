@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(Fanfare VERSION 1.7.30 LANGUAGES C CXX)
+project(Fanfare VERSION 1.7.40 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,9 +36,8 @@ if(WIN32)
     file(REMOVE "${CMAKE_CURRENT_BINARY_DIR}/Fanfare_artefacts/JuceLibraryCode/Fanfare_resources.rc")
 endif()
 
-# All compilation units (must match the Projucer source list).
-target_sources(Fanfare PRIVATE
-    Source/Main.cpp
+# Shared compilation units (must match the Projucer source list, minus Main.cpp).
+set(FANFARE_SHARED_SOURCES
     Source/MainComponent.cpp
     Source/MainComponent_Setup.cpp
     Source/MainComponent_Menus.cpp
@@ -72,15 +71,33 @@ target_sources(Fanfare PRIVATE
     Source/Synth/Fm/msfa/fm_core.cc
 )
 
-target_include_directories(Fanfare PRIVATE
+target_sources(Fanfare PRIVATE
+    Source/Main.cpp
+    ${FANFARE_SHARED_SOURCES}
+)
+
+juce_add_console_app(selftest
+    PRODUCT_NAME    "selftest"
+    COMPANY_NAME    "Fanfare"
+)
+
+target_sources(selftest PRIVATE
+    tools/selftest.cpp
+    ${FANFARE_SHARED_SOURCES}
+)
+
+set(FANFARE_INCLUDE_DIRS
     Source
     JuceLibraryCode
 )
 
+target_include_directories(Fanfare PRIVATE ${FANFARE_INCLUDE_DIRS})
+target_include_directories(selftest PRIVATE ${FANFARE_INCLUDE_DIRS})
+
 # Module configuration. Mirrors the Projucer AppConfig.h. JUCE 8+ bundles the
 # Steinberg ASIO headers under juce_audio_devices/native/asio, so enable ASIO
 # automatically on Windows when present.
-target_compile_definitions(Fanfare PUBLIC
+set(FANFARE_COMPILE_DEFS
     JUCE_PLUGINHOST_VST3=1
     JUCE_PLUGINHOST_VST=0
     JUCE_STRICT_REFCOUNTEDPOINTER=1
@@ -89,10 +106,13 @@ target_compile_definitions(Fanfare PUBLIC
 )
 
 if(WIN32 AND EXISTS "${JUCE_ROOT}/modules/juce_audio_devices/native/asio")
-    target_compile_definitions(Fanfare PUBLIC JUCE_ASIO=1)
+    list(APPEND FANFARE_COMPILE_DEFS JUCE_ASIO=1)
 endif()
 
-target_link_libraries(Fanfare PRIVATE
+target_compile_definitions(Fanfare PUBLIC ${FANFARE_COMPILE_DEFS})
+target_compile_definitions(selftest PRIVATE ${FANFARE_COMPILE_DEFS})
+
+set(FANFARE_LINK_LIBS
     juce::juce_audio_basics
     juce::juce_audio_devices
     juce::juce_audio_formats
@@ -108,21 +128,33 @@ target_link_libraries(Fanfare PRIVATE
     juce::juce_gui_extra
 )
 
+target_link_libraries(Fanfare PRIVATE ${FANFARE_LINK_LIBS})
+target_link_libraries(selftest PRIVATE ${FANFARE_LINK_LIBS})
+
 if(WIN32)
     set_property(TARGET Fanfare PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_property(TARGET selftest PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
     if(MSVC)
         target_compile_options(Fanfare PRIVATE $<$<CONFIG:Release>:/Zi>)
         target_link_options(Fanfare PRIVATE $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF>)
+        target_compile_options(selftest PRIVATE $<$<CONFIG:Release>:/Zi>)
+        target_link_options(selftest PRIVATE $<$<CONFIG:Release>:/DEBUG /OPT:REF /OPT:ICF>)
     endif()
 
     add_custom_command(TARGET Fanfare POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Fanfare>" "${CMAKE_CURRENT_SOURCE_DIR}/Fanfare.exe"
     )
+    add_custom_command(TARGET selftest POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:selftest>" "${CMAKE_CURRENT_BINARY_DIR}/selftest.exe"
+    )
 endif()
 
 if(APPLE)
     target_compile_definitions(Fanfare PUBLIC
+        JUCE_PLUGINHOST_AU=1
+    )
+    target_compile_definitions(selftest PRIVATE
         JUCE_PLUGINHOST_AU=1
     )
     set_target_properties(Fanfare PROPERTIES
@@ -132,5 +164,13 @@ if(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     )
+endif()
+
+enable_testing()
+add_test(NAME selftest_unit COMMAND $<TARGET_FILE:selftest> --unit)
+add_test(NAME selftest_offline_render COMMAND $<TARGET_FILE:selftest> --offline-render)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    add_test(NAME audio_path_scan COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/scan_audio_path.py")
 endif()
 

@@ -6,6 +6,7 @@
   ==============================================================================
 */
 
+#include "AppSettings.h"
 #include "FanfareSplashScreen.h"
 #include "MainComponent.h"
 #include "Version.h"
@@ -136,10 +137,8 @@ public:
 
       bool restoredSavedBounds = false;
       bool wantMaximised = false;
-      auto settingsFile =
-          FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-      if (settingsFile.existsAsFile()) {
-        auto v = juce::JSON::parse(settingsFile.loadFileAsString());
+      {
+        const auto v = Fanfare::AppSettings::getInstance().getSnapshot();
         if (v.isObject()) {
           if (v.hasProperty("windowMaximised"))
             wantMaximised = (bool)v["windowMaximised"];
@@ -236,31 +235,14 @@ public:
 
     void saveWindowBoundsToSettings() const {
 #if !(JUCE_IOS || JUCE_ANDROID)
-      auto f =
-          FanfareConstants::getAppDirectory().getChildFile("ui_settings.json");
-      juce::var v;
-      if (f.existsAsFile()) {
-        const auto raw = f.loadFileAsString().trim();
-        if (raw.isNotEmpty()) {
-          v = juce::JSON::parse(raw);
-          if (!v.isObject())
-            return; // Corrupt ui_settings.json — abort rather than wiping unrelated settings
-        }
-      }
-      if (!v.isObject())
-        v = juce::var(new juce::DynamicObject());
-      if (auto *obj = v.getDynamicObject()) {
+      Fanfare::AppSettings::getInstance().update([this](juce::DynamicObject &obj) {
         const bool maximised = isFullScreen();
-        obj->setProperty("windowMaximised", maximised);
+        obj.setProperty("windowMaximised", maximised);
         if (!maximised && !isMinimised() && getWidth() >= 960 &&
             getHeight() >= 560) {
-          obj->setProperty("windowBounds", getBounds().toString());
+          obj.setProperty("windowBounds", getBounds().toString());
         }
-      }
-      f.getParentDirectory().createDirectory();
-      juce::TemporaryFile tmp(f);
-      if (tmp.getFile().replaceWithText(juce::JSON::toString(v)))
-        tmp.overwriteTargetFileWithTemporary();
+      });
 #endif
     }
 

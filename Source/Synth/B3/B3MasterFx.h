@@ -182,8 +182,8 @@ public:
         delayHpL += (delayLpL - delayHpL) * delayHpCoef;
         delayHpR += (delayLpR - delayHpR) * delayHpCoef;
 
-        const float filtL = std::tanh(delayLpL - delayHpL);
-        const float filtR = std::tanh(delayLpR - delayHpR);
+        const float filtL = fastTanh(delayLpL - delayHpL);
+        const float filtR = fastTanh(delayLpR - delayHpR);
         const float monoIn = 0.5f * (l + r);
 
         delayBufL[(size_t)delayPos] = monoIn + filtR * 0.26f;
@@ -245,6 +245,14 @@ public:
   }
 
 private:
+  static inline float fastTanh(float z) noexcept {
+    if (z >= 5.0f) return 1.0f;
+    if (z <= -5.0f) return -1.0f;
+    const float z2 = z * z;
+    return z * (135135.0f + z2 * (17325.0f + z2 * (378.0f + z2))) /
+           (135135.0f + z2 * (62370.0f + z2 * (3150.0f + 28.0f * z2)));
+  }
+
   struct StereoBiquad {
     float b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
     float z1L = 0, z2L = 0, z1R = 0, z2R = 0;
