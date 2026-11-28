@@ -851,11 +851,13 @@ private:
                 else if ((bool)pv.getProperty("isMidiOut", false)) row.pluginName = "MIDI Output";
             }
         } else {
-            row.fileExists = row.pluginPath.isNotEmpty() && juce::File(row.pluginPath).existsAsFile();
+            const juce::String resolved = engine.resolvePluginPathForCurrentPlatform(row.pluginPath);
+            row.fileExists = FanfareConstants::pluginExistsOnDisk(resolved);
         }
 
         row.enabledInRig = (bool)pv.getProperty("enabled", true);
-        row.requiresMessageThread = pluginRequiresMessageThread(row.pluginPath);
+        row.requiresMessageThread = pluginRequiresMessageThread(
+            engine.resolvePluginPathForCurrentPlatform(row.pluginPath));
         row.sessionPoisoned = isPathPoisoned(row.pluginPath);
 
         juce::String stateB64 = pv.getProperty("state", "").toString();

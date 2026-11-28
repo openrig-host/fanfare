@@ -4,6 +4,7 @@ Debug/
 Release/
 out/
 build/
+build-mac/
 **/Builds/
 *.obj
 *.exe

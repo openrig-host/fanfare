@@ -323,16 +323,27 @@ void MainComponent::hideLoadingOverlay() { loadingOverlay.reset(); }
 void MainComponent::showScanResultsDialog(
     const FanfareEngine::ScanResults &results) {
   // Display plugin scanner results
+#if JUCE_MAC
+  juce::String msg = "Plugin Scan Complete!\n\n";
+  msg += "Total Available Plugins (VST3 / AU): " +
+         juce::String(engine.getNumAvailablePlugins()) + "\n";
+#else
   juce::String msg = "VST3 Scan Complete!\n\n";
   msg += "Total Available VST3s: " +
          juce::String(engine.getNumAvailablePlugins()) + "\n";
+#endif
   msg += "Newly Added: " + juce::String(results.newPlugins.size()) + "\n";
   if (!results.missingPlugins.empty()) {
     msg += "Removed (no longer on disk): " +
            juce::String(results.missingPlugins.size()) + "\n";
   }
+#if JUCE_MAC
+  msg += "\nNext step: Click any Strip Slot (1, 2, or 3) to load a VST3 or AU "
+         "instrument!";
+#else
   msg += "\nNext step: Click any Strip Slot (1, 2, or 3) to load a VST3 "
          "instrument!";
+#endif
 
   juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
                                          "Plugin Scan Results", msg);

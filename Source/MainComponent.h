@@ -224,11 +224,13 @@ private:
   juce::int64 suppressHotplugChangeBroadcastUntilMs = 0;
   int lastWinMmMidiInCount = -1;
   std::atomic<bool> usbTopologyDirty{true};
+  void startUsbDeviceWatcher();
+  void stopUsbDeviceWatcher();
 #ifdef _WIN32
   void *usbNotifyHwnd = nullptr;
   void *usbNotifyHandle = nullptr;
-  void startUsbDeviceWatcher();
-  void stopUsbDeviceWatcher();
+#elif JUCE_MAC
+  juce::MidiDeviceListConnection midiHotplugConnection;
 #endif
   juce::Component::SafePointer<juce::Component> activeAudioSelector;
 
@@ -424,16 +426,16 @@ private:
 
   juce::MidiMessageCollector midiCollector;
 
+  // CPU-0 shelter mask (constructor excludes the interrupt-dump core). Some
+  // ASIO drivers re-expand the process affinity during init, so the message
+  // thread re-applies it once a second - see reassertProcessShelter.
+  std::atomic<uintptr_t> processShelterMask{0};
+  std::atomic<uintptr_t> dspThreadAffinityMask{0};
+#ifdef _WIN32
   // Windows MMCSS audio thread priority: attempted once per audio thread
   // (device restarts create new threads — MMCSS may succeed on a retry even
   // if it failed for an earlier thread). Tracks the thread id, not a bool.
   DWORD mmcssThreadId = 0;
-  // CPU-0 shelter mask (constructor excludes the interrupt-dump core). Some
-  // ASIO drivers re-expand the process affinity during init, so the message
-  // thread re-applies it once a second - see reassertProcessShelter.
-  std::atomic<DWORD_PTR> processShelterMask{0};
-  std::atomic<DWORD_PTR> dspThreadAffinityMask{0};
-#ifdef _WIN32
   std::atomic<int> rtMmcssStatus{0};
   std::atomic<juce::uint32> rtMmcssErrorCode{0};
   HMODULE avrtModule = nullptr;

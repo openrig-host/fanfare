@@ -1,4 +1,15 @@
 cmake_minimum_required(VERSION 3.15)
+if(APPLE)
+    option(FANFARE_MAC_UNIVERSAL "Build Universal (arm64;x86_64) binary on macOS" ON)
+    if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET OR CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL "")
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS deployment version")
+    endif()
+    if(FANFARE_MAC_UNIVERSAL)
+        set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures" FORCE)
+    else()
+        set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "macOS architectures" FORCE)
+    endif()
+endif()
 project(Fanfare VERSION 1.7.40 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -22,11 +33,16 @@ add_subdirectory(${JUCE_ROOT} JUCE)
 
 # Standalone GUI application target.
 juce_add_gui_app(Fanfare
-    PRODUCT_NAME    "Fanfare"
-    COMPANY_NAME    "Fanfare"
-    BUNDLE_ID       "com.fanfare.app"
-    ICON_BIG        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Resources/Fanfare_Icon.png"
-    ICON_SMALL      "${CMAKE_CURRENT_SOURCE_DIR}/Source/Resources/Fanfare_Icon.png"
+    PRODUCT_NAME                      "Fanfare"
+    COMPANY_NAME                      "Fanfare"
+    BUNDLE_ID                         "com.fanfare.app"
+    ICON_BIG                          "${CMAKE_CURRENT_SOURCE_DIR}/Source/Resources/Fanfare_Icon.png"
+    ICON_SMALL                        "${CMAKE_CURRENT_SOURCE_DIR}/Source/Resources/Fanfare_Icon.png"
+    MICROPHONE_PERMISSION_ENABLED     TRUE
+    MICROPHONE_PERMISSION_TEXT        "Fanfare uses audio inputs for live instruments and monitor routing."
+    LOCAL_NETWORK_PERMISSION_ENABLED  TRUE
+    LOCAL_NETWORK_PERMISSION_TEXT     "Fanfare hosts a local Stage HUD web server for tablet remote control."
+    PLIST_TO_MERGE                    "<plist><dict><key>NSHighResolutionCapable</key><true/></dict></plist>"
 )
 
 # The juceaide-generated resources.rc (embedded VERSIONINFO) only re-fires on
@@ -88,8 +104,10 @@ target_sources(selftest PRIVATE
 
 set(FANFARE_INCLUDE_DIRS
     Source
-    JuceLibraryCode
 )
+if(WIN32)
+    list(APPEND FANFARE_INCLUDE_DIRS JuceLibraryCode)
+endif()
 
 target_include_directories(Fanfare PRIVATE ${FANFARE_INCLUDE_DIRS})
 target_include_directories(selftest PRIVATE ${FANFARE_INCLUDE_DIRS})
@@ -103,6 +121,7 @@ set(FANFARE_COMPILE_DEFS
     JUCE_STRICT_REFCOUNTEDPOINTER=1
     JUCE_STANDALONE_APPLICATION=1
     JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
+    DONT_SET_USING_JUCE_NAMESPACE=1
 )
 
 if(WIN32 AND EXISTS "${JUCE_ROOT}/modules/juce_audio_devices/native/asio")
@@ -127,6 +146,15 @@ set(FANFARE_LINK_LIBS
     juce::juce_gui_basics
     juce::juce_gui_extra
 )
+
+if(NOT WIN32)
+    find_package(SQLite3 REQUIRED)
+    if(TARGET SQLite3::SQLite3)
+        list(APPEND FANFARE_LINK_LIBS SQLite3::SQLite3)
+    else()
+        list(APPEND FANFARE_LINK_LIBS SQLite::SQLite3)
+    endif()
+endif()
 
 target_link_libraries(Fanfare PRIVATE ${FANFARE_LINK_LIBS})
 target_link_libraries(selftest PRIVATE ${FANFARE_LINK_LIBS})
@@ -166,6 +194,11 @@ if(APPLE)
     )
 endif()
 
+if(NOT WIN32)
+    juce_generate_juce_header(Fanfare)
+    juce_generate_juce_header(selftest)
+endif()
+
 enable_testing()
 add_test(NAME selftest_unit COMMAND $<TARGET_FILE:selftest> --unit)
 add_test(NAME selftest_offline_render COMMAND $<TARGET_FILE:selftest> --offline-render)
@@ -173,4 +206,3 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_FOUND)
     add_test(NAME audio_path_scan COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/scan_audio_path.py")
 endif()
-

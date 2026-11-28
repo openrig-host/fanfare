@@ -15,6 +15,9 @@ FanfareEngine::FanfareEngine()
 #if JUCE_PLUGINHOST_VST3
     formatManager.addFormat(std::make_unique<juce::VST3PluginFormat>());
 #endif
+#if JUCE_PLUGINHOST_AU
+    formatManager.addFormat(std::make_unique<juce::AudioUnitPluginFormat>());
+#endif
 
     std::fill(std::begin(stressTestLastNote), std::end(stressTestLastNote), -1);
 
@@ -147,7 +150,7 @@ FanfareEngine::~FanfareEngine()
 
   
 
-void FanfareEngine::setDspWorkerAffinityMask(int workerIdx, DWORD_PTR mask) noexcept 
+void FanfareEngine::setDspWorkerAffinityMask(int workerIdx, uintptr_t mask) noexcept 
 {
     if (workerIdx >= 0 && workerIdx < kMaxDspHelpers) {
       dspWorkerAffinityMasks[workerIdx].store(mask, std::memory_order_release);
@@ -508,32 +511,124 @@ void FanfareEngine::prepareToPlay(int samplesPerBlockExpected, double sampleRate
 
   
 
-void FanfareEngine::scanForPlugins() 
+namespace {
+void collectVst3Bundles(
+    const juce::File &dir,
+    std::vector<FanfareEngine::PluginInfo> &out,
+    const std::shared_ptr<std::atomic<bool>> &alive = nullptr) {
+  if (!dir.exists() || !dir.isDirectory())
+    return;
+  for (const auto &entry : juce::RangedDirectoryIterator(
+           dir, false, "*", juce::File::findFilesAndDirectories)) {
+    if (alive && !alive->load())
+      return;
+    const juce::File f = entry.getFile();
+    const juce::String name = f.getFileName();
+    if (name.endsWithIgnoreCase(".vst3")) {
+      out.push_back({f.getFileNameWithoutExtension(), f.getFullPathName()});
+    } else if (f.isDirectory() && !name.endsWithIgnoreCase(".component") &&
+               !name.endsWithIgnoreCase(".app")) {
+      collectVst3Bundles(f, out, alive);
+    }
+  }
+}
+
+void appendUniquePluginInfo(std::vector<FanfareEngine::PluginInfo> &dst,
+                            const FanfareEngine::PluginInfo &info) {
+  for (const auto &existing : dst) {
+    if (existing.path == info.path)
+      return;
+  }
+  dst.push_back(info);
+}
+
+juce::String extractVst3LeafName(const juce::String &rawPath) {
+  juce::String p = rawPath.trim();
+  if (p.isEmpty())
+    return {};
+  p = p.replaceCharacter('\\', '/');
+  juce::StringArray parts;
+  parts.addTokens(p, "/", "");
+  // Unwrap inner bundle paths like Foo.vst3/Contents/x86_64-win/Foo.vst3
+  for (const auto &seg : parts) {
+    if (seg.endsWithIgnoreCase(".vst3"))
+      return seg;
+  }
+  return parts.isEmpty() ? juce::String{} : parts[parts.size() - 1];
+}
+
+juce::String normalizeVst3StemForMatch(const juce::String &leafName) {
+  juce::String stem = leafName.trim();
+  if (stem.endsWithIgnoreCase(".vst3"))
+    stem = stem.dropLastCharacters(5);
+  static const char *const kSuffixes[] = {
+      "(VST3 64bit)", "(VST3 32bit)", "(VST3)", "(64bit)", "(64-bit)", "_x64", " x64"};
+  for (const char *sfx : kSuffixes) {
+    const int idx = stem.indexOfIgnoreCase(sfx);
+    if (idx >= 0)
+      stem = stem.substring(0, idx) + stem.substring(idx + (int)std::strlen(sfx));
+  }
+  return stem.trim();
+}
+} // namespace
+
+void FanfareEngine::scanForPlugins()
 {
-    juce::File vstFolder = FanfareConstants::getVst3Directory();
-    if (!vstFolder.exists() || !vstFolder.isDirectory()) {
+    const auto vstDirs = FanfareConstants::getVst3SearchDirectories();
+    bool hasAnyVstDir = false;
+    for (const auto &d : vstDirs) {
+      if (d.exists() && d.isDirectory()) {
+        hasAnyVstDir = true;
+        break;
+      }
+    }
+#if !JUCE_PLUGINHOST_AU
+    if (!hasAnyVstDir) {
       juce::AlertWindow::showMessageBoxAsync(
           juce::MessageBoxIconType::WarningIcon, "Scan Error",
           "VST3 folder not found!");
       return;
     }
+#else
+    juce::ignoreUnused(hasAnyVstDir);
+#endif
 
     // Run in background to avoid UI freeze
     auto alive = engineAlive;
-    std::thread([this, alive, vstFolder]() {
+    std::thread([this, alive, vstDirs]() {
       ScanResults results;
       std::vector<PluginInfo> foundPlugins;
 
-      // Recursive scan for .vst3 files using modern RangedDirectoryIterator
-      for (const auto &entry : juce::RangedDirectoryIterator(
-               vstFolder, true, "*.vst3", juce::File::findFiles)) {
+      for (const auto &vstFolder : vstDirs) {
         if (!alive->load()) return;
-        juce::File f = entry.getFile();
-        PluginInfo info;
-        info.name = f.getFileNameWithoutExtension();
-        info.path = f.getFullPathName();
-        foundPlugins.push_back(info);
+        std::vector<PluginInfo> dirFound;
+        collectVst3Bundles(vstFolder, dirFound, alive);
+        for (const auto &p : dirFound)
+          appendUniquePluginInfo(foundPlugins, p);
       }
+
+#if JUCE_PLUGINHOST_AU
+      if (alive->load()) {
+        juce::AudioPluginFormat *auFormat = nullptr;
+        for (int i = 0; i < formatManager.getNumFormats(); ++i) {
+          if (formatManager.getFormat(i)->getName() == "AudioUnit") {
+            auFormat = formatManager.getFormat(i);
+            break;
+          }
+        }
+        if (auFormat != nullptr) {
+          const juce::StringArray auIds =
+              auFormat->searchPathsForPlugins({}, true, false);
+          for (const auto &id : auIds) {
+            if (!alive->load()) return;
+            juce::String auName = auFormat->getNameOfPluginFromIdentifier(id);
+            if (auName.isEmpty())
+              auName = id;
+            appendUniquePluginInfo(foundPlugins, {auName + " (AU)", id});
+          }
+        }
+      }
+#endif
 
       if (!alive->load()) return;
 
@@ -564,7 +659,7 @@ void FanfareEngine::scanForPlugins()
             }
           }
           // Also consider missing if file no longer exists
-          if (!exists || !juce::File(existing.path).exists()) {
+          if (!exists || !FanfareConstants::pluginExistsOnDisk(existing.path)) {
             results.missingPlugins.push_back(existing);
           }
         }
@@ -677,9 +772,35 @@ void FanfareEngine::loadPluginList()
     availablePlugins.erase(
         std::remove_if(availablePlugins.begin(), availablePlugins.end(),
                        [](const PluginInfo &p) {
-                         return !juce::File(p.path).exists();
+                         return !FanfareConstants::pluginExistsOnDisk(p.path);
                        }),
         availablePlugins.end());
+
+#if JUCE_MAC
+    if (availablePlugins.empty()) {
+      for (const auto &vstFolder : FanfareConstants::getVst3SearchDirectories()) {
+        std::vector<PluginInfo> dirFound;
+        collectVst3Bundles(vstFolder, dirFound);
+        for (const auto &p : dirFound)
+          appendUniquePluginInfo(availablePlugins, p);
+      }
+#if JUCE_PLUGINHOST_AU
+      for (int i = 0; i < formatManager.getNumFormats(); ++i) {
+        auto *fmt = formatManager.getFormat(i);
+        if (fmt != nullptr && fmt->getName() == "AudioUnit") {
+          const juce::StringArray auIds = fmt->searchPathsForPlugins({}, true, false);
+          for (const auto &id : auIds) {
+            juce::String auName = fmt->getNameOfPluginFromIdentifier(id);
+            if (auName.isEmpty())
+              auName = id;
+            appendUniquePluginInfo(availablePlugins, {auName + " (AU)", id});
+          }
+          break;
+        }
+      }
+#endif
+    }
+#endif
 
     std::sort(availablePlugins.begin(), availablePlugins.end(),
               [](const PluginInfo &a, const PluginInfo &b) {
@@ -2032,9 +2153,20 @@ juce::var FanfareEngine::getPluginVar(juce::AudioPluginInstance *plugin)
 
 juce::String FanfareEngine::normalizePath(const juce::String &path) 
 {
-    if (path.trim().isEmpty())
+    const juce::String trimmed = path.trim();
+    if (trimmed.isEmpty())
       return "";
-    juce::String p = juce::File(path).getFullPathName().trim().toLowerCase();
+    if (FanfareConstants::isAudioUnitIdentifier(trimmed))
+      return trimmed;
+#if !JUCE_WINDOWS
+    if (trimmed.containsChar('\\') || (trimmed.length() >= 2 && trimmed[1] == ':')) {
+      juce::String p = trimmed.toLowerCase().replaceCharacter('/', '\\');
+      while (p.endsWithChar('\\'))
+        p = p.dropLastCharacters(1);
+      return p;
+    }
+#endif
+    juce::String p = juce::File(trimmed).getFullPathName().trim().toLowerCase();
     p = p.replaceCharacter('/', '\\');
     while (p.endsWithChar('\\'))
       p = p.dropLastCharacters(1);
@@ -2073,7 +2205,7 @@ juce::String FanfareEngine::getMasterPluginPath(bool isFoh, int chainIndex) cons
 void FanfareEngine::loadPluginFromVarSmart(int slotIdx, int chainIdx, const juce::var &vt,
                               bool isFohOrChannel) 
 {
-    juce::String newPath = vt.getProperty("path", "").toString();
+    juce::String newPath = resolvePluginPathForCurrentPlatform(vt.getProperty("path", "").toString());
     juce::String newStateBase64 = vt.getProperty("state", "").toString();
 
     if (newPath.isEmpty())
@@ -2169,7 +2301,7 @@ void FanfareEngine::loadPluginFromVarSmart(int slotIdx, int chainIdx, const juce
 bool FanfareEngine::loadPluginFromVar(int slotIdx, int chainIdx, const juce::var &vt,
                          bool isFohOrChannel) 
 {
-    juce::String path = vt.getProperty("path", "").toString();
+    juce::String path = resolvePluginPathForCurrentPlatform(vt.getProperty("path", "").toString());
     if (path.isEmpty())
       return false;
 
@@ -2340,6 +2472,118 @@ juce::AudioPluginFormat *FanfareEngine::findVst3Format()
     }
     return nullptr;
   }
+
+juce::AudioPluginFormat *FanfareEngine::findFormatForPath(const juce::String &path)
+{
+    if (FanfareConstants::isAudioUnitIdentifier(path) || path.endsWithIgnoreCase(".component")) {
+      for (int i = 0; i < formatManager.getNumFormats(); ++i) {
+        if (formatManager.getFormat(i)->getName() == "AudioUnit")
+          return formatManager.getFormat(i);
+      }
+    }
+    if (path.endsWithIgnoreCase(".vst3")) {
+      if (auto *vst3 = findVst3Format())
+        return vst3;
+    }
+    for (int i = 0; i < formatManager.getNumFormats(); ++i) {
+      if (formatManager.getFormat(i)->fileMightContainThisPluginType(path))
+        return formatManager.getFormat(i);
+    }
+    return findVst3Format();
+}
+
+juce::String FanfareEngine::resolveWindowsVst3PathFromList(
+    const juce::String &rawPath,
+    const std::vector<PluginInfo> &knownPlugins,
+    const juce::Array<juce::File> &vst3SearchDirs)
+{
+    const juce::String trimmed = rawPath.trim();
+    if (trimmed.isEmpty() || FanfareConstants::pluginExistsOnDisk(trimmed))
+      return rawPath;
+    if (!trimmed.containsIgnoreCase(".vst3"))
+      return rawPath;
+
+    const juce::String leaf = extractVst3LeafName(trimmed);
+    if (!leaf.endsWithIgnoreCase(".vst3"))
+      return rawPath;
+
+    std::vector<juce::String> candidates;
+    std::set<juce::String> seenLower;
+    auto addCandidate = [&](const juce::String &p) {
+      const juce::String pt = p.trim();
+      if (pt.isEmpty() || FanfareConstants::isAudioUnitIdentifier(pt))
+        return;
+      if (!pt.containsIgnoreCase(".vst3"))
+        return;
+      const juce::String key = pt.toLowerCase();
+      if (seenLower.insert(key).second)
+        candidates.push_back(pt);
+    };
+
+    for (const auto &kp : knownPlugins)
+      addCandidate(kp.path);
+    for (const auto &dir : vst3SearchDirs) {
+      std::vector<PluginInfo> dirFound;
+      collectVst3Bundles(dir, dirFound);
+      for (const auto &p : dirFound)
+        addCandidate(p.path);
+    }
+
+    juce::String exactMatch;
+    int exactCount = 0;
+    for (const auto &cand : candidates) {
+      if (extractVst3LeafName(cand).equalsIgnoreCase(leaf)) {
+        exactMatch = cand;
+        ++exactCount;
+      }
+    }
+    if (exactCount == 1)
+      return exactMatch;
+    if (exactCount > 1)
+      return rawPath;
+
+    const juce::String wantedStem = normalizeVst3StemForMatch(leaf);
+    if (wantedStem.isEmpty())
+      return rawPath;
+    juce::String stemMatch;
+    int stemCount = 0;
+    for (const auto &cand : candidates) {
+      if (normalizeVst3StemForMatch(extractVst3LeafName(cand)).equalsIgnoreCase(wantedStem)) {
+        stemMatch = cand;
+        ++stemCount;
+      }
+    }
+    if (stemCount == 1)
+      return stemMatch;
+    return rawPath;
+}
+
+juce::String FanfareEngine::resolvePluginPathForCurrentPlatform(const juce::String &rawPath) const
+{
+    const juce::String trimmed = rawPath.trim();
+    if (trimmed.isEmpty() || FanfareConstants::pluginExistsOnDisk(trimmed))
+      return rawPath;
+
+    std::vector<PluginInfo> snapshot;
+    {
+      juce::ScopedLock sl(lock);
+      snapshot = availablePlugins;
+    }
+    std::vector<PluginInfo> installed;
+    installed.reserve(snapshot.size());
+    for (const auto &p : snapshot) {
+      if (FanfareConstants::pluginExistsOnDisk(p.path))
+        installed.push_back(p);
+    }
+
+    const juce::String remapped = resolveWindowsVst3PathFromList(
+        trimmed, installed, FanfareConstants::getVst3SearchDirectories());
+    if (remapped != trimmed && FanfareConstants::pluginExistsOnDisk(remapped)) {
+      LOG_INFO("Remapped Windows VST3 '" + trimmed + "' -> '" + remapped + "'");
+      return remapped;
+    }
+    return rawPath;
+}
 
   
 
@@ -2684,10 +2928,11 @@ void FanfareEngine::runDspWorkerLoop(int workerIdx)
   // path has been proving this all along). On timeout the build is abandoned:
   // the half-built instance lives on the detached worker thread and the
   // caller gets null — the rig survives.
-bool FanfareEngine::findPrimaryPluginDescription(const juce::String &path,
+bool FanfareEngine::findPrimaryPluginDescription(const juce::String &rawPath,
                                                  juce::PluginDescription &outDesc,
                                                  juce::String &outError) 
 {
+    const juce::String path = resolvePluginPathForCurrentPlatform(rawPath);
     const juce::String normKey = normalizePath(path);
     {
       juce::ScopedLock cacheSl(pluginDescCacheLock);
@@ -2698,9 +2943,9 @@ bool FanfareEngine::findPrimaryPluginDescription(const juce::String &path,
       }
     }
 
-    juce::AudioPluginFormat *vst3Format = findVst3Format();
-    if (!vst3Format) {
-      outError = "VST3 format not available";
+    juce::AudioPluginFormat *pluginFormat = findFormatForPath(path);
+    if (!pluginFormat) {
+      outError = "Plugin format not available";
       return false;
     }
 
@@ -2709,7 +2954,7 @@ bool FanfareEngine::findPrimaryPluginDescription(const juce::String &path,
       std::unique_lock<std::timed_mutex> fmLock(formatManagerMutex,
                                                 std::defer_lock);
       if (!fmLock.try_lock_for(std::chrono::seconds(45))) {
-        outError = "VST3 format manager busy";
+        outError = "Plugin format manager busy";
         return false;
       }
       {
@@ -2720,7 +2965,7 @@ bool FanfareEngine::findPrimaryPluginDescription(const juce::String &path,
           return true;
         }
       }
-      vst3Format->findAllTypesForFile(descriptions, path);
+      pluginFormat->findAllTypesForFile(descriptions, path);
     }
 
     if (descriptions.isEmpty()) {
@@ -2861,11 +3106,11 @@ bool FanfareEngine::findPrimaryPluginDescription(const juce::String &path,
 
   std::unique_ptr<juce::AudioPluginInstance>
   FanfareEngine::createPreparedInteractiveInstance(
-      const juce::String &pluginPath, juce::PluginDescription &outDesc,
+      const juce::String &rawPluginPath, juce::PluginDescription &outDesc,
       juce::String &outError) 
 {
-    juce::File pluginFile(pluginPath);
-    if (!pluginFile.exists()) {
+    const juce::String pluginPath = resolvePluginPathForCurrentPlatform(rawPluginPath);
+    if (!FanfareConstants::pluginExistsOnDisk(pluginPath)) {
       outError = "Plugin file not found: " + pluginPath;
       return nullptr;
     }
@@ -2873,7 +3118,7 @@ bool FanfareEngine::findPrimaryPluginDescription(const juce::String &path,
     const juce::String normPath = normalizePath(pluginPath);
     if (Fanfare::isPathPoisoned(normPath)) {
       outError = "Plugin quarantined after prior fault: " +
-                 pluginFile.getFileName();
+                 juce::File(pluginPath).getFileName();
       return nullptr;
     }
 
@@ -3206,7 +3451,7 @@ bool FanfareEngine::findPrimaryPluginDescription(const juce::String &path,
                           std::unique_ptr<juce::AudioPluginInstance> &out,
                           juce::String &error) 
 {
-    juce::String path = vt.getProperty("path", "").toString();
+    juce::String path = resolvePluginPathForCurrentPlatform(vt.getProperty("path", "").toString());
     juce::String stateBase64 = vt.getProperty("state", "").toString();
     if (path.isEmpty()) {
       error = "empty plugin path";

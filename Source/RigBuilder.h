@@ -393,7 +393,9 @@ private:
             return true;
         }
 
-        juce::String newPath = engine.normalizePath(pv.getProperty("path", "").toString());
+        const juce::String resolvedPath =
+            engine.resolvePluginPathForCurrentPlatform(pv.getProperty("path", "").toString());
+        juce::String newPath = engine.normalizePath(resolvedPath);
         if (newPath.isEmpty())
             return true; // empty slot, nothing to build
 
@@ -605,7 +607,7 @@ private:
                 logToFile("TRACE: buildOne message-thread build/retry failed for " + label + ": " + ctx->err);
                 r.ok = false;
                 r.error = label + ": " + ctx->err;
-                const bool missingFile = !juce::File(pv.getProperty("path", "").toString()).exists();
+                const bool missingFile = !FanfareConstants::pluginExistsOnDisk(resolvedPath);
                 r.failedEntries.push_back({key, pv, missingFile ? juce::String("not installed") : ctx->err});
                 return false;
             }
@@ -634,7 +636,9 @@ private:
             return true;
         }
 
-        juce::String newPath = engine.normalizePath(pv.getProperty("path", "").toString());
+        const juce::String resolvedPath =
+            engine.resolvePluginPathForCurrentPlatform(pv.getProperty("path", "").toString());
+        juce::String newPath = engine.normalizePath(resolvedPath);
         if (newPath.isEmpty())
             return true;
 
@@ -836,7 +840,8 @@ private:
                 logToFile("TRACE: buildMaster message-thread build/retry failed for " + label + ": " + ctx->err);
                 r.ok = false;
                 r.error = label + ": " + ctx->err;
-                r.failedEntries.push_back({key, pv, ctx->err.isEmpty() ? "load failed" : ctx->err});
+                const bool missingFile = !FanfareConstants::pluginExistsOnDisk(resolvedPath);
+                r.failedEntries.push_back({key, pv, missingFile ? juce::String("not installed") : (ctx->err.isEmpty() ? juce::String("load failed") : ctx->err)});
                 return false;
             }
             inst = std::move(ctx->inst);

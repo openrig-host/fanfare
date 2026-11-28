@@ -1,11 +1,3 @@
-/*
-  ==============================================================================
-
-    This file contains the basic startup code for a JUCE application.
-
-  ==============================================================================
-*/
-
 #include "AppSettings.h"
 #include "FanfareSplashScreen.h"
 #include "MainComponent.h"
@@ -16,35 +8,30 @@
 #define NOMINMAX
 #include <Windows.h>
 #pragma comment(lib, "winmm.lib")
+#else
+#include <csignal>
 #endif
 
-//==============================================================================
 class FanfareApplication : public juce::JUCEApplication {
 public:
-  //==============================================================================
   FanfareApplication() {}
 
-  const juce::String getApplicationName() override {
-    return "Fanfare";
-  }
-  const juce::String getApplicationVersion() override {
-    return OPENRIG_VERSION_STRING;
-  }
+  const juce::String getApplicationName() override { return "Fanfare"; }
+  const juce::String getApplicationVersion() override { return OPENRIG_VERSION_STRING; }
   bool moreThanOneInstanceAllowed() override { return true; }
 
-  //==============================================================================
   void initialise(const juce::String &commandLine) override {
     juce::ignoreUnused(commandLine);
 
 #ifdef _WIN32
-    // Set Windows multimedia timer to 1ms resolution for accurate audio timing
     timeBeginPeriod(1);
+#else
+    // Prevent SIGPIPE from killing the host if a Tablet HUD client disconnects mid-frame
+    std::signal(SIGPIPE, SIG_IGN);
 #endif
 
     juce::SystemStats::setApplicationCrashHandler(FanfareLog::crashHandler);
 #ifdef _WIN32
-    // Must be called AFTER setApplicationCrashHandler so that fanfareUnhandledExceptionFilter
-    // is the active Win32 top-level exception filter (preserving background thread isolation).
     FanfareLog::setupCrashHandlers();
 #endif
 
@@ -74,37 +61,18 @@ public:
     LOG_INFO("Fanfare shutting down cleanly. Flushing log and terminating process...");
     FanfareLog::flushLog();
     splashScreen = nullptr;
-    mainWindow = nullptr; // (deletes our window)
+    mainWindow = nullptr;
     SaveHistory::waitForPendingSnapshots(2500);
 
 #ifdef _WIN32
-    // Restore default Windows timer resolution
     timeEndPeriod(1);
-    // Force terminate process to prevent zombie VST threads from locking ASIO/MIDI drivers
     TerminateProcess(GetCurrentProcess(), 0);
 #endif
   }
 
-  //==============================================================================
-  void systemRequestedQuit() override {
-    // This is called when the app is being asked to quit: you can ignore this
-    // request and let the app carry on running, or call quit() to allow the app
-    // to close.
-    quit();
-  }
+  void systemRequestedQuit() override { quit(); }
+  void anotherInstanceStarted(const juce::String &commandLine) override { juce::ignoreUnused(commandLine); }
 
-  void anotherInstanceStarted(const juce::String &commandLine) override {
-    juce::ignoreUnused(commandLine);
-    // When another instance of the app is launched while this one is running,
-    // this method is invoked, and the commandLine parameter tells you what
-    // the other instance's command-line arguments were.
-  }
-
-  //==============================================================================
-  /*
-      This class implements the desktop window that contains an instance of
-      our MainComponent class.
-  */
   class MainWindow : public juce::DocumentWindow {
   public:
     MainWindow(juce::String name)
@@ -128,8 +96,6 @@ public:
       const juce::Rectangle<int> workArea =
           display != nullptr ? display->userArea : getParentMonitorArea();
 
-      // Reserve vertical headroom for the native OS title bar + frame border
-      // before the peer exists so AdjustWindowRectEx never pushes top < 0.
       const int maxClientW = juce::jmax(960, workArea.getWidth() - 16);
       const int maxClientH = juce::jmax(560, workArea.getHeight() - 48);
       int initW = juce::jmin(getWidth(), maxClientW);
@@ -156,7 +122,6 @@ public:
 
       if (!restoredSavedBounds) {
         centreWithSize(initW, initH);
-        // Shift client area down slightly to account for native top title bar
         setTopLeftPosition(getX(),
                            juce::jmax(workArea.getY() + 34, getY() + 14));
       }
@@ -184,9 +149,6 @@ public:
 
     void closeButtonPressed() override {
       saveWindowBoundsToSettings();
-      // This is called when the user tries to close this window. Here, we'll
-      // just ask the app to quit when this happens, but you can change this to
-      // do whatever you need.
       JUCEApplication::getInstance()->systemRequestedQuit();
     }
 
@@ -207,20 +169,12 @@ public:
             int winX = wr.left;
             int winY = wr.top;
 
-            if (winW > workW)
-              winW = workW;
-            if (winH > workH)
-              winH = workH;
-
-            if (winX + winW > mi.rcWork.right)
-              winX = mi.rcWork.right - winW;
-            if (winX < mi.rcWork.left)
-              winX = mi.rcWork.left;
-
-            if (winY + winH > mi.rcWork.bottom)
-              winY = mi.rcWork.bottom - winH;
-            if (winY < mi.rcWork.top)
-              winY = mi.rcWork.top;
+            if (winW > workW) winW = workW;
+            if (winH > workH) winH = workH;
+            if (winX + winW > mi.rcWork.right) winX = mi.rcWork.right - winW;
+            if (winX < mi.rcWork.left) winX = mi.rcWork.left;
+            if (winY + winH > mi.rcWork.bottom) winY = mi.rcWork.bottom - winH;
+            if (winY < mi.rcWork.top) winY = mi.rcWork.top;
 
             if (winX != wr.left || winY != wr.top ||
                 winW != (wr.right - wr.left) || winH != (wr.bottom - wr.top)) {
@@ -246,13 +200,6 @@ public:
 #endif
     }
 
-    /* Note: Be careful if you override any DocumentWindow methods - the base
-       class uses a lot of them, so by overriding you might break its
-       functionality. It's best to do all your work in your content component
-       instead, but if you really have to override any DocumentWindow methods,
-       make sure your subclass also calls the superclass's method.
-    */
-
   private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainWindow)
   };
@@ -262,38 +209,18 @@ private:
   std::unique_ptr<MainWindow> mainWindow;
 };
 
-//==============================================================================
-// Custom entry point with SEH-protected message dispatch.
-//
-// Plugins like Kontakt and Super 8 create internal hidden windows during
-// initialization. When the JUCE message pump dispatches Windows messages to
-// these windows, the plugin's window procedure can access-violate (null
-// pointer). Standard C++ try/catch cannot catch access violations (0xC0000005)
-// because they are SEH (structured) exceptions, not C++ exceptions.
-//
-// By wrapping runDispatchLoopUntil() in __try/__except, the access violation
-// is caught and the stack unwound to a safe point. The app survives; the
-// plugin may be unstable but the host keeps running. This is critical for
-// live performance reliability.
-
 #ifdef _WIN32
-// Must be a separate function: MSVC C2712 forbids __try in functions that
-// contain C++ objects with destructors.
 static void runDispatchLoopSEH() {
   __try {
     juce::MessageManager::getInstance()->runDispatchLoop();
   } __except (EXCEPTION_EXECUTE_HANDLER) {
-    // Plugin access violation in message dispatch — swallowed.
   }
 }
-#endif
 
-// Factory for the application instance.
 static juce::JUCEApplicationBase *juce_CreateApplication() {
   return new FanfareApplication();
 }
 
-#ifdef _WIN32
 extern "C" int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
   juce::JUCEApplicationBase::createInstance = &juce_CreateApplication;
 
@@ -304,8 +231,6 @@ extern "C" int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpCmdLine, int) {
 
   app->initialise(juce::String(lpCmdLine));
 
-  // SEH-protected message loop: each plugin window crash is caught and
-  // contained. The loop continues processing subsequent messages.
   while (!juce::MessageManager::getInstance()->hasStopMessageBeenSent())
     runDispatchLoopSEH();
 

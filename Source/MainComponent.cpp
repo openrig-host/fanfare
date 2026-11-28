@@ -213,9 +213,7 @@ MainComponent::MainComponent() {
   startTimer(FanfareConstants::kTimerIntervalMs);
 
   // Setup MIDI inputs (wildcard listener + event-driven hotplug auto-enable)
-#ifdef _WIN32
   startUsbDeviceWatcher();
-#endif
   thermalMonitor.startMonitoring();
   {
     juce::Component::SafePointer<MainComponent> safeThis(this);
@@ -317,9 +315,7 @@ MainComponent::~MainComponent() {
   Fanfare::SetlistManager::getInstance().removeChangeListener(this);
   ThemeManager::getInstance().removeChangeListener(this);
   saveAudioSettings();
-#ifdef _WIN32
   stopUsbDeviceWatcher();
-#endif
   for (const auto &id : activeMidiInputIds)
     deviceManager.setMidiInputDeviceEnabled(id, false);
   deviceManager.removeMidiInputDeviceCallback({}, this);
@@ -775,6 +771,15 @@ void MainComponent::stopUsbDeviceWatcher() {
     usbNotifyHwnd = nullptr;
   }
 }
+#elif JUCE_MAC
+void MainComponent::startUsbDeviceWatcher() {
+  midiHotplugConnection = juce::MidiDeviceListConnection::make([this]() {
+    usbTopologyDirty.store(true, std::memory_order_release);
+  });
+}
+void MainComponent::stopUsbDeviceWatcher() {
+  midiHotplugConnection = {};
+}
 #else
 void MainComponent::startUsbDeviceWatcher() {}
 void MainComponent::stopUsbDeviceWatcher() {}
@@ -911,6 +916,8 @@ void MainComponent::checkAndRecoverAudioDevice() {
   const bool probeWinMm = nowCheckMs < midiProbeUntilMs;
   const int winMmCount = probeWinMm ? (int)::midiInGetNumDevs() : lastWinMmMidiInCount;
   const bool midiCountChanged = (winMmCount != lastWinMmMidiInCount);
+#elif JUCE_MAC
+  const bool midiCountChanged = topologyChanged;
 #else
   const bool midiCountChanged = false;
 #endif
@@ -1080,7 +1087,11 @@ void MainComponent::loadAudioSettings() {
     if (xml != nullptr) {
       if (xml->hasTagName("DEVICESETUP")) {
         deduplicateMidiInputsXml(*xml, {}, midiOpenFailCounts);
+#if JUCE_MAC
+        desiredAudioDeviceType = xml->getStringAttribute("deviceType", "CoreAudio");
+#else
         desiredAudioDeviceType = xml->getStringAttribute("deviceType", "ASIO");
+#endif
         juce::String devName = xml->getStringAttribute("audioDeviceName");
         desiredAudioSetup.outputDeviceName =
             devName.isNotEmpty()

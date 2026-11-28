@@ -15,23 +15,6 @@
 namespace FanfareConstants {
 
 // ===== BISECT FLAGS (Oct 12, T14 Gen 3 storm investigation) =====
-// Naked Fanfare (all off + MP3 off) runs clean where the fully-hardened
-// build stormed. Each mechanism is individually switchable so test builds
-// can isolate the guilty one. Build scripts override these via
-// FanfareBisectFlags.h (generated per build); defaults are all OFF.
-//
-// VERDICT (Oct 12, cold-tested): FANFARE_MMCSS was the storm trigger — and
-// the lesson is: MMCSS "Pro Audio" is a priority BAND reserved for THE one
-// render thread. Enrolling the engine's DSP worker threads into it made
-// workers equal to the ASIO callback, erasing the ordering that protects
-// audio; the callback then lost to its own workers during sample streaming.
-// In an ASIO host the driver registers its own callback thread anyway
-// (AvSetMmThreadCharacteristics returns 1552 = "already joined"). If MMCSS
-// is ever revisited: render thread only, AvRevert on teardown, workers stay
-// at normal priority — or better, don't: a host needs none of it.
-// Shipped defaults (v1.1.3): full hardening MINUS MMCSS — see the verdict
-// note above. These values ARE the release configuration; source builds
-// match the published binary.
 #ifndef FANFARE_PRIORITY_ELEVATION
 #define FANFARE_PRIORITY_ELEVATION 1
 #endif
@@ -63,8 +46,7 @@ constexpr int kNumFxSlotsPerBus = 3;
 constexpr int kNumSetupButtons = 10;
 
 // --- Audio Configuration ---
-constexpr int kMaxInternalChannels =
-    32; // Internal buffer size for multi-out VST3s
+constexpr int kMaxInternalChannels = 32; // Internal buffer size for multi-out VST3s
 constexpr int kDefaultInputChannels = 18; // Tascam US-1800 / Behringer UMC1820
 constexpr int kDefaultOutputChannels = 8;
 constexpr int kDefaultSampleRate = 44100;
@@ -102,8 +84,6 @@ constexpr int kDefaultArpPatternIdx = 0; // SimpleArpeggiator::Pattern::Up
 constexpr int kMaxPluginExceptionsBeforeBypass = 5;
 
 // --- Audio Callback Timing Telemetry ---
-// Ratios are (time between callbacks) / (block duration); a ratio of 1.0 is
-// a perfectly regular driver.
 constexpr double kLateCallbackRatio = 1.5;      // audibly late, below the XRUN threshold
 constexpr double kUnderrunCallbackRatio = 2.2;  // counted as an XRUN on the status bar
 constexpr double kHeavyCallbackLoad = 0.7;      // callback used >70% of its block: DSP-bound
@@ -112,14 +92,11 @@ constexpr int kMidiScratchBytes = 4096;
 constexpr int kMidiHotplugProbeWindowMs = 8000; // keep polling WinMM briefly after a USB event
 
 // --- CK88 (Roland) Default CCs ---
-// Pre-configured CC numbers for the CK88's physical knobs/sliders so the
-// host can auto-allow them without requiring the user to discover each one.
 constexpr int kCk88SlotIndex = 1;
 constexpr int kCk88ModWheelCC = 9;     // CK88 mod wheel (non-standard)
 constexpr int kCk88SustainCC = 64;     // Sustain pedal
 constexpr int kCk88ChorusCC = 93;      // Chorus / delay knob 1
 constexpr int kCk88ReverbCC = 92;      // Reverb / delay knob 2
-// B3 drawbars (Hammond organ registration)
 constexpr int kCk88Drawbar16CC = 77;   // 16' drawbar
 constexpr int kCk88Drawbar513CC = 78;  // 5-1/3' drawbar
 constexpr int kCk88Drawbar8CC = 79;    // 8' drawbar
@@ -148,6 +125,28 @@ inline juce::File getVst3Directory() {
     return juce::File("C:\\Program Files\\Common Files\\VST3");
 #endif
 }
+inline juce::Array<juce::File> getVst3SearchDirectories() {
+    juce::Array<juce::File> dirs;
+#if JUCE_MAC
+    dirs.add(juce::File("/Library/Audio/Plug-Ins/VST3"));
+    dirs.add(juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+                 .getChildFile("Library/Audio/Plug-Ins/VST3"));
+#else
+    dirs.add(getVst3Directory());
+#endif
+    return dirs;
+}
+inline bool isAudioUnitIdentifier(const juce::String& path) {
+    return path.trim().startsWithIgnoreCase("AudioUnit:");
+}
+inline bool pluginExistsOnDisk(const juce::String& path) {
+    const juce::String trimmed = path.trim();
+    if (trimmed.isEmpty())
+        return false;
+    if (isAudioUnitIdentifier(trimmed))
+        return true;
+    return juce::File(trimmed).exists();
+}
 inline juce::File getSongsDirectory() {
     return getAppDirectory().getChildFile("songs");
 }
@@ -162,4 +161,3 @@ inline juce::File getSettingsDirectory() {
 }
 
 } // namespace FanfareConstants
-

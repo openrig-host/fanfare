@@ -700,6 +700,12 @@ void WebServer::run() {
                 }
 
                 setSocketTimeoutsMs(clientSock, 5000, 5000);
+#if defined(SO_NOSIGPIPE)
+                {
+                    int noSigPipe = 1;
+                    ::setsockopt(clientSock, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, sizeof(noSigPipe));
+                }
+#endif
                 void* handle = (void*)(uintptr_t)clientSock;
                 {
                     std::lock_guard<std::mutex> lock(clientSocketsMutex);

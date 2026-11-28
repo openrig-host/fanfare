@@ -12,6 +12,7 @@
 #include <JuceHeader.h>
 #include "FanfareConstants.h"
 #include <algorithm>
+#include <cstdint>
 #include <fstream>
 #include <functional>
 #include <memory>
@@ -62,18 +63,18 @@ bool isParallelProcessingEnabled() const noexcept { return parallelProcessingEna
 void setParallelProcessingEnabled(bool enabled) noexcept { parallelProcessingEnabled.store(enabled, std::memory_order_release); }
 
   
-DWORD_PTR getShelteredAffinityMask() const noexcept { return shelteredAffinityMask.load(std::memory_order_relaxed); }
+uintptr_t getShelteredAffinityMask() const noexcept { return shelteredAffinityMask.load(std::memory_order_relaxed); }
   
-void setShelteredAffinityMask(DWORD_PTR mask) noexcept {
+void setShelteredAffinityMask(uintptr_t mask) noexcept {
     shelteredAffinityMask.store(mask, std::memory_order_release);
     dspTuningGen.fetch_add(1, std::memory_order_acq_rel);
   }
 
   
-void setDspWorkerAffinityMask(int workerIdx, DWORD_PTR mask) noexcept;
-DWORD_PTR getBackgroundAffinityMask() const noexcept { return backgroundAffinityMask.load(std::memory_order_relaxed); }
+void setDspWorkerAffinityMask(int workerIdx, uintptr_t mask) noexcept;
+uintptr_t getBackgroundAffinityMask() const noexcept { return backgroundAffinityMask.load(std::memory_order_relaxed); }
   
-void setBackgroundAffinityMask(DWORD_PTR mask) noexcept { backgroundAffinityMask.store(mask, std::memory_order_release); }
+void setBackgroundAffinityMask(uintptr_t mask) noexcept { backgroundAffinityMask.store(mask, std::memory_order_release); }
 
   
 void setActiveDspHelperLimit(int count) noexcept {
@@ -516,8 +517,10 @@ void processAudio(const float *const *inputData, int numInputs,
           }
 #if defined(_MSC_VER) || defined(__INTEL_COMPILER)
           _mm_pause();
+#elif defined(__x86_64__) || defined(__i386__)
+          asm volatile("pause" ::: "memory");
 #elif defined(__arm__) || defined(__aarch64__)
-          __yield();
+          asm volatile("yield" ::: "memory");
 #endif
           if ((spinCount & 0x3FF) == 0) {
 #ifdef _WIN32
@@ -951,6 +954,12 @@ void loadPluginFromVarSmart(int slotIdx, int chainIdx, const juce::var &vt,
 bool loadPluginFromVar(int slotIdx, int chainIdx, const juce::var &vt,
                          bool isFohOrChannel);
 juce::AudioPluginFormat *findVst3Format();
+juce::AudioPluginFormat *findFormatForPath(const juce::String &path);
+juce::String resolvePluginPathForCurrentPlatform(const juce::String &rawPath) const;
+static juce::String resolveWindowsVst3PathFromList(
+    const juce::String &rawPath,
+    const std::vector<PluginInfo> &knownPlugins,
+    const juce::Array<juce::File> &vst3SearchDirs = {});
 void configureStereoLayout(juce::AudioProcessor *processor);
 public:
   std::vector<std::unique_ptr<RackSlot>>& getSlots() { return slots; }
@@ -1174,9 +1183,9 @@ std::atomic<bool> audioUnderrunFlag{false};
   static constexpr int kMaxDspHelpers = 4;
 std::vector<juce::AudioBuffer<float>> scratchBuffers;
 std::atomic<bool> parallelProcessingEnabled{true};
-std::atomic<DWORD_PTR> shelteredAffinityMask{0};
-std::atomic<DWORD_PTR> dspWorkerAffinityMasks[kMaxDspHelpers] = {};
-std::atomic<DWORD_PTR> backgroundAffinityMask{0};
+std::atomic<uintptr_t> shelteredAffinityMask{0};
+std::atomic<uintptr_t> dspWorkerAffinityMasks[kMaxDspHelpers] = {};
+std::atomic<uintptr_t> backgroundAffinityMask{0};
 std::atomic<int> activeDspHelperLimit{1};
 std::atomic<bool> preventPowerThrottlingEnabled{true};
 std::atomic<uint32_t> dspTuningGen{1};
@@ -1260,6 +1269,7 @@ std::set<juce::String> stagedFailedKeys;
 std::map<juce::String, juce::String> lastAppliedPluginStates;
 public:
   std::vector<PluginInfo> availablePlugins = {
+#if JUCE_WINDOWS
       // --- Original Plugins ---
       {"bx_meter (VU)", "C:\\Program Files\\Common Files\\VST3\\bx_meter.vst3"},
       {"EZkeys 2", "C:\\Program Files\\Common Files\\VST3\\EZkeys 2.vst3"},
@@ -1308,6 +1318,7 @@ public:
        "C:\\Program Files\\Common Files\\VST3\\TR5 British Channel.vst3"},
       {"TR5 White Channel",
        "C:\\Program Files\\Common Files\\VST3\\TR5 White Channel.vst3"},
+#endif
   };
 int getNumAvailablePlugins() const { return (int)availablePlugins.size(); }
   

@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "BoutiqueLookAndFeel.h"
 #include "ButtonRoles.h"
+#include "FanfareConstants.h"
 #include "ThemeManager.h"
 
 struct MissingPluginInfo {
@@ -25,7 +26,7 @@ public:
     {
         setAlwaysOnTop(true);
         for (const auto& it : items) {
-            const bool fileExists = it.path.isNotEmpty() && juce::File(it.path).existsAsFile();
+            const bool fileExists = FanfareConstants::pluginExistsOnDisk(it.path);
             if (fileExists || it.reason.containsIgnoreCase("stall") ||
                 it.reason.containsIgnoreCase("timed out") ||
                 it.reason.containsIgnoreCase("wedged")) {
@@ -94,7 +95,7 @@ public:
             auto itemArea = inner.removeFromTop(22.0f);
 
             // Small indicator bar
-            const bool fileExists = item.path.isNotEmpty() && juce::File(item.path).existsAsFile();
+            const bool fileExists = FanfareConstants::pluginExistsOnDisk(item.path);
             g.setColour(fileExists ? t.danger : t.warn);
             g.fillRect(itemArea.getX() + 2.0f, itemArea.getCentreY() - 3.0f, 3.0f, 6.0f);
             itemArea.removeFromLeft(12.0f);

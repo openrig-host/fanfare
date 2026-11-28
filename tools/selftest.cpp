@@ -23,6 +23,9 @@
 #include "Web/OpenRigWebServer.h"
 #include <atomic>
 #include <cmath>
+#ifndef _WIN32
+#include <csignal>
+#endif
 #include <cstdio>
 #include <functional>
 #include <thread>
@@ -668,30 +671,61 @@ void runPhase3Tests(CheckFn&& check) {
               "Phase3: second flushGlitchLog is a no-op once buffer is drained");
         tmpLog.deleteFile();
     }
+
+    // MacPhase2: AU identifier handling, bundle-aware exists check, and safe Windows -> macOS VST3 remapping
+    {
+        check(FanfareConstants::isAudioUnitIdentifier("AudioUnit:Synths/aumu,NiK8,NiMa"),
+              "MacPhase2: recognizes AudioUnit identifier");
+        check(!FanfareConstants::isAudioUnitIdentifier("/Library/Audio/Plug-Ins/VST3/Kontakt 8.vst3"),
+              "MacPhase2: does not confuse VST3 path with AudioUnit identifier");
+        check(FanfareConstants::pluginExistsOnDisk("AudioUnit:Synths/aumu,NiK8,NiMa"),
+              "MacPhase2: AudioUnit identifier passes pluginExistsOnDisk");
+
+        const auto tmpBundle = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                   .getChildFile("FanfareTestPlugin.vst3");
+        tmpBundle.deleteRecursively();
+        tmpBundle.createDirectory();
+        check(FanfareConstants::pluginExistsOnDisk(tmpBundle.getFullPathName()),
+              "MacPhase2: directory-bundle .vst3 passes pluginExistsOnDisk");
+        tmpBundle.deleteRecursively();
+
+        FanfareEngine eng;
+        check(eng.normalizePath("AudioUnit:Synths/aumu,NiK8,NiMa") == "AudioUnit:Synths/aumu,NiK8,NiMa",
+              "MacPhase2: normalizePath preserves AudioUnit identifier case");
+
+        const std::vector<FanfareEngine::PluginInfo> macInstalled = {
+            {"Kontakt 8", "/Library/Audio/Plug-Ins/VST3/Kontakt 8.vst3"},
+            {"JUNO-106", "/Library/Audio/Plug-Ins/VST3/Roland/JUNO-106.vst3"},
+            {"UVIWorkstation", "/Library/Audio/Plug-Ins/VST3/UVIWorkstation.vst3"},
+            {"Super 8 (AU)", "AudioUnit:Synths/aumu,NiS8,NiMa"},
+            {"DupA", "/Library/Audio/Plug-Ins/VST3/A/Dup.vst3"},
+            {"DupB", "/Library/Audio/Plug-Ins/VST3/B/Dup.vst3"},
+        };
+
+        check(FanfareEngine::resolveWindowsVst3PathFromList(
+                  "C:\\Program Files\\Common Files\\VST3\\Kontakt 8.vst3", macInstalled) ==
+                  "/Library/Audio/Plug-Ins/VST3/Kontakt 8.vst3",
+              "MacPhase2: remaps exact Windows VST3 filename to macOS VST3");
+        check(FanfareEngine::resolveWindowsVst3PathFromList(
+                  "C:\\Program Files\\Common Files\\VST3\\Roland\\JUNO-106\\JUNO-106(VST3 64bit).vst3", macInstalled) ==
+                  "/Library/Audio/Plug-Ins/VST3/Roland/JUNO-106.vst3",
+              "MacPhase2: remaps (VST3 64bit) suffixed Windows VST3 to macOS VST3");
+        check(FanfareEngine::resolveWindowsVst3PathFromList(
+                  "C:\\Program Files\\Common Files\\VST3\\UVIWorkstation.vst3\\Contents\\x86_64-win\\UVIWorkstation.vst3", macInstalled) ==
+                  "/Library/Audio/Plug-Ins/VST3/UVIWorkstation.vst3",
+              "MacPhase2: unwraps Windows VST3 inner Contents/x86_64-win path");
+        check(FanfareEngine::resolveWindowsVst3PathFromList(
+                  "C:\\Program Files\\Common Files\\VST3\\Super 8.vst3", macInstalled) ==
+                  "C:\\Program Files\\Common Files\\VST3\\Super 8.vst3",
+              "MacPhase2: never remaps Windows VST3 path to an AudioUnit identifier");
+        check(FanfareEngine::resolveWindowsVst3PathFromList(
+                  "C:\\Program Files\\Common Files\\VST3\\Dup.vst3", macInstalled) ==
+                  "C:\\Program Files\\Common Files\\VST3\\Dup.vst3",
+              "MacPhase2: refuses ambiguous multiple-match VST3 remapping");
+    }
 }
 
-} // namespace
-
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::printf("usage: selftest <song.json> [--parse-only] | --web <port> | --unit | --offline-render\n");
-        return 2;
-    }
-
-    // The MessageManager is thread-affine: create it on the pump thread and run
-    // the dispatch loop there, so RigBuilder's callAsync build steps complete.
-    std::atomic<bool> run{true};
-    std::atomic<bool> ready{false};
-    juce::MessageManager* mm = nullptr;
-    std::thread pump([&] {
-        juce::ScopedJuceInitialiser_GUI gui;
-        mm = juce::MessageManager::getInstance();
-        ready.store(true);
-        mm->runDispatchLoop();
-    });
-    while (!ready.load())
-        juce::Thread::sleep(5);
-
+int runSelftestBody(int argc, char** argv, std::atomic<bool>& run) {
     int failures = 0;
     auto check = [&](bool cond, const char* msg) {
         std::printf("  [%s] %s\n", cond ? "PASS" : "FAIL", msg);
@@ -720,15 +754,11 @@ int main(int argc, char** argv) {
         runOfflineRenderTest(check);
         runPhase2Tests(check);
         runPhase3Tests(check);
-        mm->stopDispatchLoop();
-        pump.join();
         return failures ? 1 : 0;
     }
 
     if (juce::String(argv[1]) == "--offline-render") {
         runOfflineRenderTest(check);
-        mm->stopDispatchLoop();
-        pump.join();
         return failures ? 1 : 0;
     }
 
@@ -742,8 +772,6 @@ int main(int argc, char** argv) {
         while (run.load())
             juce::Thread::sleep(200);
         server.stopServer();
-        mm->stopDispatchLoop();
-        pump.join();
         return started ? 0 : 1;
     }
 
@@ -754,8 +782,6 @@ int main(int argc, char** argv) {
     std::fflush(stdout);
     if (!file.existsAsFile()) {
         std::printf("  [FAIL] file exists\n");
-        mm->stopDispatchLoop();
-        pump.join();
         return 1;
     }
 
@@ -766,8 +792,6 @@ int main(int argc, char** argv) {
     check(parsed.isObject(), "song JSON parses to an object");
     std::printf("  parse: %.1f ms\n", parseMs);
     if (!parsed.isObject()) {
-        mm->stopDispatchLoop();
-        pump.join();
         return 1;
     }
 
@@ -794,20 +818,14 @@ int main(int argc, char** argv) {
         }
         std::printf("  live slots with plugins: %d, total chain entries: %d (built/staged: %d)\n",
                     slotsWithPlugins, totalChain, res.builtCount + res.reusedCount);
-        // RigBuilder stages builds; they promote to live slots in the
-        // transitioner, which the harness does not run - so assert on the
-        // build result, not on live slots.
         check(res.builtCount + res.reusedCount > 0, "plugins were built/staged by RigBuilder");
 
-        // Scene round-trip: change bypass on the keyboard slot, snapshot to
-        // scene 0, undo, recall, and verify the state came back.
         engine.getSlot(1)->setBypass(true);
         engine.saveCurrentStateToScene(0);
         engine.getSlot(1)->setBypass(false);
         engine.loadScene(0);
         check(engine.getSlot(1)->isBypassed(), "scene save/recall restores slot bypass");
 
-        // Export -> clear -> rebuild -> export must be byte-stable.
         const auto e1 = engine.exportRigToJson();
         engine.clearAllRacks();
         auto res2 = Fanfare::RigBuilder::build(engine, juce::JSON::parse(e1));
@@ -819,9 +837,54 @@ int main(int argc, char** argv) {
                     res2.builtCount, res2.reusedCount);
     }
 
-    mm->stopDispatchLoop();
-    pump.join();
     std::printf("== %s: %s (%d failures)\n", file.getFileName().toRawUTF8(),
                 failures ? "FAIL" : "OK", failures);
     return failures ? 1 : 0;
+}
+
+} // namespace
+
+#if JUCE_MAC
+namespace juce { extern void initialiseNSApplication(); }
+#endif
+
+int main(int argc, char** argv) {
+#ifndef _WIN32
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
+    if (argc < 2) {
+        std::printf("usage: selftest <song.json> [--parse-only] | --web <port> | --unit | --offline-render\n");
+        return 2;
+    }
+
+    std::atomic<bool> run{true};
+#if JUCE_MAC
+    juce::initialiseNSApplication();
+    juce::ScopedJuceInitialiser_GUI gui;
+    auto* mm = juce::MessageManager::getInstance();
+    int exitCode = 0;
+    std::thread worker([&] {
+        exitCode = runSelftestBody(argc, argv, run);
+        mm->stopDispatchLoop();
+    });
+    mm->runDispatchLoop();
+    worker.join();
+    return exitCode;
+#else
+    std::atomic<bool> ready{false};
+    juce::MessageManager* mm = nullptr;
+    std::thread pump([&] {
+        juce::ScopedJuceInitialiser_GUI gui;
+        mm = juce::MessageManager::getInstance();
+        ready.store(true);
+        mm->runDispatchLoop();
+    });
+    while (!ready.load())
+        juce::Thread::sleep(5);
+
+    const int exitCode = runSelftestBody(argc, argv, run);
+    mm->stopDispatchLoop();
+    pump.join();
+    return exitCode;
+#endif
 }
