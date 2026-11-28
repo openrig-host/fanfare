@@ -1,0 +1,44 @@
+# Build and test Fanfare on every push to trunk.
+#
+# Uses the CMake route (see BUILDING.md): JUCE 8.0.12 is cloned from the
+# official repo, which bundles the ASIO headers, so the build has ASIO
+# enabled exactly like a local Windows build. The CTest suite runs the
+# selftest unit tests, the offline render test, and the audio-path scan.
+#
+# A macOS job will be added to this file once the macOS port lands
+# (the APPLE block in CMakeLists.txt is already in place).
+name: build
+
+on:
+  push:
+    branches: [trunk]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out Fanfare
+        uses: actions/checkout@v4
+
+      - name: Check out JUCE 8.0.12
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: 8.0.12
+          path: juce
+          fetch-depth: 1
+
+      - name: Configure (Visual Studio generator)
+        run: cmake -S . -B build -DJUCE_ROOT="$env:GITHUB_WORKSPACE/juce"
+
+      - name: Build Fanfare and selftest
+        run: cmake --build build --config Release --parallel
+
+      - name: Selftest (unit, offline render, audio-path scan)
+        run: ctest --test-dir build -C Release --output-on-failure --timeout 600
