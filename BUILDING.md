@@ -2,14 +2,14 @@
 
 Fanfare is a **JUCE 8 / C++17** standalone Windows application. There are two
 ways to build it: the **Projucer → Visual Studio** route (full-featured, ASIO
-support) or the **CMake** route (no ASIO, CI-friendly). Both produce a single
-standalone `Fanfare.exe`.
+support) or the **CMake** route (scriptable, CI-friendly). Both produce a
+single standalone `Fanfare.exe`.
 
 ## Requirements
 
 1. **Visual Studio 2022 or 2026** (Community is fine) with the
    **Desktop development with C++** workload. No other workloads needed.
-2. **JUCE 8**, with the modules at exactly:
+2. **JUCE 8** (version 8.0.12; not JUCE 9), with the modules at exactly:
 
    ```
    C:\JUCE\modules\...
@@ -18,7 +18,7 @@ standalone `Fanfare.exe`.
    Verify: `C:\JUCE\modules\juce_core\juce_core.h` exists.
    (CMake builds can use any location — pass `-DJUCE_ROOT=C:/path/to/JUCE`.)
 
-3. **Steinberg ASIO SDK** *(Projucer route only, only if you want ASIO)*:
+3. **Steinberg ASIO SDK** *(only if you want ASIO)*:
    free from <https://www.steinberg.net/developers/> — copy the headers from
    the SDK's `common` folder into:
 
@@ -31,11 +31,18 @@ standalone `Fanfare.exe`.
 
 ## Option A — Visual Studio (recommended)
 
-1. Open `Builds\VisualStudio2026\Fanfare.sln`.
-2. Set configuration to **Release**, platform **x64**.
-3. Build Solution (`Ctrl+Shift+B`).
-4. Output: `Builds\VisualStudio2026\x64\Release\App\Fanfare.exe`.
-5. Automatic Cloud Distribution: Post-build automatically copies the newest `Fanfare.exe` and `Fanfare.pdb` to `E:\My Drive\Fanfare - Latest versions` (Google Drive).
+The Visual Studio project isn't kept in git; the Projucer generates it from
+`Fanfare.jucer`.
+
+1. Open `Fanfare.jucer` in the Projucer (it comes with JUCE) and save it
+   (`Ctrl+S`). This writes `Builds\VisualStudio2026\Fanfare.sln`.
+2. Open `Builds\VisualStudio2026\Fanfare.sln`.
+3. Set configuration to **Release**, platform **x64**.
+4. Build Solution (`Ctrl+Shift+B`).
+5. Output: `Builds\VisualStudio2026\x64\Release\App\Fanfare.exe`.
+
+A post-build step copies the result to a distribution folder on the
+maintainer's machine. It does nothing anywhere else.
 
 Command line equivalent:
 
@@ -46,9 +53,8 @@ msbuild "Builds\VisualStudio2026\Fanfare.sln" /p:Configuration=Release /p:Platfo
 On VS 2022, retarget the project to the v143 toolset if prompted
 (VS 2026 uses v145).
 
-> The committed `JuceLibraryCode\` wrapper and generated project already match
-> the source — you only need the Projucer app if you change the module list
-> or add source files (`Fanfare.jucer`).
+> Repeat step 1 whenever source files are added or removed, or the module list
+> changes.
 
 ## Option B — CMake
 
@@ -58,8 +64,9 @@ cmake --build build --config Release
 ```
 
 Output: `build\Fanfare_artefacts\Release\Fanfare.exe`.
-**Note:** the CMake path has ASIO disabled (the Steinberg SDK can't be
-distributed or fetched by CI). WASAPI/DirectSound cover a release build.
+**Note:** on Windows the CMake build turns on ASIO by itself when it finds
+`modules/juce_audio_devices/native/asio` in the JUCE checkout; otherwise it
+uses WASAPI/DirectSound.
 
 ## First launch
 
@@ -74,6 +81,7 @@ set sample rate and buffer size, then scan your VST3 plugin folder
 |---|---|
 | `Cannot open include file: 'asio.h'` | ASIO SDK headers missing — see requirement 3, or build via CMake (no ASIO). |
 | `Cannot open include file: 'juce_core.h'` | JUCE not at `C:\JUCE` — see requirement 2. |
+| `#error "This project was last saved using an outdated version of the Projucer!"`, or missing `JUCE_WEBVIEW_INTEROP_LIBRARY_VERSION` | JUCE 9 is installed — use 8.0.12. |
 | `unresolved external symbol` | Build **x64**, not Win32. |
 | `MSB8020: build tools for v145 cannot be found` | Building on VS 2022 — retarget to v143. |
 | `LNK1104` / `LNK1106` writing the exe | The app is still running — close it, delete the exe, rebuild. |

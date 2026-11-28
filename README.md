@@ -302,9 +302,9 @@ You'll need:
 2. **[JUCE 8](https://juce.com)** installed at `C:\JUCE`
 3. **Steinberg ASIO SDK**, placed as described above
 
-Open `Builds\VisualStudio2026\Fanfare.sln`, set **Release / x64**, and build. You'll get `Fanfare.exe`.
+Open `Fanfare.jucer` in the Projucer (it comes with JUCE) and save it to generate `Builds\VisualStudio2026\Fanfare.sln`. Open that solution, set **Release / x64**, and build. You'll get `Fanfare.exe`.
 
-For the CMake build without ASIO, command-line MSBuild, and troubleshooting, see **[BUILDING.md](BUILDING.md)**.
+For the CMake build, command-line MSBuild, and troubleshooting, see **[BUILDING.md](BUILDING.md)**.
 
 ---
 
