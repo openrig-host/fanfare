@@ -57,6 +57,8 @@ get_sources.ps1
 rename_to_openrig.ps1
 update_includes.ps1
 setup_projucer.bat
+# optional personal post-build hook (see BUILDING.md)
+tools/postbuild_local.bat
 
 # Generated per-build bisect overrides (never commit)
 Source/FanfareBisectFlags.h

@@ -178,7 +178,7 @@
     <VS2026 targetFolder="Builds/VisualStudio2026">
       <CONFIGURATIONS>
         <CONFIGURATION isDebug="1" name="Debug" targetName="Fanfare"/>
-        <CONFIGURATION isDebug="0" name="Release" targetName="Fanfare" postbuildCommand="if exist &quot;E:\My Drive\Fanfare - Latest versions&quot; (&#10;  copy /Y &quot;$(TargetPath)&quot; &quot;E:\My Drive\Fanfare - Latest versions\Fanfare.exe&quot;&#10;  if exist &quot;$(TargetDir)$(TargetName).pdb&quot; copy /Y &quot;$(TargetDir)$(TargetName).pdb&quot; &quot;E:\My Drive\Fanfare - Latest versions\Fanfare.pdb&quot;&#10;)"/>
+        <CONFIGURATION isDebug="0" name="Release" targetName="Fanfare" postbuildCommand="if exist &quot;$(ProjectDir)..\..\tools\postbuild_local.bat&quot; call &quot;$(ProjectDir)..\..\tools\postbuild_local.bat&quot; &quot;$(TargetPath)&quot;"/>
       </CONFIGURATIONS>
       <MODULEPATHS>
         <MODULEPATH id="juce_audio_basics" path="C:/JUCE/modules"/>

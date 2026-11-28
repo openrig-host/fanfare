@@ -18,16 +18,20 @@ single standalone `Fanfare.exe`.
    Verify: `C:\JUCE\modules\juce_core\juce_core.h` exists.
    (CMake builds can use any location — pass `-DJUCE_ROOT=C:/path/to/JUCE`.)
 
-3. **Steinberg ASIO SDK** *(only if you want ASIO)*:
-   free from <https://www.steinberg.net/developers/> — copy the headers from
-   the SDK's `common` folder into:
+3. **ASIO headers** *(only if you want ASIO)*: JUCE 8.0.12 ships `asio.h`,
+   `asiosys.h`, and `iasiodrv.h` with its audio module and uses them by
+   default. They live at:
 
    ```
    C:\JUCE\modules\juce_audio_devices\native\asio\
    ```
 
-   (`asio.h`, `asiosys.h`, `iasiodrv.h` must exist there.) ASIO matters for
-   live low-latency use; WASAPI works as a fallback.
+   (For CMake builds, the same folder inside your JUCE checkout.) They have to
+   be there, because that's the folder JUCE reads them from. If your JUCE copy
+   is missing them, download the SDK from
+   <https://www.steinberg.net/developers/> and copy those three files in from
+   its `common` folder. ASIO matters for live low-latency use; WASAPI works as
+   a fallback.
 
 ## Option A — Visual Studio (recommended)
 
@@ -41,8 +45,16 @@ The Visual Studio project isn't kept in git; the Projucer generates it from
 4. Build Solution (`Ctrl+Shift+B`).
 5. Output: `Builds\VisualStudio2026\x64\Release\App\Fanfare.exe`.
 
-A post-build step copies the result to a distribution folder on the
-maintainer's machine. It does nothing anywhere else.
+After a Release build, Visual Studio runs `tools\postbuild_local.bat` if that
+file exists, passing it the built `.exe` path. The file is gitignored, so you
+can keep a personal copy-or-sync step there:
+
+```bat
+@echo off
+set "DIST=D:\some\folder"
+if not exist "%DIST%" exit /b 0
+copy /Y "%~1" "%DIST%\"
+```
 
 Command line equivalent:
 
@@ -79,7 +91,7 @@ set sample rate and buffer size, then scan your VST3 plugin folder
 
 | Symptom | Cause / Fix |
 |---|---|
-| `Cannot open include file: 'asio.h'` | ASIO SDK headers missing — see requirement 3, or build via CMake (no ASIO). |
+| `Cannot open include file: 'asio.h'` | The ASIO headers are missing from your JUCE copy — see requirement 3. The CMake build leaves ASIO out when it can't find them. |
 | `Cannot open include file: 'juce_core.h'` | JUCE not at `C:\JUCE` — see requirement 2. |
 | `#error "This project was last saved using an outdated version of the Projucer!"`, or missing `JUCE_WEBVIEW_INTEROP_LIBRARY_VERSION` | JUCE 9 is installed — use 8.0.12. |
 | `unresolved external symbol` | Build **x64**, not Win32. |

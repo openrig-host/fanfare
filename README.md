@@ -57,7 +57,15 @@ It's not a DAW. It's an instrument.
 
 ---
 
-## What's New in v1.73: Snapshots Rail, Permanent Setlist Bar & B3 Upgrades
+## What's New in v1.74: Lower CPU, Same Sound
+
+- **B3 organ and convolution reverb use much less CPU, and sound identical.** The reverb now uses smaller, non-uniform partitions sized for your real audio buffer instead of 8,192-sample partitions (16K FFTs on every callback). The B3's tube preamp uses fast approximations accurate to below -115 dB, and its scanner chorus, Leslie chorus, and ping-pong delay use lookup tables instead of per-sample trig calls.
+- **Startup "What's New" panel refreshed.** The Welcome screen's summary now covers the current release.
+- **Engine hardening.** Settings, CPU topology, glitch telemetry, strip state, and the web host each live in their own module, with a wider `selftest` suite and an automated real-time safety scan of the audio path.
+
+---
+
+## Previous Highlights in v1.73: Snapshots Rail, Permanent Setlist Bar & B3 Upgrades
 
 <p align="center">
   <img src="docs/snapshots_rail.png" alt="Fanfare v1.73 Far-Right Snapshots Rail, Dual VU Meters, IEM Click Track & Panic" width="360" />
@@ -174,7 +182,7 @@ It's not a DAW. It's an instrument.
 - **Rig migration.** Older rig files upgrade automatically. Files from newer versions are refused instead of half-loaded.
 
 ### Engine, CPU & USB Hotplug Reliability (New in v1.2 & v1.3)
-- **Live USB Hotplug & Automatic ASIO Recovery (v1.3).** When your bass player accidentally yanks your USB cable out of the computer, just put it back in, count to three, go back to playing, and smile at your bass player. Possibly the single most important update in Fanfare history! Fanfare detects disconnected or stalled ASIO interfaces and unplugged USB MIDI controllers, immediately sends All Notes Off so nothing hangs, protects `audio_settings.xml` from falling back to laptop speakers, and automatically reconnects your ASIO driver and MIDI inputs as soon as the USB cable is plugged back in.
+- **Live USB Hotplug & Automatic ASIO Recovery (v1.3).** Fanfare detects disconnected or stalled ASIO interfaces and unplugged USB MIDI controllers, immediately sends All Notes Off so nothing hangs, protects `audio_settings.xml` from falling back to laptop speakers, and automatically reconnects your ASIO driver and MIDI inputs as soon as the USB cable is plugged back in.
 - **Lock-free Parallel Work-Sharing DSP.** Persistent real-time DSP helper threads share active instrument slots with the ASIO audio thread itself using lock-free atomics. There are no mutexes, no heap allocations on the audio thread, and no `ThreadPool` dropped-job stalls. Active worker count scales automatically to one worker per physical Performance core.
 - **Hybrid CPU Core Split (P-Cores for Audio, E-Cores for Everything Else).** On Intel 12th Gen and newer hybrid laptops, real-time ASIO and DSP threads are pinned exclusively to fast Performance cores while the UI, graphics rendering, plugin disk streaming, and background setlist preloading run on Efficiency cores. Preloading the next song never steals cycles from live audio.
 - **CPU Core 0 Interrupt Shielding.** Keeps real-time audio off Core 0, where Windows and laptop firmware dump Wi-Fi, USB hub, ACPI, and battery-polling driver interrupts (DPCs).
@@ -282,7 +290,7 @@ You have two ways to install Fanfare on Windows 10/11 (64-bit) with **ASIO suppo
 - **GitHub Releases (Most Current — Unsigned):** [**Download Latest from GitHub Releases**](https://github.com/openrig-host/fanfare/releases/latest)
   Always has the newest fixes and features first (`Fanfare.exe`, `.msi`, and portable `.zip`), **but is unsigned** and will trigger a Windows SmartScreen warning on installation (*More info → Run anyway*).
 
-> Releases are built with ASIO enabled and uploaded to GitHub directly. There's no CI build because Steinberg's ASIO SDK license doesn't allow it to live in a public repo or on a public build server.
+> Releases are built with ASIO enabled and uploaded to GitHub directly. There's no CI build.
 
 ### Requirements
 - Windows 10 or 11 (64-bit)
@@ -291,16 +299,15 @@ You have two ways to install Fanfare on Windows 10/11 (64-bit) with **ASIO suppo
 
 ### Building it yourself
 
-> **ASIO SDK licensing:** The Steinberg ASIO SDK can't be included in this repo. To build with ASIO, download the SDK from the [Steinberg Developer Portal](https://www.steinberg.net/developers/) and put the headers here:
+> **ASIO SDK licensing:** Steinberg licenses the ASIO SDK under either its proprietary license or GPL v3, and Fanfare is GPL v3. JUCE 8.0.12 ships the three ASIO headers inside its audio module and uses them by default. They live at:
 > ```
 > C:\JUCE\modules\juce_audio_devices\native\asio\
 > ```
-> It has to be that exact path, because that's where the project's `AppConfig.h` looks for it.
+> They have to be at that exact path, because that's the folder JUCE's audio module reads them from. Check that `asio.h`, `asiosys.h`, and `iasiodrv.h` are there. If they're missing, download the SDK from the [Steinberg Developer Portal](https://www.steinberg.net/developers/) and copy those three files in.
 
 You'll need:
 1. **Visual Studio 2022 or later** with the "Desktop development with C++" workload
-2. **[JUCE 8](https://juce.com)** installed at `C:\JUCE`
-3. **Steinberg ASIO SDK**, placed as described above
+2. **[JUCE 8](https://juce.com)** (8.0.12) installed at `C:\JUCE`, which includes the ASIO headers
 
 Open `Fanfare.jucer` in the Projucer (it comes with JUCE) and save it to generate `Builds\VisualStudio2026\Fanfare.sln`. Open that solution, set **Release / x64**, and build. You'll get `Fanfare.exe`.
 
@@ -325,7 +332,7 @@ Fanfare was built with AI coding tools: [Antigravity](https://antigravity.dev) a
    - *"Add support for my controller."*
 5. **Keep going.** The agent sees the whole codebase, so it can make real changes.
 
-You'll need the build setup from [BUILDING.md](BUILDING.md): Visual Studio, JUCE, and the ASIO SDK if you want ASIO.
+You'll need the build setup from [BUILDING.md](BUILDING.md): Visual Studio and JUCE 8.
 
 **Pull requests are welcome but not required.** If you distribute a modified version, though, the [GPL v3](LICENSE) requires you to publish your source.
 
@@ -360,7 +367,7 @@ GPL v3 was picked on purpose. Steinberg offers the ASIO SDK under GPL v3 as an a
 In practice:
 - You can use, study, change, and share Fanfare, including the ASIO builds.
 - If you **distribute** a modified version, as a binary or as source, you have to release your changes under GPL v3 too.
-- The ASIO SDK itself still can't be included in this repo. Download it yourself as described in [BUILDING.md](BUILDING.md).
+- The ASIO headers aren't stored in this repo. They ship inside JUCE, as described in [BUILDING.md](BUILDING.md).
 
 ## Credits
 
